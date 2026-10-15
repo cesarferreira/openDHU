@@ -15,6 +15,9 @@ use crate::runner::Clock;
 #[derive(Default)]
 pub struct FakeClock {
     now: Cell<Duration>,
+    sleeps: Cell<usize>,
+    /// Report `cancelled` once this many sleeps have happened, as if Ctrl+C arrived then.
+    pub cancel_after_sleeps: Cell<Option<usize>>,
 }
 
 impl Clock for FakeClock {
@@ -22,7 +25,17 @@ impl Clock for FakeClock {
         self.now.get()
     }
     fn sleep(&self, d: Duration) {
-        self.now.set(self.now.get() + d);
+        self.sleeps.set(self.sleeps.get() + 1);
+        // An interrupted sleep returns early, like the real clock's.
+        if !self.cancelled() {
+            self.now.set(self.now.get() + d);
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel_after_sleeps
+            .get()
+            .is_some_and(|n| self.sleeps.get() >= n)
     }
 }
 

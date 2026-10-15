@@ -278,11 +278,11 @@ removes any stale file, and reports the path and size of the file that was actua
 
 `autolab test PATH…` runs YAML tests through the backend trait (`autolab-test` depends only on `autolab-core`);
 see [testing.md](testing.md). Verified on the phone with `examples/video-focus.yaml`, `focus-status.yaml` and
-`screenshots.yaml`, and the generated JUnit passes `xmllint`.
+`screenshots.yaml`, and the generated JUnit passes `xmllint`. Ctrl+C and SIGTERM stop a run cleanly (focus restored, artifacts
+written, exit 130); this was verified with real signals against the fake DHU and on the phone.
 
 Not implemented: HTTP daemon, event stream, night mode, driving restrictions, audio and
-nav focus, TOML config file, `--adb` transport, device selection beyond `--serial`, clean Ctrl+C handling in
-`autolab test`.
+nav focus, TOML config file, `--adb` transport, device selection beyond `--serial`.
 
 ## 11. Tests and how to run them
 

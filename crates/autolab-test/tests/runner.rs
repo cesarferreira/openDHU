@@ -258,3 +258,87 @@ fn backend_mismatch_and_a_down_backend_are_errors() {
     );
     assert_eq!((r.outcome, r.exit_code), (Outcome::Error, 3));
 }
+
+fn run_cancelling(
+    yaml: &str,
+    cancel_after: usize,
+    backend: &mut MockBackend,
+    tag: &str,
+) -> (TestResult, FakeClock) {
+    let dir = artifacts(tag);
+    let clock = FakeClock::default();
+    clock.cancel_after_sleeps.set(Some(cancel_after));
+    let test = parse(yaml).unwrap();
+    let r = run_test(
+        &test,
+        "t.yaml",
+        backend,
+        &RunConfig {
+            artifacts_dir: &dir,
+            skip_unsupported: false,
+            clock: &clock,
+        },
+    );
+    (r, clock)
+}
+
+#[test]
+fn interrupt_during_a_wait_stops_promptly_restores_focus_and_exits_130() {
+    let mut b = MockBackend::new();
+    let yaml = "name: t\nsteps:\n  - action: focus.video\n    value: off\n  - action: wait\n    duration: 10m\n  - action: focus.video\n    value: on\n";
+    let (r, clock) = run_cancelling(yaml, 1, &mut b, "int-wait");
+    assert_eq!((r.outcome, r.exit_code), (Outcome::Error, 130));
+    assert_eq!(
+        clock.now(),
+        Duration::ZERO,
+        "the interrupted wait must not run to completion"
+    );
+    assert!(
+        r.steps[2].detail.contains("interrupted during a 600s wait"),
+        "{}",
+        r.steps[2].detail
+    );
+    assert_eq!(
+        r.steps[3].outcome,
+        Outcome::Skipped,
+        "the step after the interrupt is not run"
+    );
+    // focus was left off by the test, so cleanup must put it back
+    assert_eq!(b.calls.last().unwrap(), "focus.video on");
+    let cleanup = r.steps.last().unwrap();
+    assert_eq!(
+        (cleanup.action.as_str(), cleanup.outcome),
+        ("cleanup.focus.video", Outcome::Passed)
+    );
+    assert!(r.message.unwrap().contains("interrupted"));
+}
+
+#[test]
+fn interrupt_before_any_step_changes_nothing_on_the_backend() {
+    let mut b = MockBackend::new();
+    let yaml = "name: t\nsteps:\n  - action: focus.video\n    value: off\n  - action: wait\n    duration: 1s\n";
+    let (r, _) = run_cancelling(yaml, 0, &mut b, "int-before");
+    assert_eq!((r.outcome, r.exit_code), (Outcome::Error, 130));
+    assert!(r.steps[1].detail.contains("before this step ran"));
+    assert!(
+        !b.calls.iter().any(|c| c.starts_with("focus.video")),
+        "{:?}",
+        b.calls
+    );
+    assert!(
+        !r.steps.iter().any(|s| s.action == "cleanup.focus.video"),
+        "nothing to clean up"
+    );
+}
+
+#[test]
+fn interrupt_while_waiting_for_a_condition_exits_130_not_6() {
+    let mut b = MockBackend::new();
+    let yaml = "name: t\nsteps:\n  - action: waitFor\n    condition:\n      videoFocus: {observed: on}\n    timeout: 10m\n";
+    let (r, clock) = run_cancelling(yaml, 1, &mut b, "int-waitfor");
+    assert_eq!((r.outcome, r.exit_code), (Outcome::Error, 130));
+    assert!(
+        clock.now() < Duration::from_secs(1),
+        "must stop within one poll, not run the 10m timeout"
+    );
+}

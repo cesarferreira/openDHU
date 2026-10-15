@@ -31,7 +31,7 @@ command. It does not mean the phone acknowledged it. The output shows the DHU's 
 and `Phone confirmed` stays `unknown` because no phone-side check is implemented yet.
 
 Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailable, 4 device disconnected,
-5 unsupported, 6 timeout, 7 assertion failure, 8 session conflict.
+5 unsupported, 6 timeout, 7 assertion failure, 8 session conflict, 130 interrupted.
 
 ## Known limitations
 
@@ -44,7 +44,8 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
 - Video focus, screenshots and the YAML test runner are implemented. Night mode, driving restrictions, audio and
   nav focus, and the HTTP daemon are not.
 - A passing `focus.video` step means the command was accepted, not that the phone confirmed it. Ctrl+C during
-  `autolab test` can leave video focus off (details in docs/testing.md).
+  `autolab test` stops cleanly (focus restored, artifacts written, exit 130); a second Ctrl+C exits at once without
+  cleanup (details in docs/testing.md).
 - Tested with DHU 2.0 (build 2022-03-30) and Android Auto 18.0.164204 on a Pixel 6.
 
 ## Tests

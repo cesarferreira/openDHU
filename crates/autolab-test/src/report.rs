@@ -67,13 +67,15 @@ pub struct Metadata {
 pub struct RunReport {
     pub metadata: Metadata,
     pub exit_code: u8,
+    /// The run was stopped by Ctrl+C or SIGTERM, so some tests or steps did not run.
+    pub interrupted: bool,
     pub tests: Vec<TestResult>,
 }
 
 /// One exit code for a whole run. Order is fixed so the result is deterministic: invalid input
 /// first, then environment problems, then timeouts, then assertion failures.
 pub fn exit_code_for(tests: &[TestResult]) -> u8 {
-    const ORDER: [u8; 8] = [2, 3, 4, 5, 6, 7, 8, 1];
+    const ORDER: [u8; 9] = [crate::runner::INTERRUPTED, 2, 3, 4, 5, 6, 7, 8, 1];
     let present = |c: u8| tests.iter().any(|t| t.exit_code == c);
     ORDER
         .into_iter()
@@ -348,6 +350,7 @@ mod tests {
                 summary: Summary::of(&tests),
             },
             exit_code: exit_code_for(&tests),
+            interrupted: false,
             tests,
         }
     }
@@ -396,6 +399,11 @@ mod tests {
         assert_eq!(exit_code_for(&[t(7), t(2)]), 2);
         assert_eq!(exit_code_for(&[t(1), t(7)]), 7);
         assert_eq!(exit_code_for(&[t(9)]), 9);
+        assert_eq!(
+            exit_code_for(&[t(7), t(130)]),
+            130,
+            "an interrupt outranks everything"
+        );
     }
 
     #[test]

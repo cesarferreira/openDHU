@@ -7,6 +7,8 @@
 //! - Every test ends by restoring video focus if the test may have left it off.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use autolab_core::{Error, FocusState, HeadUnitBackend, HeadUnitStatus, OpStatus, Support};
@@ -19,16 +21,27 @@ pub trait Clock {
     /// Monotonic time since an arbitrary start.
     fn now(&self) -> Duration;
     fn sleep(&self, d: Duration);
+    /// True once the user asked to stop (Ctrl+C or SIGTERM). Sleeps must then return early.
+    fn cancelled(&self) -> bool {
+        false
+    }
 }
 
 pub struct SystemClock {
     start: Instant,
+    cancel: Arc<AtomicBool>,
 }
 
 impl SystemClock {
     pub fn new() -> Self {
+        Self::with_cancel(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// A clock whose sleeps end early, and which reports `cancelled`, once `cancel` is set.
+    pub fn with_cancel(cancel: Arc<AtomicBool>) -> Self {
         Self {
             start: Instant::now(),
+            cancel,
         }
     }
 }
@@ -44,7 +57,19 @@ impl Clock for SystemClock {
         self.start.elapsed()
     }
     fn sleep(&self, d: Duration) {
-        std::thread::sleep(d);
+        // Short slices, so an interrupt is noticed within ~100 ms even in a 10 minute wait.
+        let end = Instant::now() + d;
+        while !self.cancelled() {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            std::thread::sleep(left.min(Duration::from_millis(100)));
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
     }
 }
 
@@ -57,6 +82,9 @@ pub struct RunConfig<'a> {
 }
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Exit code for a run stopped by Ctrl+C or SIGTERM (the shell convention for SIGINT).
+pub const INTERRUPTED: u8 = 130;
 
 struct End {
     outcome: Outcome,
@@ -91,6 +119,13 @@ impl End {
             outcome: Outcome::Error,
             detail: e.message().to_string(),
             code: e.exit_code(),
+        }
+    }
+    fn interrupted(detail: impl Into<String>) -> Self {
+        Self {
+            outcome: Outcome::Error,
+            detail: detail.into(),
+            code: INTERRUPTED,
         }
     }
     fn other(detail: impl Into<String>, code: u8) -> Self {
@@ -173,13 +208,17 @@ pub fn run_test(
                 });
                 continue;
             }
-            if let Step::FocusVideo { value } = step
-                && !value.0
-            {
-                maybe_off = true;
-            }
             let t0 = cfg.clock.now();
-            let end = exec(step, backend, cfg);
+            let end = if cfg.clock.cancelled() {
+                End::interrupted("interrupted before this step ran")
+            } else {
+                if let Step::FocusVideo { value } = step
+                    && !value.0
+                {
+                    maybe_off = true;
+                }
+                exec(step, backend, cfg)
+            };
             if matches!(step, Step::FocusVideo { value } if value.0)
                 && end.outcome == Outcome::Passed
             {
@@ -326,6 +365,12 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
         Step::FocusVideo { value } => focus_video(value.focus_state(), backend),
         Step::Wait { duration } => {
             cfg.clock.sleep(duration.0);
+            if cfg.clock.cancelled() {
+                return End::interrupted(format!(
+                    "interrupted during a {} wait",
+                    fmt_dur(duration.0)
+                ));
+            }
             End::pass(format!("waited {}", fmt_dur(duration.0)))
         }
         Step::Screenshot { path } => screenshot(path, backend, cfg.artifacts_dir),
@@ -362,6 +407,9 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
                         fmt_dur(timeout.0),
                         bad.join("; ")
                     ));
+                }
+                if cfg.clock.cancelled() {
+                    return End::interrupted("interrupted while waiting for a condition");
                 }
                 cfg.clock.sleep(POLL_INTERVAL.min(deadline - now));
             }

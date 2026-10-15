@@ -1,6 +1,8 @@
 //! `autolab test`: parse every file first, then run them through the session backend.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use autolab_core::{Error, HeadUnitBackend, Result};
@@ -8,7 +10,7 @@ use autolab_test::report::{
     BackendMeta, Format, Metadata, RunReport, Summary, exit_code_for, iso8601_utc, step_log,
     write_artifacts,
 };
-use autolab_test::runner::{Clock, RunConfig, SystemClock, run_test};
+use autolab_test::runner::{Clock, INTERRUPTED, RunConfig, SystemClock, run_test};
 use autolab_test::{Outcome, TestFile, TestResult};
 use clap::ValueEnum;
 
@@ -140,6 +142,18 @@ fn print_test(t: &TestResult) {
     println!("Duration: {:.1}s\n", t.duration_ms as f64 / 1000.0);
 }
 
+/// First Ctrl+C or SIGTERM asks the run to stop cleanly. A second one exits at once, in case a
+/// backend call is stuck and the clean stop never comes.
+fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
+    let flag = Arc::clone(flag);
+    ctrlc::set_handler(move || {
+        if flag.swap(true, Ordering::SeqCst) {
+            std::process::exit(i32::from(INTERRUPTED));
+        }
+    })
+    .map_err(|e| Error::Other(format!("cannot install the interrupt handler: {e}")))
+}
+
 pub fn run(opts: Options) -> Result<u8> {
     let files = collect(&opts.paths)?;
     let tests = parse_all(&files)?; // exit 2 before the session is touched
@@ -152,7 +166,9 @@ pub fn run(opts: Options) -> Result<u8> {
 
     let mut backend = SessionBackend;
     let head = backend.status()?; // no session or dead DHU: exit 3 before any test runs
-    let clock = SystemClock::new();
+    let cancel = Arc::new(AtomicBool::new(false));
+    install_interrupt_handler(&cancel)?;
+    let clock = SystemClock::with_cancel(Arc::clone(&cancel));
     let started_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -167,6 +183,9 @@ pub fn run(opts: Options) -> Result<u8> {
     };
     let mut results = Vec::new();
     for (file, test) in &tests {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
         let r = run_test(test, file, &mut backend, &cfg);
         if !opts.json {
             print_test(&r);
@@ -174,7 +193,14 @@ pub fn run(opts: Options) -> Result<u8> {
         results.push(r);
     }
 
-    let exit_code = exit_code_for(&results);
+    // An interrupt wins over every other code, even if it arrived between two tests.
+    let interrupted = cancel.load(Ordering::SeqCst);
+    let not_run = tests.len() - results.len();
+    let exit_code = if interrupted {
+        INTERRUPTED
+    } else {
+        exit_code_for(&results)
+    };
     let summary = Summary::of(&results);
     let report = RunReport {
         metadata: Metadata {
@@ -196,6 +222,7 @@ pub fn run(opts: Options) -> Result<u8> {
             summary: summary.clone(),
         },
         exit_code,
+        interrupted,
         tests: results,
     };
 
@@ -234,6 +261,14 @@ pub fn run(opts: Options) -> Result<u8> {
             summary.errors,
             summary.skipped
         );
+        if interrupted {
+            let rest = match not_run {
+                0 => String::new(),
+                1 => " 1 test was not run.".into(),
+                n => format!(" {n} tests were not run."),
+            };
+            println!("Interrupted.{rest} Video focus was restored if a test had left it off.");
+        }
         println!("Artifacts: {}", dir.display());
         for p in &written {
             println!("  {}", p.display());

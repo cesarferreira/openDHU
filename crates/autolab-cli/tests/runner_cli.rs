@@ -269,3 +269,148 @@ fn missing_paths_and_empty_directories_are_argument_errors() {
     assert_eq!(code(&s.autolab(&["test", empty.to_str().unwrap()])), 2);
     assert_eq!(code(&s.autolab(&["test"])), 2, "a path is required");
 }
+
+// ---- Ctrl+C -------------------------------------------------------------------------------
+
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+fn spawn_test(s: &Sandbox, env: &[(&str, &str)], args: &[&str]) -> Child {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_autolab"));
+    c.arg("test")
+        .args(args)
+        .env("AUTOLAB_RUNTIME_DIR", &s.dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    c.spawn().unwrap()
+}
+
+fn sigint(child: &Child) {
+    Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+}
+
+fn wait_exit(child: &mut Child, limit: Duration) -> Option<std::process::ExitStatus> {
+    let end = Instant::now() + limit;
+    while Instant::now() < end {
+        if let Some(st) = child.try_wait().unwrap() {
+            return Some(st);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    None
+}
+
+/// Wait until the runner has really turned video focus off, so the interrupt lands mid-wait.
+fn wait_until_focus_off(s: &Sandbox) {
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            let o = s.autolab(&["status", "--json"]);
+            serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                .is_ok_and(|v| v["videoFocus"]["requested"] == "off")
+        }),
+        "the test never turned focus off"
+    );
+}
+
+const LONG: &str = "name: Long wait\nsteps:\n  - action: focus.video\n    value: off\n  - action: wait\n    duration: 30s\n";
+
+#[test]
+fn ctrl_c_stops_promptly_restores_focus_writes_artifacts_and_skips_the_rest() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let tests = s.scratch("tests");
+    write(&tests, "a_long.yaml", LONG);
+    write(
+        &tests,
+        "b_never_runs.yaml",
+        "name: Never runs\nsteps:\n  - action: wait\n    duration: 10ms\n",
+    );
+    let art = s.scratch("art");
+    let mut child = spawn_test(
+        &s,
+        &[],
+        &[
+            tests.to_str().unwrap(),
+            "--artifacts-dir",
+            art.to_str().unwrap(),
+        ],
+    );
+    wait_until_focus_off(&s);
+
+    let signalled = Instant::now();
+    sigint(&child);
+    let status = wait_exit(&mut child, Duration::from_secs(10)).expect("must exit after Ctrl+C");
+    assert!(
+        signalled.elapsed() < Duration::from_secs(5),
+        "must not sit out the 30s wait"
+    );
+    assert_eq!(status.code(), Some(130));
+
+    let out = child.wait_with_output().unwrap();
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(all.contains("Interrupted. 1 test was not run."), "{all}");
+
+    let r = json(&art.join("results.json"));
+    assert_eq!(r["interrupted"], true);
+    assert_eq!(r["exitCode"], 130);
+    let tests = r["tests"].as_array().unwrap();
+    assert_eq!(tests.len(), 1, "the second test must not have run");
+    assert_eq!(tests[0]["outcome"], "error");
+    let steps = tests[0]["steps"].as_array().unwrap();
+    assert_eq!(steps.last().unwrap()["action"], "cleanup.focus.video");
+    assert_eq!(steps.last().unwrap()["outcome"], "passed");
+    assert!(art.join("metadata.json").is_file());
+
+    let st = s.status_json();
+    assert_eq!(
+        st["videoFocus"]["backendReported"], "on",
+        "focus must not be left off"
+    );
+    assert_eq!(st["videoFocus"]["requested"], "on");
+}
+
+#[test]
+fn a_second_ctrl_c_exits_immediately_even_if_cleanup_is_stuck() {
+    let s = Sandbox::new();
+    // `focus video on` hangs in this fake, so the cleanup that follows the first Ctrl+C blocks.
+    let started = s.autolab_env(
+        &["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"],
+        &[("FAKE_DHU_MODE", "hang-on-focus-on")],
+    );
+    assert_eq!(code(&started), 0, "{}", text(&started));
+    let tests = s.scratch("tests");
+    let f = write(&tests, "long.yaml", LONG);
+    let mut child = spawn_test(
+        &s,
+        &[],
+        &[
+            f.to_str().unwrap(),
+            "--artifacts-dir",
+            s.scratch("art").to_str().unwrap(),
+        ],
+    );
+    wait_until_focus_off(&s);
+
+    sigint(&child);
+    std::thread::sleep(Duration::from_millis(600)); // now inside the stuck cleanup
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the first Ctrl+C must wait for cleanup"
+    );
+    let second = Instant::now();
+    sigint(&child);
+    let status =
+        wait_exit(&mut child, Duration::from_secs(3)).expect("second Ctrl+C must exit at once");
+    assert!(second.elapsed() < Duration::from_secs(2));
+    assert_eq!(status.code(), Some(130));
+}

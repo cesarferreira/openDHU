@@ -70,9 +70,11 @@ After every test, including failed ones, the runner restores video focus to `on`
 off, and records that as a `cleanup.focus.video` step. If the restore fails, the test fails. A test does not
 assume the next one starts clean in any other way: nothing on the phone is reset.
 
-If you press Ctrl+C, only `autolab test` dies. The session survives, **video focus may be left off**, and no
-artifacts are written for the interrupted run. Run `autolab focus video on` to put it back. Clean handling
-needs a signal-handling dependency that has not been added.
+**Ctrl+C and SIGTERM.** The first one asks the run to stop cleanly. Waits end within about 100 ms, the step in
+progress is reported as interrupted, video focus is restored if the test had left it off, the artifacts for what
+ran are written (`interrupted: true` in `results.json`), tests that had not started are not run, and the exit code
+is 130. A second Ctrl+C exits immediately, without cleanup, in case a backend call is stuck. In that case run
+`autolab focus video on` yourself. The session itself always survives; only `autolab test` stops.
 
 ## Results and exit codes
 
@@ -88,6 +90,7 @@ gone, a rejected command or a failed cleanup) or `skipped`.
 | 5 | a required capability is unsupported (use `--skip-unsupported` to skip such tests instead) |
 | 6 | a `waitFor` timed out |
 | 7 | an assertion failed |
+| 130 | interrupted by Ctrl+C or SIGTERM (outranks every other code) |
 | 1 | any other error |
 
 `autolab start` can also return 4 (a device or tunnel problem). `autolab test` cannot: it never starts a session, and a
@@ -121,4 +124,4 @@ to the DHU console, whose handling of quoting is unverified.
 
 ## Not implemented
 
-Retry policies, image assertions, tap/swipe/key steps, event assertions, a Kotlin DSL and clean Ctrl+C handling.
+Retry policies, image assertions, tap/swipe/key steps, event assertions and a Kotlin DSL.

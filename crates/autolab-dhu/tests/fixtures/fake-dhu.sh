@@ -3,7 +3,7 @@
 # silent success for `focus video on|off`, `[I]: Has video focus: <bool>` for the query,
 # `[E]: ...` for errors, a bare `> ` prompt with no newline, exit on `quit` or stdin EOF.
 # Stream split matches the real DHU (verified): prompt and banner on stdout, [I]/[E]/log lines on stderr.
-# FAKE_DHU_MODE: fail-start | late-fail-start | hang-start | (default) normal
+# FAKE_DHU_MODE: fail-start | late-fail-start | hang-start | hang-on-focus-on | (default) normal
 case "$FAKE_DHU_MODE" in
   fail-start)
     echo '[I]: Connecting over ADB to localhost:5277...' >&2
@@ -30,7 +30,9 @@ focus=true
 printf '> '
 while IFS= read -r line; do
   case "$line" in
-    "focus video on") focus=true;;
+    "focus video on")
+      if [ "$FAKE_DHU_MODE" = hang-on-focus-on ]; then sleep 8; fi
+      focus=true;;
     "focus video off") focus=false;;
     "focus video toggle") if $focus; then focus=false; else focus=true; fi;;
     "focus video") echo "[I]: Has video focus: $focus" >&2;;
