@@ -1,0 +1,214 @@
+//! `autolab doctor`: read-only environment checks. It never starts a DHU or touches the phone,
+//! so it is safe to run while a session is active.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use autolab_dhu::{adb, console, discovery};
+use serde::Serialize;
+
+use crate::session;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Level {
+    Ok,
+    Warn,
+    Fail,
+    Info,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Check {
+    pub level: Level,
+    pub name: String,
+    pub detail: String,
+}
+
+fn check(level: Level, name: &str, detail: impl Into<String>) -> Check {
+    Check {
+        level,
+        name: name.into(),
+        detail: detail.into(),
+    }
+}
+
+/// Run `program args` with a hard deadline and return its stdout+stderr.
+fn run_bounded(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let end = Instant::now() + limit;
+    loop {
+        match child.try_wait().ok()? {
+            Some(_) => {
+                let out = child.wait_with_output().ok()?;
+                return Some(format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                ));
+            }
+            None if Instant::now() >= end => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+/// Parse `pgrep` output (one pid per line).
+fn parse_pids(out: &str) -> Vec<u32> {
+    out.lines().filter_map(|l| l.trim().parse().ok()).collect()
+}
+
+/// DHU processes other than the one AutoLab's own session owns.
+fn foreign_dhu_pids(running: &[u32], own: Option<u32>) -> Vec<u32> {
+    running
+        .iter()
+        .copied()
+        .filter(|p| Some(*p) != own)
+        .collect()
+}
+
+pub fn run(explicit_dhu: Option<PathBuf>) -> Vec<Check> {
+    let mut out = Vec::new();
+
+    let env = discovery::Env::from_process(explicit_dhu);
+    match discovery::find_dhu(&env) {
+        Ok(found) => {
+            out.push(check(
+                Level::Ok,
+                "dhu executable",
+                format!("{} ({:?})", found.path.display(), found.source),
+            ));
+            match run_bounded(&found.path, &["--version"], Duration::from_secs(5)) {
+                Some(text) => {
+                    let info = console::parse_info(&console::clean_lines(&text));
+                    out.push(check(
+                        Level::Ok,
+                        "dhu launches",
+                        format!(
+                            "version {} build {} (checked with --version; no device touched)",
+                            info.version.as_deref().unwrap_or("unknown"),
+                            info.build.as_deref().unwrap_or("unknown")
+                        ),
+                    ));
+                }
+                None => out.push(check(
+                    Level::Fail,
+                    "dhu launches",
+                    "`--version` did not finish within 5s",
+                )),
+            }
+        }
+        Err(tried) => {
+            let list: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
+            out.push(check(
+                Level::Fail,
+                "dhu executable",
+                format!("not found. Install it via the Android SDK Manager (extras;google;auto) or pass --dhu-path. Tried: {}", list.join(", ")),
+            ));
+        }
+    }
+
+    let sdk_roots = adb::sdk_roots_from_env();
+    let path_var = std::env::var("PATH").ok();
+    match adb::find_adb(path_var.as_deref(), &sdk_roots) {
+        None => out.push(check(
+            Level::Fail,
+            "adb",
+            "not found on PATH or in ANDROID_HOME/platform-tools",
+        )),
+        Some(adb_path) => {
+            out.push(check(Level::Ok, "adb", adb_path.display().to_string()));
+            match adb::list_devices(&adb_path) {
+                Err(e) => out.push(check(Level::Fail, "adb devices", e.to_string())),
+                Ok(devs) if devs.is_empty() => {
+                    out.push(check(Level::Fail, "adb devices", "no device attached"))
+                }
+                Ok(devs) => {
+                    for d in devs {
+                        let level = if d.state == "device" {
+                            Level::Ok
+                        } else {
+                            Level::Fail
+                        };
+                        out.push(check(
+                            level,
+                            "adb device",
+                            format!(
+                                "{} {} ({})",
+                                d.serial,
+                                d.state,
+                                d.model.as_deref().unwrap_or("unknown model")
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let session = session::status().ok();
+    match &session {
+        Some(s) => out.push(check(
+            Level::Info,
+            "session",
+            format!("running (dhu pid {}, serial {})", s.dhu_pid, s.serial),
+        )),
+        None => out.push(check(Level::Info, "session", "none running")),
+    }
+    let running = Command::new("pgrep")
+        .args(["-x", "desktop-head-unit"])
+        .output()
+        .map(|o| parse_pids(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+    let foreign = foreign_dhu_pids(&running, session.as_ref().map(|s| s.dhu_pid));
+    if !foreign.is_empty() {
+        let pids: Vec<String> = foreign.iter().map(u32::to_string).collect();
+        out.push(check(
+            Level::Warn,
+            "other dhu",
+            format!(
+                "a desktop-head-unit not started by AutoLab is running (pid {}). It holds the phone's USB link and AutoLab cannot control it; stop it before `autolab start`",
+                pids.join(", ")
+            ),
+        ));
+    }
+    out.push(check(
+        Level::Info,
+        "not checked",
+        "whether Android Auto projection will connect; that needs `autolab start` and a phone with Android Auto set up",
+    ));
+    out
+}
+
+pub fn has_failures(checks: &[Check]) -> bool {
+    checks.iter().any(|c| c.level == Level::Fail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_pgrep_output() {
+        assert_eq!(parse_pids("35180\n35199\n"), vec![35180, 35199]);
+        assert!(parse_pids("").is_empty());
+    }
+
+    #[test]
+    fn own_dhu_is_not_foreign() {
+        assert_eq!(foreign_dhu_pids(&[10, 20], Some(10)), vec![20]);
+        assert_eq!(foreign_dhu_pids(&[10], Some(10)), Vec::<u32>::new());
+        assert_eq!(foreign_dhu_pids(&[10], None), vec![10]);
+    }
+}

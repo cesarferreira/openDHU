@@ -1,0 +1,296 @@
+mod doctor;
+mod session;
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use autolab_core::{Error, FocusState, OpStatus, OperationResult, Result};
+use autolab_dhu::{DhuLaunch, adb, discovery};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "autolab",
+    version,
+    about = "Programmable Android Auto head unit control"
+)]
+struct Cli {
+    /// Print machine-readable JSON instead of text
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Start a DHU session (launches Google's DHU over USB and keeps it under AutoLab's control)
+    Start {
+        /// Path to the desktop-head-unit executable [env: AUTOLAB_DHU_PATH]
+        #[arg(long)]
+        dhu_path: Option<PathBuf>,
+        /// Android device serial (default: the only authorized adb device)
+        #[arg(long)]
+        serial: Option<String>,
+        /// DHU .ini configuration file
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Run the DHU without its window
+        #[arg(long)]
+        headless: bool,
+    },
+    /// Stop the running session
+    Stop,
+    /// Show the running session
+    Status,
+    /// Change head unit focus
+    Focus {
+        #[command(subcommand)]
+        kind: FocusKind,
+    },
+    /// Check the environment without touching a running session
+    Doctor {
+        #[arg(long)]
+        dhu_path: Option<PathBuf>,
+    },
+    #[command(name = "__supervise", hide = true)]
+    Supervise {
+        #[arg(long)]
+        dhu_path: PathBuf,
+        #[arg(long)]
+        serial: String,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        headless: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum FocusKind {
+    /// Take or release video focus
+    Video { state: OnOff },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum OnOff {
+    On,
+    Off,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let supervising = matches!(cli.command, Command::Supervise { .. });
+    match run(cli) {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            // The supervisor's stderr is read back by `start`, which re-wraps the message.
+            if supervising {
+                eprintln!("{}", e.message());
+            } else {
+                eprintln!("error: {e}");
+            }
+            ExitCode::from(e.exit_code())
+        }
+    }
+}
+
+fn run(cli: Cli) -> Result<u8> {
+    let json = cli.json;
+    match cli.command {
+        Command::Start {
+            dhu_path,
+            serial,
+            config,
+            headless,
+        } => {
+            let launch = resolve_launch(dhu_path, serial, config, headless)?;
+            let s = session::start(&launch)?;
+            print_status(&s, json);
+            Ok(0)
+        }
+        Command::Stop => {
+            session::stop()?;
+            println!(
+                "{}",
+                if json {
+                    "{\"stopped\":true}"
+                } else {
+                    "Session stopped"
+                }
+            );
+            Ok(0)
+        }
+        Command::Status => {
+            print_status(&session::status()?, json);
+            Ok(0)
+        }
+        Command::Focus {
+            kind: FocusKind::Video { state },
+        } => {
+            let r = session::set_video_focus(matches!(state, OnOff::On))?;
+            print_focus(&r, json);
+            Ok(status_exit_code(r.status))
+        }
+        Command::Doctor { dhu_path } => {
+            let checks = doctor::run(dhu_path);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&checks).expect("serializes")
+                );
+            } else {
+                for c in &checks {
+                    let tag = match c.level {
+                        doctor::Level::Ok => "ok  ",
+                        doctor::Level::Warn => "warn",
+                        doctor::Level::Fail => "FAIL",
+                        doctor::Level::Info => "info",
+                    };
+                    println!("{tag}  {:<15} {}", c.name, c.detail);
+                }
+            }
+            Ok(if doctor::has_failures(&checks) { 3 } else { 0 })
+        }
+        Command::Supervise {
+            dhu_path,
+            serial,
+            config,
+            headless,
+        } => {
+            session::supervise(DhuLaunch {
+                program: dhu_path,
+                serial,
+                config,
+                headless,
+            })?;
+            Ok(0)
+        }
+    }
+}
+
+fn status_exit_code(s: OpStatus) -> u8 {
+    match s {
+        OpStatus::Accepted | OpStatus::Acknowledged | OpStatus::Observed => 0,
+        OpStatus::Failed => 1,
+        OpStatus::Unsupported => 5,
+        OpStatus::TimedOut => 6,
+    }
+}
+
+fn resolve_launch(
+    dhu_path: Option<PathBuf>,
+    serial: Option<String>,
+    config: Option<PathBuf>,
+    headless: bool,
+) -> Result<DhuLaunch> {
+    let env = discovery::Env::from_process(dhu_path);
+    let found = discovery::find_dhu(&env).map_err(|tried| {
+        let list: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
+        Error::BackendUnavailable(format!(
+            "DHU executable not found (install extras;google;auto or pass --dhu-path). Tried: {}",
+            list.join(", ")
+        ))
+    })?;
+    let serial = match serial {
+        Some(s) => s,
+        None => pick_device()?,
+    };
+    Ok(DhuLaunch {
+        program: found.path,
+        serial,
+        config,
+        headless,
+    })
+}
+
+/// Choose the device only when there is exactly one authorized candidate.
+fn pick_device() -> Result<String> {
+    let sdk_roots = adb::sdk_roots_from_env();
+    let adb_path =
+        adb::find_adb(std::env::var("PATH").ok().as_deref(), &sdk_roots).ok_or_else(|| {
+            Error::BackendUnavailable(
+                "adb not found; pass --serial or install platform-tools".into(),
+            )
+        })?;
+    let ready: Vec<_> = adb::list_devices(&adb_path)
+        .map_err(|e| Error::BackendUnavailable(format!("adb failed: {e}")))?
+        .into_iter()
+        .filter(|d| d.state == "device")
+        .collect();
+    match ready.as_slice() {
+        [] => Err(Error::DeviceDisconnected(
+            "no authorized adb device is attached".into(),
+        )),
+        [one] => Ok(one.serial.clone()),
+        many => Err(Error::InvalidArgs(format!(
+            "multiple devices attached ({}); pass --serial",
+            many.iter()
+                .map(|d| d.serial.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+fn focus_word(s: FocusState) -> &'static str {
+    match s {
+        FocusState::On => "on",
+        FocusState::Off => "off",
+        FocusState::Unknown => "unknown",
+    }
+}
+
+fn print_focus(r: &OperationResult, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(r).expect("serializes"));
+        return;
+    }
+    match r.status {
+        OpStatus::Accepted => {
+            println!("Video focus {} command accepted", focus_word(r.requested));
+            println!(
+                "  DHU reports:     {} (DHU console readback, not a phone acknowledgement)",
+                focus_word(r.backend_reported)
+            );
+            println!("  Phone confirmed: {}", focus_word(r.observed));
+        }
+        other => {
+            eprintln!(
+                "Video focus {} command {:?}",
+                focus_word(r.requested),
+                other
+            );
+            for l in &r.evidence {
+                eprintln!("  {l}");
+            }
+        }
+    }
+}
+
+fn print_status(s: &session::StatusInfo, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(s).expect("serializes"));
+        return;
+    }
+    let v = &s.video_focus;
+    println!("AutoLab {}\n", env!("CARGO_PKG_VERSION"));
+    println!(
+        "Backend:      {} ({}, build {})",
+        s.backend,
+        s.dhu_version.as_deref().unwrap_or("unknown version"),
+        s.dhu_build.as_deref().unwrap_or("unknown")
+    );
+    println!("State:        {}", s.state);
+    println!("Transport:    {} (serial {})", s.transport, s.serial);
+    println!(
+        "Video focus:  requested {}; DHU reports {}; phone confirmed {}",
+        focus_word(v.requested),
+        focus_word(v.backend_reported),
+        focus_word(v.observed)
+    );
+    println!(
+        "Session:      supervisor pid {}, dhu pid {}",
+        s.supervisor_pid, s.dhu_pid
+    );
+}

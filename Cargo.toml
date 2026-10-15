@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/autolab-core", "crates/autolab-dhu", "crates/autolab-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "Apache-2.0"
+authors = ["Cesar Ferreira"]
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
