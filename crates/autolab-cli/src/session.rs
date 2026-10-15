@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use autolab_core::{Error, FocusState, HeadUnitBackend, OperationResult, Result};
+use autolab_core::{Error, FocusState, HeadUnitBackend, OperationResult, Result, ScreenshotResult};
 use autolab_dhu::{DhuBackend, DhuLaunch};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum Request {
     Status,
     FocusVideo { enabled: bool },
+    Screenshot { path: PathBuf },
     Stop,
 }
 
@@ -35,6 +36,7 @@ pub enum Request {
 pub enum Response {
     Status(StatusInfo),
     Operation(OperationResult),
+    Screenshot(ScreenshotResult),
     Stopped,
     Error { code: u8, message: String },
 }
@@ -154,6 +156,17 @@ pub fn set_video_focus(enabled: bool) -> Result<OperationResult> {
         Response::Operation(r) => Ok(r),
         other => Err(Error::Other(format!(
             "unexpected reply to focus: {other:?}"
+        ))),
+    }
+}
+
+pub fn screenshot(path: &Path) -> Result<ScreenshotResult> {
+    match request(&Request::Screenshot {
+        path: path.to_path_buf(),
+    })? {
+        Response::Screenshot(r) => Ok(r),
+        other => Err(Error::Other(format!(
+            "unexpected reply to screenshot: {other:?}"
         ))),
     }
 }
@@ -314,6 +327,10 @@ fn handle(backend: &mut DhuBackend, launch: &DhuLaunch, stream: UnixStream) -> b
         ),
         Ok(Request::FocusVideo { enabled }) => (
             into_response(backend.set_video_focus(enabled).map(Response::Operation)),
+            false,
+        ),
+        Ok(Request::Screenshot { path }) => (
+            into_response(backend.screenshot(&path).map(Response::Screenshot)),
             false,
         ),
         Ok(Request::Stop) => (

@@ -1,10 +1,12 @@
 mod doctor;
+mod output_path;
 mod session;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
-use autolab_core::{Error, FocusState, OpStatus, OperationResult, Result};
+use autolab_core::{Error, FocusState, OpStatus, OperationResult, Result, ScreenshotResult};
 use autolab_dhu::{DhuLaunch, adb, discovery};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -47,6 +49,15 @@ enum Command {
     Focus {
         #[command(subcommand)]
         kind: FocusKind,
+    },
+    /// Save a PNG of the projected display
+    Screenshot {
+        /// Output file, must end in .png
+        #[arg(conflicts_with = "output")]
+        path: Option<PathBuf>,
+        /// Output file, must end in .png (same as the positional argument)
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
     },
     /// Check the environment without touching a running session
     Doctor {
@@ -132,6 +143,16 @@ fn run(cli: Cli) -> Result<u8> {
             print_focus(&r, json);
             Ok(status_exit_code(r.status))
         }
+        Command::Screenshot { path, output } => {
+            let raw = path.or(output).ok_or_else(|| {
+                Error::InvalidArgs("give an output path: `autolab screenshot out.png`".into())
+            })?;
+            let cwd = std::env::current_dir()
+                .map_err(|e| Error::Other(format!("cannot read current directory: {e}")))?;
+            let abs = output_path::resolve_png(&raw, &cwd)?;
+            print_screenshot(&session::screenshot(&abs)?, json);
+            Ok(0)
+        }
         Command::Doctor { dhu_path } => {
             let checks = doctor::run(dhu_path);
             if json {
@@ -204,6 +225,26 @@ fn resolve_launch(
     })
 }
 
+/// How long to wait for a phone that has just dropped off adb. After a DHU session ends the
+/// phone leaves USB accessory mode and is briefly invisible to adb.
+const DEVICE_WAIT: Duration = Duration::from_secs(10);
+
+/// Pick the only authorized device. `Ok(None)` means none yet; several is always an error.
+fn select_device(devices: &[adb::AdbDevice]) -> Result<Option<String>> {
+    let ready: Vec<_> = devices.iter().filter(|d| d.state == "device").collect();
+    match ready.as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some(one.serial.clone())),
+        many => Err(Error::InvalidArgs(format!(
+            "multiple devices attached ({}); pass --serial",
+            many.iter()
+                .map(|d| d.serial.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 /// Choose the device only when there is exactly one authorized candidate.
 fn pick_device() -> Result<String> {
     let sdk_roots = adb::sdk_roots_from_env();
@@ -213,23 +254,20 @@ fn pick_device() -> Result<String> {
                 "adb not found; pass --serial or install platform-tools".into(),
             )
         })?;
-    let ready: Vec<_> = adb::list_devices(&adb_path)
-        .map_err(|e| Error::BackendUnavailable(format!("adb failed: {e}")))?
-        .into_iter()
-        .filter(|d| d.state == "device")
-        .collect();
-    match ready.as_slice() {
-        [] => Err(Error::DeviceDisconnected(
-            "no authorized adb device is attached".into(),
-        )),
-        [one] => Ok(one.serial.clone()),
-        many => Err(Error::InvalidArgs(format!(
-            "multiple devices attached ({}); pass --serial",
-            many.iter()
-                .map(|d| d.serial.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
+    let deadline = Instant::now() + DEVICE_WAIT;
+    loop {
+        let devices = adb::list_devices(&adb_path)
+            .map_err(|e| Error::BackendUnavailable(format!("adb failed: {e}")))?;
+        if let Some(serial) = select_device(&devices)? {
+            return Ok(serial);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::DeviceDisconnected(format!(
+                "no authorized adb device appeared within {}s",
+                DEVICE_WAIT.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(500));
     }
 }
 
@@ -268,6 +306,19 @@ fn print_focus(r: &OperationResult, json: bool) {
     }
 }
 
+fn print_screenshot(r: &ScreenshotResult, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(r).expect("serializes"));
+    } else {
+        println!(
+            "Screenshot saved: {} ({}x{})",
+            r.path.display(),
+            r.width,
+            r.height
+        );
+    }
+}
+
 fn print_status(s: &session::StatusInfo, json: bool) {
     if json {
         println!("{}", serde_json::to_string_pretty(s).expect("serializes"));
@@ -293,4 +344,38 @@ fn print_status(s: &session::StatusInfo, json: bool) {
         "Session:      supervisor pid {}, dhu pid {}",
         s.supervisor_pid, s.dhu_pid
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dev(serial: &str, state: &str) -> adb::AdbDevice {
+        adb::AdbDevice {
+            serial: serial.into(),
+            state: state.into(),
+            model: None,
+        }
+    }
+
+    #[test]
+    fn selects_only_a_single_authorized_device() {
+        assert_eq!(select_device(&[]).unwrap(), None);
+        assert_eq!(
+            select_device(&[dev("A", "unauthorized")]).unwrap(),
+            None,
+            "unauthorized devices are never chosen"
+        );
+        assert_eq!(
+            select_device(&[dev("A", "device"), dev("B", "offline")]).unwrap(),
+            Some("A".into())
+        );
+    }
+
+    #[test]
+    fn several_authorized_devices_is_an_error_not_a_guess() {
+        let err = select_device(&[dev("A", "device"), dev("B", "device")]).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("A, B"));
+    }
 }

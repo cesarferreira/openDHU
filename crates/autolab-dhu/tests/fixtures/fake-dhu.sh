@@ -35,6 +35,18 @@ while IFS= read -r line; do
     "focus video toggle") if $focus; then focus=false; else focus=true; fi;;
     "focus video") echo "[I]: Has video focus: $focus" >&2;;
     "focus video "*) echo "[E]: Invalid state '${line#focus video }'" >&2;;
+    "screenshot "*)
+      path=${line#screenshot }
+      if ! $focus; then
+        echo "[E]: Don't have video focus - nothing to screenshot." >&2
+        printf '> '
+        continue
+      fi
+      case "$FAKE_DHU_MODE" in
+        screenshot-nofile) ;;
+        screenshot-notpng) echo "this is not a png, just some text padding" > "$path";;
+        *) printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x05\x00\x00\x00\x02\xd0\x08\x06\x00\x00\x00' > "$path";;
+      esac;;
     "quit"|"exit") exit 0;;
     "crash") exit 3;;
     "hang") exec sleep 30;;

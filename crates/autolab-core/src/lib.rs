@@ -6,4 +6,4 @@ mod result;
 
 pub use backend::{Capabilities, HeadUnitBackend, Support};
 pub use error::{Error, Result};
-pub use result::{FocusState, OpStatus, OperationResult};
+pub use result::{FocusState, OpStatus, OperationResult, ScreenshotResult};

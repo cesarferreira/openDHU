@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use autolab_core::{Error, FocusState, HeadUnitBackend, OpStatus};
+use autolab_core::{Error, FocusState, HeadUnitBackend, OpStatus, Support};
 use autolab_dhu::{DhuBackend, DhuProcess};
 
 fn fake() -> PathBuf {
@@ -21,7 +21,17 @@ fn spawn(mode: &str) -> DhuProcess {
 }
 
 fn backend() -> DhuBackend {
-    DhuBackend::from_process(spawn("normal"), Duration::from_secs(10)).unwrap()
+    backend_in("normal")
+}
+
+fn backend_in(mode: &str) -> DhuBackend {
+    DhuBackend::from_process(spawn(mode), Duration::from_secs(10)).unwrap()
+}
+
+fn shot_path(tag: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!("al-shot-{}-{tag}.png", std::process::id()));
+    let _ = std::fs::remove_file(&p);
+    p
 }
 
 fn alive(pid: u32) -> bool {
@@ -196,4 +206,74 @@ fn spawn_of_missing_binary_is_backend_unavailable() {
         .err()
         .unwrap();
     assert!(matches!(err, Error::BackendUnavailable(_)));
+}
+
+#[test]
+fn screenshot_is_verified_on_disk_and_sized_from_the_png() {
+    let mut b = backend();
+    let path = shot_path("ok");
+    let r = b.screenshot(&path).unwrap();
+    assert_eq!((r.width, r.height), (1280, 720));
+    assert_eq!(r.path, path);
+    assert!(path.is_file());
+    assert_eq!(b.capabilities().screenshots, Support::Supported);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn screenshot_that_never_appears_fails_even_if_a_stale_file_existed() {
+    let mut b = backend_in("screenshot-nofile");
+    let path = shot_path("stale");
+    // A valid-looking old PNG must not be mistaken for a new capture.
+    std::fs::write(
+        &path,
+        b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\x05\0\0\0\x02\xd0old",
+    )
+    .unwrap();
+    let err = b.screenshot(&path).unwrap_err();
+    assert!(matches!(err, Error::Timeout(_)), "{err}");
+    assert!(
+        !path.exists(),
+        "stale file must have been removed before capture"
+    );
+}
+
+#[test]
+fn screenshot_without_video_focus_is_refused_and_writes_nothing() {
+    // Verified on the real DHU: it answers "[E]: Don't have video focus - nothing to screenshot."
+    let mut b = backend();
+    b.set_video_focus(false).unwrap();
+    let path = shot_path("nofocus");
+    let err = b.screenshot(&path).unwrap_err();
+    assert!(err.to_string().contains("nothing to screenshot"), "{err}");
+    assert!(!path.exists());
+    b.set_video_focus(true).unwrap();
+    assert!(
+        b.screenshot(&path).is_ok(),
+        "works again once focus is back"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn screenshot_that_is_not_a_png_is_an_error() {
+    let mut b = backend_in("screenshot-notpng");
+    let path = shot_path("notpng");
+    let err = b.screenshot(&path).unwrap_err();
+    assert!(err.to_string().contains("not a PNG"), "{err}");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn screenshot_rejects_relative_and_whitespace_paths_without_touching_the_console() {
+    let mut b = backend();
+    for bad in ["relative.png", "/tmp/has space.png", "/tmp/new\nline.png"] {
+        let err = b.screenshot(std::path::Path::new(bad)).unwrap_err();
+        assert!(matches!(err, Error::InvalidArgs(_)), "{bad}: {err}");
+    }
+    // the session still works afterwards
+    assert_eq!(
+        b.set_video_focus(true).unwrap().backend_reported,
+        FocusState::On
+    );
 }

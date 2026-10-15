@@ -19,6 +19,7 @@ autolab doctor                  # read-only environment check
 autolab start                   # launches the DHU over USB and keeps it under AutoLab's control
 autolab focus video off
 autolab focus video on
+autolab screenshot out.png   # needs video focus on
 autolab status --json
 autolab stop
 ```
@@ -37,7 +38,7 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
 - Starting a session re-enumerates the phone over USB, which drops `adb reverse`/`forward` tunnels. Re-apply any
   tunnel your app needs after `autolab start`.
 - USB transport only. Only one DHU can hold a phone at a time, so stop other DHUs first.
-- Only video focus is implemented. Night mode, driving restrictions, audio and nav focus, screenshots,
+- Video focus and screenshots are implemented. Night mode, driving restrictions, audio and nav focus,
   the HTTP daemon and the test runner are not.
 - Tested with DHU 2.0 (build 2022-03-30) and Android Auto 18.0.164204 on a Pixel 6.
 

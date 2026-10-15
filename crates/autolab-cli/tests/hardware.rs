@@ -33,6 +33,17 @@ fn real_dhu_video_focus_round_trip() {
             "phone confirmation is not implemented"
         );
     }
+    let shot = format!("{}-shot.png", s.dir.display());
+    let o = s.autolab(&["screenshot", &shot, "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert!(v["width"].as_u64().unwrap() > 0 && v["height"].as_u64().unwrap() > 0);
+    assert!(
+        std::fs::metadata(&shot).unwrap().len() > 1000,
+        "screenshot looks empty"
+    );
+    let _ = std::fs::remove_file(&shot);
+
     let st = s.status_json();
     let dhu = st["dhuPid"].as_u64().unwrap();
     assert_eq!(code(&s.autolab(&["stop"])), 0);

@@ -1,15 +1,21 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, OperationResult, Result, Support,
+    Capabilities, Error, FocusState, HeadUnitBackend, OperationResult, Result, ScreenshotResult,
+    Support,
 };
 
 use crate::console::{self, DhuInfo};
+use crate::png;
 use crate::process::DhuProcess;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+/// The DHU replies before the file is necessarily complete, so wait for it to settle.
+const SCREENSHOT_SETTLE: Duration = Duration::from_secs(3);
 const READY_TIMEOUT: Duration = Duration::from_secs(45);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
@@ -91,6 +97,7 @@ impl HeadUnitBackend for DhuBackend {
         Capabilities {
             backend: "dhu".into(),
             video_focus: Support::Supported,
+            screenshots: Support::Supported,
         }
     }
 
@@ -108,6 +115,39 @@ impl HeadUnitBackend for DhuBackend {
         Ok(OperationResult::accepted(requested, reported, lines))
     }
 
+    fn screenshot(&mut self, path: &Path) -> Result<ScreenshotResult> {
+        let text = path
+            .to_str()
+            .ok_or_else(|| Error::InvalidArgs("screenshot path must be valid UTF-8".into()))?;
+        // How the DHU parses quoting is unverified, so only unambiguous paths are passed through.
+        if !path.is_absolute() || text.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(Error::InvalidArgs(
+                "screenshot path must be absolute and contain no whitespace".into(),
+            ));
+        }
+        // A leftover file would otherwise satisfy the check below without a new capture.
+        if path.is_file() {
+            std::fs::remove_file(path)
+                .map_err(|e| Error::Other(format!("cannot replace {text}: {e}")))?;
+        }
+        let lines = self
+            .proc
+            .round_trip(&format!("screenshot {text}"), COMMAND_TIMEOUT)?;
+        let errors = console::error_lines(&lines);
+        if !errors.is_empty() {
+            return Err(Error::Other(format!(
+                "DHU rejected the screenshot: {}",
+                errors.join("; ")
+            )));
+        }
+        let (width, height) = wait_for_png(path)?;
+        Ok(ScreenshotResult {
+            path: path.to_path_buf(),
+            width,
+            height,
+        })
+    }
+
     fn stop(&mut self) -> Result<()> {
         if !self.proc.shutdown(STOP_GRACE) {
             return Err(Error::Other(
@@ -115,6 +155,36 @@ impl HeadUnitBackend for DhuBackend {
             ));
         }
         Ok(())
+    }
+}
+
+/// Wait until `path` holds a complete-looking PNG (size stable across two polls).
+fn wait_for_png(path: &Path) -> Result<(u32, u32)> {
+    let deadline = Instant::now() + SCREENSHOT_SETTLE;
+    let mut last_len = None;
+    loop {
+        if let Ok(meta) = std::fs::metadata(path) {
+            let len = meta.len();
+            if len >= 24 && last_len == Some(len) {
+                let mut head = [0u8; 24];
+                if let Ok(mut f) = File::open(path)
+                    && f.read_exact(&mut head).is_ok()
+                {
+                    return png::dimensions(&head).ok_or_else(|| {
+                        Error::Other(format!("{} was written but is not a PNG", path.display()))
+                    });
+                }
+            }
+            last_len = Some(len);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Timeout(format!(
+                "the DHU accepted the screenshot command but {} did not appear within {}s",
+                path.display(),
+                SCREENSHOT_SETTLE.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 

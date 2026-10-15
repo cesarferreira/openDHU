@@ -4,6 +4,7 @@ pub mod adb;
 mod backend;
 pub mod console;
 pub mod discovery;
+mod png;
 mod process;
 
 pub use backend::{DhuBackend, DhuLaunch};

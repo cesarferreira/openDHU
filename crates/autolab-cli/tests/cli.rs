@@ -202,3 +202,83 @@ fn doctor_validates_the_dhu_and_flags_a_missing_one() {
     );
     assert_eq!(code(&bad), 3);
 }
+
+fn shot_file(s: &Sandbox) -> String {
+    format!("{}-shot.png", s.dir.display())
+}
+
+#[test]
+fn screenshot_saves_a_png_and_reports_its_absolute_path_and_size() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let file = shot_file(&s);
+
+    let o = s.autolab(&["screenshot", &file]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains(&format!("Screenshot saved: {file} (1280x720)")),
+        "{}",
+        text(&o)
+    );
+    assert!(std::path::Path::new(&file).is_file());
+
+    let j = s.autolab(&["screenshot", "--output", &file, "--json"]);
+    assert_eq!(code(&j), 0, "{}", text(&j));
+    let v: serde_json::Value = serde_json::from_slice(&j.stdout).unwrap();
+    assert_eq!(v["path"], file.as_str());
+    assert_eq!(
+        (v["width"].as_u64(), v["height"].as_u64()),
+        (Some(1280), Some(720))
+    );
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn screenshot_argument_errors_exit_2_before_contacting_the_session() {
+    let s = Sandbox::new(); // no session running: a 3 here would mean validation ran too late
+    for args in [
+        vec!["screenshot"],
+        vec!["screenshot", "out.jpg"],
+        vec!["screenshot", "has space.png"],
+        vec!["screenshot", "/no/such/dir/x.png"],
+        vec!["screenshot", "a.png", "--output", "b.png"],
+    ] {
+        let o = s.autolab(&args);
+        assert_eq!(code(&o), 2, "{args:?}: {}", text(&o));
+    }
+}
+
+#[test]
+fn screenshot_without_a_session_is_backend_unavailable() {
+    let s = Sandbox::new();
+    let file = shot_file(&s);
+    let o = s.autolab(&["screenshot", &file]);
+    assert_eq!(code(&o), 3, "{}", text(&o));
+    assert!(!std::path::Path::new(&file).exists());
+}
+
+#[test]
+fn screenshot_the_dhu_accepts_but_never_writes_is_a_timeout() {
+    let s = Sandbox::new();
+    let started = s.autolab_env(
+        &["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"],
+        &[("FAKE_DHU_MODE", "screenshot-nofile")],
+    );
+    assert_eq!(code(&started), 0, "{}", text(&started));
+    let file = shot_file(&s);
+    let o = s.autolab(&["screenshot", &file]);
+    assert_eq!(code(&o), 6, "{}", text(&o));
+    assert!(text(&o).contains("did not appear"), "{}", text(&o));
+}
+
+#[test]
+fn screenshot_without_video_focus_reports_the_dhu_refusal() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    assert_eq!(code(&s.autolab(&["focus", "video", "off"])), 0);
+    let file = shot_file(&s);
+    let o = s.autolab(&["screenshot", &file]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("nothing to screenshot"), "{}", text(&o));
+    assert!(!std::path::Path::new(&file).exists());
+}

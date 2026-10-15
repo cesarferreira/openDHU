@@ -155,7 +155,13 @@ readback as proof that the phone changed state.
 - **Observed:** the windowed capture showed only the projected content, with no window chrome.
 - **Not tested:** that the headless capture looks right. Its format and size were checked with `file`, and
   it was not opened. Resolution with other configs (for example a cropped 1920×1080 layout) is not tested.
-- **Not implemented in the CLI.** The capability is verified but `autolab screenshot` does not exist yet.
+- **Observed:** with video focus **off** the DHU refuses: `[E]: Don't have video focus - nothing to screenshot.`
+  No file is written. A screenshot step must therefore run while video focus is on.
+- **Observed:** the resolution follows the DHU config: 1280×720 with `default_720p.ini`, 800×480 with the
+  built-in default.
+- **Not known:** how the DHU parses a path that contains spaces. AutoLab rejects such paths instead of guessing.
+- Implemented as `autolab screenshot PATH` (see section 10). The DHU replies before the file is complete, so
+  AutoLab waits for the file to appear and stop growing, then reads its size from the PNG header.
 
 ## 6. Process lifecycle
 
@@ -213,7 +219,7 @@ Options for teams that already launch the DHU from their own script (not impleme
 |---|---|
 | Video focus on/off, with DHU readback | **Verified.** Implemented in the CLI. |
 | Phone-side confirmation of video focus | Signal exists (logcat), **fragile**, not implemented. |
-| Screenshot to PNG | **Verified** (windowed and headless). Not in the CLI yet. |
+| Screenshot to PNG | **Verified** (windowed and headless). Implemented in the CLI. Needs video focus on. |
 | Persistent console, no restart per command | **Verified.** |
 | Headless operation | **Verified** over USB. Still needs a real phone. |
 | Day / night mode (`day`, `night`, `daynight`) | In `help`. **Not exercised.** |
@@ -239,7 +245,8 @@ not prove that projection is visible. adb visibility proves even less. AutoLab u
 
 ## 9. Bugs found while building the PoC
 
-Both were found by running against real hardware or by a regression test, and both have tests:
+Found by running against real hardware. The first two have regression tests. For the third, only device
+selection is unit-tested; the wait itself was checked by hand, not by an automated test:
 
 1. **Discovery fell through an explicit path.** `--dhu-path /missing` quietly launched the SDK's DHU. An
    explicit path or `AUTOLAB_DHU_PATH` that is unusable is now an error.
@@ -248,13 +255,21 @@ Both were found by running against real hardware or by a regression test, and bo
    one shared pipe. The regression test (300 consecutive readbacks) failed on the old code in 3 of 3 runs
    and passes on the fix.
 
+3. **Start right after stop could not find the phone.** After a session ends the phone leaves accessory mode
+   and is briefly invisible to adb, so `autolab start` without `--serial` failed with "no device".
+   Auto-selection now waits up to 10 s for exactly one authorized device. With several devices it still
+   refuses to guess.
+
 ## 10. What is implemented
 
-`autolab start | stop | status | focus video on|off | doctor`, with `--json` (camelCase keys), deterministic
+`autolab start | stop | status | focus video on|off | screenshot | doctor`, with `--json` (camelCase keys), deterministic
 exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `autolab-core`. USB transport only. `doctor` is
 read-only and warns about a DHU that AutoLab does not own.
 
-Not implemented: HTTP daemon, event stream, screenshot command, night mode, driving restrictions, audio and
+`autolab screenshot PATH|-o PATH` validates the path (must end in `.png`, no whitespace, existing directory),
+removes any stale file, and reports the path and size of the file that was actually written.
+
+Not implemented: HTTP daemon, event stream, night mode, driving restrictions, audio and
 nav focus, TOML config file, YAML test runner, `--adb` transport, device selection beyond `--serial`.
 
 ## 11. Tests and how to run them

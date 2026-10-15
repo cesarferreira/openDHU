@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 /// A state we either know or explicitly do not. Never guessed.
@@ -74,6 +76,15 @@ impl OperationResult {
             evidence,
         }
     }
+}
+
+/// A screenshot that exists on disk. Dimensions are read from the written PNG, not assumed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotResult {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[cfg(test)]
