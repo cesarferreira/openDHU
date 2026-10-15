@@ -217,8 +217,12 @@ Options for teams that already launch the DHU from their own script (not impleme
   ports asked for are added, and nothing is ever removed.
 - **Verified on the phone:** after `autolab start --reverse 10101`, `adb reverse --list` independently showed
   `UsbFfs tcp:10101 tcp:10101`.
-- **Not handled:** tunnels dropped by a *later* re-enumeration while the session runs are reported as `missing`
-  but not re-applied. The user's script does re-apply them in a loop.
+- **Handled mid-session too:** a supervisor thread checks `adb reverse --list` every 2 s and re-applies only the
+  requested tunnels that are missing. It acts only when adb answers, so a phone that is mid-re-enumeration is left
+  alone and never hammered. `status` shows how many times each tunnel was re-applied.
+- **Verified on the phone:** with `--reverse 47123`, removing that tunnel with `adb reverse --remove` was repaired
+  within 2 s (`status`: `active`, `reapplied: 1`; an independent `adb reverse --list` agreed). That drop was
+  *simulated*; a genuine USB re-enumeration was not forced, because doing so risks the DHU link.
 
 ## 8. Capabilities (DHU 2.0 + Android Auto 18.0.164204, USB)
 

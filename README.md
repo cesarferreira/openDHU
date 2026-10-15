@@ -38,8 +38,8 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
 - **AutoLab can only control a DHU that it started.** A DHU launched from another terminal or script
   takes commands only on its own stdin, and nothing else can reach it.
 - Starting a session re-enumerates the phone over USB, which drops `adb reverse`/`forward` tunnels. Pass
-  `--reverse PORT` to `autolab start` to restore the ones you need. Only `adb reverse` is supported, and tunnels
-  lost later in a session are reported by `status` but not re-applied.
+  `--reverse PORT` to `autolab start` to restore the ones you need; AutoLab also re-applies them if the phone drops
+  them later in the session. Only `adb reverse` is supported.
 - USB transport only. Only one DHU can hold a phone at a time, so stop other DHUs first.
 - Video focus, screenshots and the YAML test runner are implemented. Night mode, driving restrictions, audio and
   nav focus, and the HTTP daemon are not.

@@ -45,7 +45,9 @@ fn reverse_tunnels_are_applied_confirmed_and_reported_live() {
 #[test]
 fn status_reflects_the_device_not_the_request() {
     let s = Sandbox::new();
-    let env = s.adb_env("normal");
+    let mut env = s.adb_env("normal");
+    // Keep the keeper out of the way: this test is about what `status` reports, not about repairs.
+    env.push(("AUTOLAB_TUNNEL_CHECK_MS".into(), "600000".into()));
     assert_eq!(code(&start_with(&s, &env, &["--reverse", "10101"])), 0);
     // The phone re-enumerated and lost the tunnel behind AutoLab's back.
     std::fs::remove_file(s.adb_state().join("reverse")).unwrap();
@@ -110,4 +112,81 @@ fn without_reverse_adb_is_never_called() {
     assert_eq!(code(&start_with(&s, &env, &[])), 0);
     assert_eq!(code(&s.autolab_with(&["status"], &env)), 0);
     assert_eq!(s.adb_calls(), "", "no --reverse means no adb side effects");
+}
+
+// ---- keeping tunnels alive ---------------------------------------------------------------
+
+use std::time::Duration;
+
+fn fast_keeper(s: &Sandbox) -> Vec<(String, String)> {
+    let mut env = s.adb_env("normal");
+    env.push(("AUTOLAB_TUNNEL_CHECK_MS".into(), "100".into()));
+    env
+}
+
+fn reverse_calls(s: &Sandbox, port: u16) -> usize {
+    s.adb_calls()
+        .lines()
+        .filter(|l| l.contains(&format!("reverse tcp:{port} tcp:{port}")))
+        .count()
+}
+
+fn tunnel(s: &Sandbox, env: &[(String, String)]) -> serde_json::Value {
+    let st = s.autolab_with(&["status", "--json"], env);
+    let v: serde_json::Value = serde_json::from_slice(&st.stdout).unwrap();
+    v["tunnels"][0].clone()
+}
+
+#[test]
+fn a_tunnel_the_phone_drops_is_put_back_and_counted() {
+    let s = Sandbox::new();
+    let env = fast_keeper(&s);
+    assert_eq!(code(&start_with(&s, &env, &["--reverse", "10101"])), 0);
+    assert_eq!(reverse_calls(&s, 10101), 1);
+
+    // The phone re-enumerated and lost the tunnel.
+    std::fs::remove_file(s.adb_state().join("reverse")).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            let t = tunnel(&s, &env);
+            t["state"] == "active" && t["reapplied"].as_u64() == Some(1)
+        }),
+        "tunnel was never restored: {}",
+        tunnel(&s, &env)
+    );
+    assert_eq!(reverse_calls(&s, 10101), 2, "exactly one re-application");
+}
+
+#[test]
+fn an_unreachable_phone_is_left_alone_until_it_comes_back() {
+    let s = Sandbox::new();
+    let env = fast_keeper(&s);
+    assert_eq!(code(&start_with(&s, &env, &["--reverse", "10101"])), 0);
+
+    std::fs::write(s.adb_state().join("offline"), "").unwrap();
+    std::fs::remove_file(s.adb_state().join("reverse")).unwrap();
+    std::thread::sleep(Duration::from_millis(800)); // ~8 checks while adb is failing
+    assert_eq!(
+        reverse_calls(&s, 10101),
+        1,
+        "must not hammer a phone that adb cannot reach"
+    );
+
+    std::fs::remove_file(s.adb_state().join("offline")).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(10), || tunnel(&s, &env)["reapplied"]
+            .as_u64()
+            == Some(1)),
+        "tunnel was not restored once the phone returned"
+    );
+}
+
+#[test]
+fn healthy_tunnels_are_never_touched() {
+    let s = Sandbox::new();
+    let env = fast_keeper(&s);
+    assert_eq!(code(&start_with(&s, &env, &["--reverse", "10101"])), 0);
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(reverse_calls(&s, 10101), 1);
+    assert_eq!(tunnel(&s, &env)["reapplied"], 0);
 }

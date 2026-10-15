@@ -388,7 +388,14 @@ fn print_status(s: &session::StatusInfo, json: bool) {
         focus_word(v.observed)
     );
     for t in &s.tunnels {
-        println!("Tunnel:       adb reverse tcp:{} ({:?})", t.port, t.state);
+        let again = match t.reapplied {
+            0 => String::new(),
+            n => format!(", re-applied {n}x"),
+        };
+        println!(
+            "Tunnel:       adb reverse tcp:{} ({:?}{again})",
+            t.port, t.state
+        );
     }
     println!(
         "Session:      supervisor pid {}, dhu pid {}",

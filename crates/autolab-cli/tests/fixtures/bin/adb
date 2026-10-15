@@ -3,6 +3,8 @@
 # FAKE_ADB_MODE: normal | reverse-fails | lying-list | no-device
 [ -n "$FAKE_ADB_STATE" ] && echo "$*" >> "$FAKE_ADB_STATE/calls.log"
 [ "$1" = "-s" ] && shift 2
+# A flag file simulates the phone being mid-re-enumeration: every adb call fails.
+if [ -e "$FAKE_ADB_STATE/offline" ]; then echo "error: device offline" >&2; exit 1; fi
 case "$1" in
   get-state)
     if [ "$FAKE_ADB_MODE" = no-device ]; then echo "error: device offline" >&2; exit 1; fi

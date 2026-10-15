@@ -30,6 +30,22 @@ fn real_dhu_video_focus_round_trip() {
     );
 
     // Includes repeated same-state calls: those exposed a stdout/stderr ordering bug once.
+    // Simulate the phone dropping our (test-only) tunnel; AutoLab must put it back.
+    let adb = |args: &[&str]| {
+        std::process::Command::new("adb")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    adb(&["reverse", "--remove", "tcp:47123"]);
+    assert!(
+        wait_until(std::time::Duration::from_secs(15), || {
+            String::from_utf8_lossy(&adb(&["reverse", "--list"]).stdout)
+                .contains("tcp:47123 tcp:47123")
+        }),
+        "AutoLab did not restore the dropped tunnel"
+    );
+
     for arg in [
         "off", "on", "on", "off", "off", "on", "off", "on", "on", "off", "on", "on",
     ] {

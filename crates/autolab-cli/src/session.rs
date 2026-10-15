@@ -12,6 +12,8 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -24,6 +26,8 @@ use serde::{Deserialize, Serialize};
 /// DHU handshake (up to 45s) plus waiting for the phone to return to adb (up to 30s).
 const START_TIMEOUT: Duration = Duration::from_secs(100);
 const DEVICE_RETURN_WAIT: Duration = Duration::from_secs(30);
+/// How often the supervisor checks that requested tunnels still exist.
+const TUNNEL_CHECK: Duration = Duration::from_secs(2);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -74,12 +78,17 @@ pub enum TunnelState {
 pub struct TunnelStatus {
     pub port: u16,
     pub state: TunnelState,
+    /// Times AutoLab re-applied this tunnel after the phone dropped it.
+    #[serde(default)]
+    pub reapplied: u32,
 }
 
 /// Tunnels the supervisor was asked to maintain, and the adb it uses to check them.
 struct Tunnels {
     adb: Option<PathBuf>,
     ports: Vec<u16>,
+    /// How many times the keeper had to put each tunnel back, parallel to `ports`.
+    reapplied: Vec<AtomicU32>,
 }
 
 pub fn runtime_dir() -> Result<PathBuf> {
@@ -288,7 +297,11 @@ pub fn supervise(launch: DhuLaunch, reverse: Vec<u16>) -> Result<()> {
     // The USB accessory switch drops adb tunnels, so they are only added once the DHU is attached.
     // A failure here ends the session (the DHU stops with it) rather than leaving one that looks
     // healthy while the app under test cannot reach its backend.
-    let tunnels = setup_tunnels(&launch.serial, &reverse)?;
+    let tunnels = Arc::new(setup_tunnels(&launch.serial, &reverse)?);
+    if !tunnels.ports.is_empty() {
+        let (serial, shared) = (launch.serial.clone(), Arc::clone(&tunnels));
+        thread::spawn(move || keep_tunnels(serial, shared));
+    }
     let listener = UnixListener::bind(&sock).map_err(|e| match e.kind() {
         ErrorKind::AddrInUse => conflict(),
         _ => Error::Other(format!("cannot bind {}: {e}", sock.display())),
@@ -402,15 +415,48 @@ fn tunnel_status(serial: &str, tunnels: &Tunnels) -> Vec<TunnelStatus> {
     tunnels
         .ports
         .iter()
-        .map(|&port| TunnelStatus {
+        .zip(&tunnels.reapplied)
+        .map(|(&port, reapplied)| TunnelStatus {
             port,
             state: match &live {
                 None => TunnelState::Unknown,
                 Some(l) if l.contains(&port) => TunnelState::Active,
                 Some(_) => TunnelState::Missing,
             },
+            reapplied: reapplied.load(Ordering::SeqCst),
         })
         .collect()
+}
+
+/// Background upkeep: the phone drops `adb reverse` tunnels whenever it re-enumerates over USB, so
+/// put back any that are missing. It acts only when adb answers and the list lacks the port, so
+/// a phone that is mid-re-enumeration (adb not answering) is left alone instead of being hammered.
+fn keep_tunnels(serial: String, tunnels: Arc<Tunnels>) {
+    let Some(adb) = tunnels.adb.clone() else {
+        return;
+    };
+    let every = std::env::var("AUTOLAB_TUNNEL_CHECK_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map_or(TUNNEL_CHECK, Duration::from_millis);
+    loop {
+        thread::sleep(every);
+        let Some(live) = adb::reversed_ports(&adb, &serial) else {
+            continue;
+        };
+        for (&port, count) in tunnels.ports.iter().zip(&tunnels.reapplied) {
+            if live.contains(&port) {
+                continue;
+            }
+            match adb::reverse(&adb, &serial, port) {
+                Ok(()) => {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    println!("tunnel tcp:{port} was missing; re-applied");
+                }
+                Err(e) => println!("tunnel tcp:{port} is missing and re-applying failed: {e}"),
+            }
+        }
+    }
 }
 
 fn setup_tunnels(serial: &str, ports: &[u16]) -> Result<Tunnels> {
@@ -418,6 +464,7 @@ fn setup_tunnels(serial: &str, ports: &[u16]) -> Result<Tunnels> {
         return Ok(Tunnels {
             adb: None,
             ports: Vec::new(),
+            reapplied: Vec::new(),
         });
     }
     let adb = adb::find_adb(
@@ -455,5 +502,6 @@ fn setup_tunnels(serial: &str, ports: &[u16]) -> Result<Tunnels> {
     Ok(Tunnels {
         adb: Some(adb),
         ports: ports.to_vec(),
+        reapplied: ports.iter().map(|_| AtomicU32::new(0)).collect(),
     })
 }
