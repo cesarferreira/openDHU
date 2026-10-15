@@ -1,12 +1,16 @@
 mod doctor;
 mod output_path;
 mod session;
+mod session_backend;
+mod test_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use autolab_core::{Error, FocusState, OpStatus, OperationResult, Result, ScreenshotResult};
+use autolab_core::{
+    Error, FocusState, OpStatus, OperationResult, Result, ScreenshotResult, SessionState,
+};
 use autolab_dhu::{DhuLaunch, adb, discovery};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -40,6 +44,10 @@ enum Command {
         /// Run the DHU without its window
         #[arg(long)]
         headless: bool,
+        /// Re-apply `adb reverse tcp:PORT tcp:PORT` after the phone attaches (repeatable). Starting
+        /// a session re-enumerates the phone over USB, which drops existing tunnels.
+        #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+        reverse: Vec<u16>,
     },
     /// Stop the running session
     Stop,
@@ -59,6 +67,21 @@ enum Command {
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
     },
+    /// Run YAML tests against the running session
+    Test {
+        /// Test files or directories (searched recursively for .yaml/.yml)
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Report to write into the artifacts directory (repeatable; default: json)
+        #[arg(long, value_enum)]
+        report: Vec<test_cmd::ReportFormat>,
+        /// Where reports, logs and screenshots go [default: ./test-results]
+        #[arg(long)]
+        artifacts_dir: Option<PathBuf>,
+        /// Skip, instead of fail, tests whose required capabilities the backend lacks
+        #[arg(long)]
+        skip_unsupported: bool,
+    },
     /// Check the environment without touching a running session
     Doctor {
         #[arg(long)]
@@ -74,6 +97,8 @@ enum Command {
         config: Option<PathBuf>,
         #[arg(long)]
         headless: bool,
+        #[arg(long = "reverse")]
+        reverse: Vec<u16>,
     },
 }
 
@@ -114,9 +139,10 @@ fn run(cli: Cli) -> Result<u8> {
             serial,
             config,
             headless,
+            reverse,
         } => {
             let launch = resolve_launch(dhu_path, serial, config, headless)?;
-            let s = session::start(&launch)?;
+            let s = session::start(&launch, &reverse)?;
             print_status(&s, json);
             Ok(0)
         }
@@ -153,6 +179,18 @@ fn run(cli: Cli) -> Result<u8> {
             print_screenshot(&session::screenshot(&abs)?, json);
             Ok(0)
         }
+        Command::Test {
+            paths,
+            report,
+            artifacts_dir,
+            skip_unsupported,
+        } => test_cmd::run(test_cmd::Options {
+            paths,
+            report,
+            artifacts_dir,
+            skip_unsupported,
+            json,
+        }),
         Command::Doctor { dhu_path } => {
             let checks = doctor::run(dhu_path);
             if json {
@@ -178,13 +216,17 @@ fn run(cli: Cli) -> Result<u8> {
             serial,
             config,
             headless,
+            reverse,
         } => {
-            session::supervise(DhuLaunch {
-                program: dhu_path,
-                serial,
-                config,
-                headless,
-            })?;
+            session::supervise(
+                DhuLaunch {
+                    program: dhu_path,
+                    serial,
+                    config,
+                    headless,
+                },
+                reverse,
+            )?;
             Ok(0)
         }
     }
@@ -324,22 +366,30 @@ fn print_status(s: &session::StatusInfo, json: bool) {
         println!("{}", serde_json::to_string_pretty(s).expect("serializes"));
         return;
     }
-    let v = &s.video_focus;
+    let h = &s.head_unit;
+    let v = &h.video_focus;
+    let serial = h.serial.as_deref().unwrap_or("unknown");
     println!("AutoLab {}\n", env!("CARGO_PKG_VERSION"));
     println!(
         "Backend:      {} ({}, build {})",
-        s.backend,
-        s.dhu_version.as_deref().unwrap_or("unknown version"),
-        s.dhu_build.as_deref().unwrap_or("unknown")
+        h.backend,
+        h.backend_version.as_deref().unwrap_or("unknown version"),
+        h.backend_build.as_deref().unwrap_or("unknown")
     );
-    println!("State:        {}", s.state);
-    println!("Transport:    {} (serial {})", s.transport, s.serial);
+    let state = match h.state {
+        SessionState::Running => "running",
+    };
+    println!("State:        {state}");
+    println!("Transport:    {} (serial {serial})", s.transport);
     println!(
         "Video focus:  requested {}; DHU reports {}; phone confirmed {}",
         focus_word(v.requested),
         focus_word(v.backend_reported),
         focus_word(v.observed)
     );
+    for t in &s.tunnels {
+        println!("Tunnel:       adb reverse tcp:{} ({:?})", t.port, t.state);
+    }
     println!(
         "Session:      supervisor pid {}, dhu pid {}",
         s.supervisor_pid, s.dhu_pid

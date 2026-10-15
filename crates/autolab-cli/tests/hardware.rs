@@ -15,8 +15,19 @@ fn real_dhu_video_focus_round_trip() {
         return;
     }
     let s = Sandbox::new();
-    let start = s.autolab(&["start", "--headless"]);
+    // An arbitrary port, so the test never disturbs a tunnel the user relies on.
+    let start = s.autolab(&["start", "--headless", "--reverse", "47123"]);
     assert_eq!(code(&start), 0, "{}", text(&start));
+    // Independent of AutoLab: ask adb itself.
+    let list = std::process::Command::new("adb")
+        .args(["reverse", "--list"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&list.stdout).contains("tcp:47123 tcp:47123"),
+        "adb does not list the tunnel: {}",
+        String::from_utf8_lossy(&list.stdout)
+    );
 
     // Includes repeated same-state calls: those exposed a stdout/stderr ordering bug once.
     for arg in [
@@ -43,6 +54,28 @@ fn real_dhu_video_focus_round_trip() {
         "screenshot looks empty"
     );
     let _ = std::fs::remove_file(&shot);
+
+    // Milestone 3: the YAML runner against the real session, checked through its JSON report.
+    for example in ["video-focus.yaml", "focus-status.yaml", "screenshots.yaml"] {
+        let art = s.scratch(&format!("art-{example}"));
+        let path = format!("{}/../../examples/{example}", env!("CARGO_MANIFEST_DIR"));
+        let o = s.autolab(&["test", &path, "--artifacts-dir", art.to_str().unwrap()]);
+        assert_eq!(code(&o), 0, "{example}: {}", text(&o));
+        let r: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(art.join("results.json")).unwrap()).unwrap();
+        assert_eq!(r["tests"][0]["outcome"], "passed", "{example}");
+        assert!(
+            r["metadata"]["backend"]["version"].is_string(),
+            "real DHU version recorded"
+        );
+    }
+    let shot = s
+        .scratch("art-video-focus.yaml")
+        .join("screenshots/restored.png");
+    assert!(
+        std::fs::metadata(&shot).unwrap().len() > 1000,
+        "runner screenshot looks empty"
+    );
 
     let st = s.status_json();
     let dhu = st["dhuPid"].as_u64().unwrap();

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use std::path::Path;
 
-use crate::{OperationResult, Result, ScreenshotResult};
+use crate::{HeadUnitStatus, OperationResult, Result, ScreenshotResult};
 
 /// Capability levels. `Unverified` means "not yet proven against real hardware".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,9 @@ pub struct Capabilities {
 /// The only way callers (CLI, future test runner, daemon) reach a head unit.
 /// Deliberately small: grow it only when a verified operation needs it.
 pub trait HeadUnitBackend {
-    fn capabilities(&self) -> Capabilities;
+    /// Queried, not cached: a backend may need to ask a live session.
+    fn capabilities(&mut self) -> Result<Capabilities>;
+    fn status(&mut self) -> Result<HeadUnitStatus>;
     fn set_video_focus(&mut self, enabled: bool) -> Result<OperationResult>;
     /// Write a PNG of the projected display to `path` (absolute) and verify it exists.
     fn screenshot(&mut self, path: &Path) -> Result<ScreenshotResult>;

@@ -1,0 +1,26 @@
+# Status assertions. `backendReported` is the DHU's own readback. `observed` (phone-confirmed) is
+# always unknown today, so asserting it would fail by design.
+name: Focus changes are tracked
+
+requirements:
+  - videoFocus
+
+steps:
+  - action: focus.video
+    value: off
+
+  - action: assert.status
+    expect:
+      state: running
+      videoFocus:
+        requested: off
+        backendReported: off
+
+  - action: focus.video
+    value: on
+
+  - action: waitFor
+    condition:
+      videoFocus:
+        backendReported: on
+    timeout: 5s

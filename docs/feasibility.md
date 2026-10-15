@@ -210,8 +210,15 @@ Options for teams that already launch the DHU from their own script (not impleme
   (`TcpMetricsLogger: connect … dst=[127.0.0.1]:10101 … err=111`, connection refused), and the projected app showed a retry state. After the AutoLab sessions, `adb reverse --list` was empty.
 - **Inferred:** the accessory-mode switch re-enumerates the phone over USB, which drops `adb reverse` and
   `adb forward` tunnels. The user's own launch script says the same in a comment and re-applies its `adb reverse` tunnel after the switch.
-- AutoLab does not create tunnels. They are specific to the app under test. Anyone who needs one (for
-  example a mock-server port) has to re-apply it after `autolab start`. This is not yet automated.
+- **Handled:** `autolab start --reverse PORT` (repeatable) runs `adb reverse tcp:PORT tcp:PORT` once the DHU is
+  attached, because the switch is what drops them. A tunnel counts only after `adb reverse --list` shows it;
+  otherwise `start` fails and the DHU is stopped, so a session never looks healthy while the app cannot reach its
+  backend. `status` re-checks each tunnel against `adb reverse --list` (`active`, `missing` or `unknown`). Only the
+  ports asked for are added, and nothing is ever removed.
+- **Verified on the phone:** after `autolab start --reverse 10101`, `adb reverse --list` independently showed
+  `UsbFfs tcp:10101 tcp:10101`.
+- **Not handled:** tunnels dropped by a *later* re-enumeration while the session runs are reported as `missing`
+  but not re-applied. The user's script does re-apply them in a loop.
 
 ## 8. Capabilities (DHU 2.0 + Android Auto 18.0.164204, USB)
 
@@ -262,15 +269,20 @@ selection is unit-tested; the wait itself was checked by hand, not by an automat
 
 ## 10. What is implemented
 
-`autolab start | stop | status | focus video on|off | screenshot | doctor`, with `--json` (camelCase keys), deterministic
+`autolab start [--reverse PORT]… | stop | status | focus video on|off | screenshot | test | doctor`, with `--json` (camelCase keys), deterministic
 exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `autolab-core`. USB transport only. `doctor` is
 read-only and warns about a DHU that AutoLab does not own.
 
 `autolab screenshot PATH|-o PATH` validates the path (must end in `.png`, no whitespace, existing directory),
 removes any stale file, and reports the path and size of the file that was actually written.
 
+`autolab test PATH…` runs YAML tests through the backend trait (`autolab-test` depends only on `autolab-core`);
+see [testing.md](testing.md). Verified on the phone with `examples/video-focus.yaml`, `focus-status.yaml` and
+`screenshots.yaml`, and the generated JUnit passes `xmllint`.
+
 Not implemented: HTTP daemon, event stream, night mode, driving restrictions, audio and
-nav focus, TOML config file, YAML test runner, `--adb` transport, device selection beyond `--serial`.
+nav focus, TOML config file, `--adb` transport, device selection beyond `--serial`, clean Ctrl+C handling in
+`autolab test`.
 
 ## 11. Tests and how to run them
 

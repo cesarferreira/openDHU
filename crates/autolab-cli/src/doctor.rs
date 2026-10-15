@@ -2,8 +2,8 @@
 //! so it is safe to run while a session is active.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use autolab_dhu::{adb, console, discovery};
 use serde::Serialize;
@@ -36,32 +36,7 @@ fn check(level: Level, name: &str, detail: impl Into<String>) -> Check {
 
 /// Run `program args` with a hard deadline and return its stdout+stderr.
 fn run_bounded(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let end = Instant::now() + limit;
-    loop {
-        match child.try_wait().ok()? {
-            Some(_) => {
-                let out = child.wait_with_output().ok()?;
-                return Some(format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                ));
-            }
-            None if Instant::now() >= end => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            None => std::thread::sleep(Duration::from_millis(20)),
-        }
-    }
+    adb::run_bounded(program, args, limit).map(|o| format!("{}{}", o.stdout, o.stderr))
 }
 
 /// Parse `pgrep` output (one pid per line).
@@ -162,7 +137,11 @@ pub fn run(explicit_dhu: Option<PathBuf>) -> Vec<Check> {
         Some(s) => out.push(check(
             Level::Info,
             "session",
-            format!("running (dhu pid {}, serial {})", s.dhu_pid, s.serial),
+            format!(
+                "running (dhu pid {}, serial {})",
+                s.dhu_pid,
+                s.head_unit.serial.as_deref().unwrap_or("unknown")
+            ),
         )),
         None => out.push(check(Level::Info, "session", "none running")),
     }

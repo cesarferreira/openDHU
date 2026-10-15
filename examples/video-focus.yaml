@@ -1,0 +1,22 @@
+# From the PRD. It checks that the commands were accepted and that a screenshot can be taken once
+# focus is back. It does NOT prove the app recovered; that needs an app-level assertion.
+name: Video focus recovery
+
+backend: dhu
+
+requirements:
+  - videoFocus
+  - screenshots
+
+steps:
+  - action: focus.video
+    value: off
+
+  - action: wait
+    duration: 1s
+
+  - action: focus.video
+    value: on
+
+  - action: screenshot
+    path: screenshots/restored.png

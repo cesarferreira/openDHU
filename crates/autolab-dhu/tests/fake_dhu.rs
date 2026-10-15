@@ -216,7 +216,7 @@ fn screenshot_is_verified_on_disk_and_sized_from_the_png() {
     assert_eq!((r.width, r.height), (1280, 720));
     assert_eq!(r.path, path);
     assert!(path.is_file());
-    assert_eq!(b.capabilities().screenshots, Support::Supported);
+    assert_eq!(b.capabilities().unwrap().screenshots, Support::Supported);
     let _ = std::fs::remove_file(&path);
 }
 
@@ -276,4 +276,17 @@ fn screenshot_rejects_relative_and_whitespace_paths_without_touching_the_console
         b.set_video_focus(true).unwrap().backend_reported,
         FocusState::On
     );
+}
+
+#[test]
+fn status_reports_only_what_the_dhu_can_tell() {
+    let mut b = backend();
+    b.set_video_focus(false).unwrap();
+    let st = b.status().unwrap();
+    assert_eq!(st.backend, "dhu");
+    assert_eq!(st.backend_version.as_deref(), Some("0.0-fake"));
+    assert_eq!(st.video_focus.requested, FocusState::Off);
+    assert_eq!(st.video_focus.backend_reported, FocusState::Off);
+    assert_eq!(st.video_focus.observed, FocusState::Unknown);
+    assert_eq!(st.serial, None, "no launch, so no serial is known");
 }

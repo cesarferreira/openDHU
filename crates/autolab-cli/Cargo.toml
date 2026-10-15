@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 autolab-core = { path = "../autolab-core" }
 autolab-dhu = { path = "../autolab-dhu" }
+autolab-test = { path = "../autolab-test" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

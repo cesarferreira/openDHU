@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, OperationResult, Result, ScreenshotResult,
-    Support,
+    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, OperationResult, Result,
+    ScreenshotResult, SessionState, Support, VideoFocusStatus,
 };
 
 use crate::console::{self, DhuInfo};
@@ -47,12 +47,15 @@ pub struct DhuBackend {
     proc: DhuProcess,
     info: DhuInfo,
     requested_video: FocusState,
+    serial: Option<String>,
 }
 
 impl DhuBackend {
     pub fn launch(launch: &DhuLaunch) -> Result<Self> {
         let proc = DhuProcess::spawn(&launch.program, &launch.args(), &[])?;
-        Self::from_process(proc, READY_TIMEOUT)
+        let mut backend = Self::from_process(proc, READY_TIMEOUT)?;
+        backend.serial = Some(launch.serial.clone());
+        Ok(backend)
     }
 
     /// Wrap an already spawned process (used by tests with a fake DHU).
@@ -63,6 +66,7 @@ impl DhuBackend {
             proc,
             info,
             requested_video: FocusState::Unknown,
+            serial: None,
         })
     }
 
@@ -93,12 +97,31 @@ impl DhuBackend {
 }
 
 impl HeadUnitBackend for DhuBackend {
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
+    fn capabilities(&mut self) -> Result<Capabilities> {
+        Ok(Capabilities {
             backend: "dhu".into(),
             video_focus: Support::Supported,
             screenshots: Support::Supported,
+        })
+    }
+
+    fn status(&mut self) -> Result<HeadUnitStatus> {
+        if let Some(st) = self.exit_status() {
+            return Err(Error::BackendUnavailable(format!("DHU has exited ({st})")));
         }
+        let backend_reported = self.read_video_focus()?;
+        Ok(HeadUnitStatus {
+            backend: "dhu".into(),
+            state: SessionState::Running,
+            serial: self.serial.clone(),
+            backend_version: self.info.version.clone(),
+            backend_build: self.info.build.clone(),
+            video_focus: VideoFocusStatus {
+                requested: self.requested_video,
+                backend_reported,
+                observed: FocusState::Unknown,
+            },
+        })
     }
 
     fn set_video_focus(&mut self, enabled: bool) -> Result<OperationResult> {

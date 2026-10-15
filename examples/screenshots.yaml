@@ -1,0 +1,13 @@
+# The DHU refuses screenshots while video focus is off, so capture only with focus on.
+name: Screenshot while projecting
+
+requirements:
+  - screenshots
+
+steps:
+  - action: assert.status
+    expect:
+      state: running
+
+  - action: screenshot
+    path: screenshots/home.png

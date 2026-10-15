@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
+pub fn fake_adb_dir() -> String {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/bin").to_string()
+}
+
 pub fn fake_dhu() -> String {
     concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -49,6 +53,42 @@ impl Sandbox {
         self.autolab(&["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"])
     }
 
+    /// Env that puts the fake adb first on PATH, with its state kept next to the sandbox.
+    pub fn adb_env(&self, mode: &str) -> Vec<(String, String)> {
+        let state = self.adb_state();
+        std::fs::create_dir_all(&state).unwrap();
+        vec![
+            ("FAKE_ADB_STATE".into(), state.display().to_string()),
+            ("FAKE_ADB_MODE".into(), mode.into()),
+            (
+                "PATH".into(),
+                format!(
+                    "{}:{}",
+                    fake_adb_dir(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            ),
+        ]
+    }
+
+    pub fn adb_state(&self) -> PathBuf {
+        PathBuf::from(format!("{}-adb", self.dir.display()))
+    }
+
+    pub fn adb_calls(&self) -> String {
+        std::fs::read_to_string(self.adb_state().join("calls.log")).unwrap_or_default()
+    }
+
+    pub fn autolab_with(&self, args: &[&str], env: &[(String, String)]) -> Output {
+        let pairs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        self.autolab_env(args, &pairs)
+    }
+
+    /// A scratch path next to the runtime dir, removed on drop.
+    pub fn scratch(&self, name: &str) -> PathBuf {
+        PathBuf::from(format!("{}-{name}", self.dir.display()))
+    }
+
     pub fn status_json(&self) -> serde_json::Value {
         let o = self.autolab(&["status", "--json"]);
         assert_eq!(code(&o), 0, "{}", text(&o));
@@ -63,6 +103,20 @@ impl Drop for Sandbox {
             .env("AUTOLAB_RUNTIME_DIR", &self.dir)
             .output();
         let _ = std::fs::remove_dir_all(&self.dir);
+        // Everything a test put next to the runtime dir: `-adb`, `-shot.png`, `-art`, `-tests`.
+        if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name()) {
+            let prefix = format!("{}-", name.to_string_lossy());
+            for e in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+                if e.file_name().to_string_lossy().starts_with(&prefix) {
+                    let p = e.path();
+                    let _ = if p.is_dir() {
+                        std::fs::remove_dir_all(&p)
+                    } else {
+                        std::fs::remove_file(&p)
+                    };
+                }
+            }
+        }
     }
 }
 

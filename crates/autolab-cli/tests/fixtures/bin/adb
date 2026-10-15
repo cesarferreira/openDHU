@@ -1,0 +1,22 @@
+#!/bin/bash
+# Fake adb for tests. $FAKE_ADB_STATE holds calls.log and the `reverse` tunnel list.
+# FAKE_ADB_MODE: normal | reverse-fails | lying-list | no-device
+[ -n "$FAKE_ADB_STATE" ] && echo "$*" >> "$FAKE_ADB_STATE/calls.log"
+[ "$1" = "-s" ] && shift 2
+case "$1" in
+  get-state)
+    if [ "$FAKE_ADB_MODE" = no-device ]; then echo "error: device offline" >&2; exit 1; fi
+    echo device;;
+  reverse)
+    shift
+    case "$1" in
+      --list)
+        [ -f "$FAKE_ADB_STATE/reverse" ] && while read -r p; do echo "UsbFfs tcp:$p tcp:$p"; done < "$FAKE_ADB_STATE/reverse";;
+      --remove|--remove-all) echo "$*" >> "$FAKE_ADB_STATE/removed.log";;
+      *)
+        if [ "$FAKE_ADB_MODE" = reverse-fails ]; then echo "error: closed" >&2; exit 1; fi
+        [ "$FAKE_ADB_MODE" = lying-list ] || echo "${1#tcp:}" >> "$FAKE_ADB_STATE/reverse";;
+    esac;;
+  devices) echo "List of devices attached"; echo "FAKE0001 device usb:1 model:Fake transport_id:1";;
+esac
+exit 0

@@ -269,6 +269,14 @@ fn screenshot_the_dhu_accepts_but_never_writes_is_a_timeout() {
     let o = s.autolab(&["screenshot", &file]);
     assert_eq!(code(&o), 6, "{}", text(&o));
     assert!(text(&o).contains("did not appear"), "{}", text(&o));
+    // Regression: the supervisor once sent the already-prefixed Display text, so the client
+    // printed "timed out: timed out: ...".
+    assert_eq!(
+        text(&o).matches("timed out").count(),
+        1,
+        "doubled prefix: {}",
+        text(&o)
+    );
 }
 
 #[test]
