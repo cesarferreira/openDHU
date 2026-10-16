@@ -1,0 +1,36 @@
+[package]
+name = "android-auto"
+description = "A crate for implementing the android auto protocol."
+version = "0.3.8"
+edition = "2024"
+repository = "https://github.com/uglyoldbob/android-auto.git"
+publish = ["crates-io"]
+license = "LGPL-3.0-or-later"
+
+[dependencies]
+async-trait = "0.1.88"
+aws-lc-rs = "1.13.1"
+bitfield = "0.19.0"
+bluetooth-rust = { version = "0.3.8", optional = true }
+enum_dispatch = "0.3.13"
+futures = "0.3.30"
+log = "0.4.27"
+nusb = { version = "0.2.2", features = ["tokio"], optional = true }
+protobuf = "3.7.2"
+# Pinned: the patched rustls-webpki (vendor/rustls-webpki) is 0.103.9, so rustls must ask for no newer.
+rustls = { version = "=0.23.37", features=["ring"]}
+serde = {version = "1.0.219", features = ["derive"]}
+tokio = { version = "1.40.0", features = ["full"] }
+webpki-roots = "0.26.9"
+
+[build-dependencies]
+protobuf-codegen = "3.7.2"
+
+[features]
+default = ["usb"]
+wireless = ["dep:bluetooth-rust"]
+usb = ["dep:nusb"]
+
+# Third-party code: its warnings are not ours to fix. Keep the diff against upstream small.
+[lints.rust]
+warnings = "allow"
