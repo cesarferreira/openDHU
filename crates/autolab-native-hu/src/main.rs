@@ -13,6 +13,19 @@ use std::sync::Arc;
 use autolab_native::protocol::{self, Event, Line};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+/// Logs go to stderr: stdout carries protocol lines only, and a log line there would be taken for junk.
+struct StderrLogger;
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+    fn log(&self, r: &log::Record) {
+        eprintln!("[{}] {}: {}", r.level(), r.target(), r.args());
+    }
+    fn flush(&self) {}
+}
+
 /// Every protocol line goes through here so two tasks never interleave bytes in one line.
 pub fn emit(line: &Line) {
     let text = protocol::encode(line);
@@ -37,9 +50,7 @@ pub fn emit_video(data: &[u8], burst: bool) {
 #[tokio::main]
 async fn main() {
     if std::env::var_os("AUTOLAB_NATIVE_LOG").is_some() {
-        let _ = simple_logger::SimpleLogger::new()
-            .with_level(log::LevelFilter::Info)
-            .init();
+        let _ = log::set_logger(&StderrLogger).map(|()| log::set_max_level(log::LevelFilter::Info));
     }
     let setup = android_auto::setup();
     let hu = Arc::new(headunit::Shared::new());

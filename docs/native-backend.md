@@ -70,7 +70,8 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 
 ## Limits
 
-- **Audio, navigation, night mode, driving restrictions, multi-touch and keys are not implemented.** The head unit
+- **Car buttons are sent but not proven.** `autolab key home|back|up|down|...` sends Android key presses, and the phone binds all 13 buttons we declare (it asks for exactly those). But on a Pixel 6 none of Home, Back, the arrows or a long press visibly changed the screen in my tests, so `keyInput` stays `unverified` and the key YAML step cannot be required. Treat buttons as experimental. The cause is unknown: either a detail of the key message that I have wrong, or Android Auto ignoring them on a touch head unit.
+- **Audio, navigation, night mode, driving restrictions and multi-touch are not implemented.** The head unit
   answers the phone's sensor requests with fixed values (daytime, unrestricted). Those capabilities stay `unverified`.
 - **Touch is fire-and-forget.** `autolab tap X Y` and `autolab swipe X1 Y1 X2 Y2` send single-finger touches in
   screenshot pixels (800×480). The phone never acknowledges them, so the result is `accepted` at best.

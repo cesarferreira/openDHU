@@ -256,8 +256,24 @@ fn live_card(
         };
         let width = ui.available_width().min(800.0);
         let size = egui::vec2(width, width * 480.0 / 800.0);
-        let response =
-            ui.add(egui::Image::new((texture.id(), size)).sense(egui::Sense::click_and_drag()));
+        // When the phone has stopped projecting the last picture is old. Dim it and say so, and do not
+        // send touches: the head unit refuses them anyway.
+        let stopped = state.phone_stopped_projecting();
+        let mut image = egui::Image::new((texture.id(), size));
+        if stopped {
+            image = image.tint(Color32::from_gray(70));
+        } else {
+            image = image.sense(egui::Sense::click_and_drag());
+        }
+        let response = ui.add(image);
+        if stopped {
+            ui.label(
+                RichText::new(
+                    "Video focus is off: the phone has stopped sending the picture, so this is its last one. Click Focus on below.",
+                )
+                .color(WARN),
+            );
+        }
         ui.label(
             RichText::new("This is the head unit display, as a car would show it. Click to tap, drag to swipe: touches go to the phone.")
                 .color(DIM),
@@ -275,6 +291,9 @@ fn live_card(
                 }
             }
             ui.checkbox(&mut form.long_press, "long press");
+            ui.label(
+                RichText::new("buttons are experimental: the phone may ignore them").color(DIM),
+            );
         });
         let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size());
         if response.drag_started()
@@ -896,6 +915,31 @@ mod tests {
         frame(&mut state, &mut form);
         form.live = false;
         frame(&mut state, &mut form);
+    }
+
+    #[test]
+    fn a_session_whose_phone_stopped_projecting_is_recognised_and_draws_dimmed() {
+        let ctx = egui::Context::default();
+        let mut state = native_state_with_a_shot(&ctx);
+        assert!(!state.phone_stopped_projecting());
+        if let Conn::Connected(s) = &mut state.conn {
+            s.session
+                .as_mut()
+                .unwrap()
+                .details
+                .as_mut()
+                .unwrap()
+                .head_unit
+                .video_focus
+                .observed = autolab_core::FocusState::Off;
+        }
+        assert!(state.phone_stopped_projecting());
+        state.live_texture = Some(ctx.load_texture(
+            "live",
+            egui::ColorImage::filled([800, 480], Color32::BLUE),
+            egui::TextureOptions::LINEAR,
+        ));
+        frame(&mut state, &mut Form::new());
     }
 
     #[test]

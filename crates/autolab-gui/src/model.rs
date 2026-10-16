@@ -95,6 +95,18 @@ impl State {
         }
     }
 
+    /// The phone itself has said it stopped projecting (video focus off). Its last picture is old.
+    pub fn phone_stopped_projecting(&self) -> bool {
+        match &self.conn {
+            Conn::Connected(s) => s
+                .session
+                .as_ref()
+                .and_then(|s| s.details.as_ref())
+                .is_some_and(|d| d.head_unit.video_focus.observed == autolab_core::FocusState::Off),
+            Conn::Disconnected => false,
+        }
+    }
+
     /// A native session is up and running: the only kind that has live video and touch.
     pub fn native_running(&self) -> bool {
         match &self.conn {

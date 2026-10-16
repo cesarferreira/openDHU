@@ -128,6 +128,7 @@ impl ChannelHandlerTrait for InputChannelHandler {
         if let Ok(msg2) = msg2 {
             match msg2 {
                 InputMessage::BindingRequest(chan, m) => {
+                    log::info!("PHONE input binding request for key codes {:?}", m.scan_codes);
                     let mut status = true;
                     let ics = main.retrieve_input_configuration();
                     for c in &m.scan_codes {
