@@ -18,4 +18,5 @@ async-trait = "0.1"
 log = "0.4"
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "sync", "time", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "sync", "time", "process", "fs"] }
+image.workspace = true
