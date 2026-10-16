@@ -20,6 +20,7 @@ fn launch(mode: &str, ready: Duration) -> Result<NativeBackend, Error> {
     let launch = NativeLaunch {
         program: fake(),
         serial: Some("FAKE0001".into()),
+        tcp: None,
     };
     unsafe { std::env::set_var("FAKE_NATIVE_MODE", mode) };
     let r = NativeBackend::launch_with_ready_timeout(&launch, &[] as &[&str], ready);
@@ -135,6 +136,7 @@ fn a_missing_program_is_backend_unavailable() {
     let err = NativeBackend::launch(&NativeLaunch {
         program: "/no/such/autolab-native-hu".into(),
         serial: None,
+        tcp: None,
     })
     .err()
     .unwrap();
@@ -274,4 +276,20 @@ fn status_preserves_the_loaded_certificate_source() {
         let status = serde_json::to_value(backend.status().unwrap()).unwrap();
         assert_eq!(status["certificateSource"].as_str(), expected);
     }
+}
+
+#[test]
+fn tcp_endpoint_is_passed_to_the_child_for_this_session() {
+    let launch = NativeLaunch {
+        program: "/bin/sh".into(),
+        serial: None,
+        tcp: Some("127.0.0.1:15277".into()),
+    };
+    let script = r#"[ "$AUTOLAB_NATIVE_TCP" = "127.0.0.1:15277" ] || exit 9
+printf '%s\n' '{"event":"ready","backend_version":"tcp-test","backend_build":"test"}'
+cat >/dev/null"#;
+    let backend =
+        NativeBackend::launch_with_ready_timeout(&launch, &["-c", script], Duration::from_secs(2))
+            .unwrap();
+    drop(backend);
 }

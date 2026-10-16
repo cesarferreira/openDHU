@@ -74,6 +74,7 @@ impl Clock for SystemClock {
 }
 
 pub struct RunConfig<'a> {
+    pub app_label: Option<&'a str>,
     /// Screenshot paths in tests are relative to this directory.
     pub artifacts_dir: &'a Path,
     /// Skip, rather than fail, a test whose required capabilities the backend lacks.
@@ -364,6 +365,15 @@ fn restore_focus(backend: &mut dyn HeadUnitBackend) -> End {
 
 fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     match step {
+        Step::AppOpen => open_app(backend, cfg),
+        Step::UiWaitFor { text, timeout } | Step::UiExpect { text, timeout } => {
+            screen_text(text, timeout.0, false, false, None, backend, cfg)
+        }
+        Step::UiTap {
+            text,
+            timeout,
+            until,
+        } => screen_text(text, timeout.0, true, false, until.as_deref(), backend, cfg),
         Step::FocusVideo { value } => focus_video(value.focus_state(), backend),
         Step::Wait { duration } => {
             cfg.clock.sleep(duration.0);
@@ -504,4 +514,132 @@ fn screenshot(rel: &str, backend: &mut dyn HeadUnitBackend, artifacts: &Path) ->
         Ok(r) => End::pass(format!("saved {rel} ({}x{})", r.width, r.height)),
         Err(e) => End::error(&e),
     }
+}
+
+static SCREEN_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn screen_text(
+    text: &str,
+    timeout: Duration,
+    tap: bool,
+    launcher: bool,
+    until: Option<&str>,
+    backend: &mut dyn HeadUnitBackend,
+    cfg: &RunConfig,
+) -> End {
+    let id = SCREEN_ID.fetch_add(1, Ordering::Relaxed);
+    let dir = cfg.artifacts_dir.join("ui");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return End::error(&Error::Other(e.to_string()));
+    }
+    let image = dir.join(format!("screen-{id:04}.png"));
+    let deadline = cfg.clock.now() + timeout;
+    let mut last = String::new();
+    loop {
+        if cfg.clock.cancelled() {
+            return End::interrupted("interrupted while observing projected UI");
+        }
+        if let Err(e) = backend.screenshot(&image) {
+            return End::error(&e);
+        }
+        let words = match crate::screen::recognize(&image, || cfg.clock.cancelled()) {
+            Ok(words) => words,
+            Err(e) => return End::error(&e),
+        };
+        // Completion wins over another tap, including when the desired screen was already open.
+        if let Some(result) = until
+            && crate::screen::locate(&words, result).is_some()
+        {
+            return End::pass(format!(
+                "projected result {result:?} visible after tapping {text:?}; {}",
+                image.display()
+            ));
+        }
+        let found = if launcher {
+            crate::screen::locate_in_region(&words, text, 70, 410)
+        } else {
+            crate::screen::locate(&words, text)
+        };
+        if let Some((x, y)) = found {
+            if tap {
+                // Never tap after the observation deadline; a final screenshot can still prove
+                // completion, but should not send another action that cannot be observed.
+                if until.is_none() || cfg.clock.now() < deadline {
+                    if let Err(e) = backend.tap(x, y) {
+                        return End::error(&e);
+                    }
+                    if until.is_none() {
+                        return End::pass(format!(
+                            "tapped projected text {text:?} at ({x}, {y}); assert on the result"
+                        ));
+                    }
+                }
+            }
+            if !tap {
+                return End::pass(format!(
+                    "projected text {text:?} visible; {}",
+                    image.display()
+                ));
+            }
+        }
+        let seen = crate::screen::text(&words);
+        if seen != last {
+            last = seen;
+        }
+        let now = cfg.clock.now();
+        if now >= deadline {
+            return End::timeout(format!(
+                "{}; last OCR: {last}; screenshot: {}",
+                until.map_or_else(
+                    || format!("projected text {text:?} not visible"),
+                    |result| format!(
+                        "projected result {result:?} not visible after tapping {text:?}"
+                    ),
+                ),
+                image.display()
+            ));
+        }
+        let pause = if until.is_some() { 500 } else { 250 };
+        cfg.clock
+            .sleep(Duration::from_millis(pause).min(deadline - now));
+    }
+}
+
+fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
+    let Some(label) = cfg.app_label else {
+        return End::error(&Error::InvalidArgs(
+            "app.open requires a suite environment.appLabel".into(),
+        ));
+    };
+    // Host launcher position is part of the currently supported native 800x480 profile.
+    // From an app the first tap opens the dashboard; a second opens its app grid.
+    for _ in 0..3 {
+        if cfg.clock.cancelled() {
+            return End::interrupted("interrupted while opening app");
+        }
+        if let Err(e) = backend.tap(770, 452) {
+            return End::error(&e);
+        }
+        cfg.clock.sleep(Duration::from_secs(1));
+        // Launcher labels may be ellipsized. A stable prefix is sufficient; app content is asserted next.
+        let prefix: String = label.chars().take(12).collect();
+        let result = screen_text(
+            &prefix,
+            Duration::from_secs(2),
+            true,
+            true,
+            None,
+            backend,
+            cfg,
+        );
+        if result.outcome == Outcome::Passed {
+            return result;
+        }
+        if result.outcome == Outcome::Error {
+            return result;
+        }
+    }
+    End::timeout(format!(
+        "app {label:?} was not visible in the Android Auto launcher"
+    ))
 }

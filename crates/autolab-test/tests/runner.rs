@@ -29,6 +29,7 @@ fn run(
         "t.yaml",
         backend,
         &RunConfig {
+            app_label: None,
             artifacts_dir: &dir,
             skip_unsupported: skip,
             clock: &clock,
@@ -274,6 +275,7 @@ fn run_cancelling(
         "t.yaml",
         backend,
         &RunConfig {
+            app_label: None,
             artifacts_dir: &dir,
             skip_unsupported: false,
             clock: &clock,

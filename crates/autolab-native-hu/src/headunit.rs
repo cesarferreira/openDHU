@@ -745,8 +745,14 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
         }
         .into(),
     );
-    let mut tasks = tokio::task::JoinSet::new();
-    Box::new(Hu(hu)).run(config, &mut tasks, setup).await
+    if let Some(endpoint) = env_value("AUTOLAB_NATIVE_TCP") {
+        let endpoint =
+            autolab_native::validate_tcp_endpoint(&endpoint).map_err(|e| e.to_string())?;
+        Box::new(Hu(hu)).run_tcp(config, endpoint).await
+    } else {
+        let mut tasks = tokio::task::JoinSet::new();
+        Box::new(Hu(hu)).run(config, &mut tasks, setup).await
+    }
 }
 
 #[async_trait::async_trait]

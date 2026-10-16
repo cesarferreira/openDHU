@@ -31,6 +31,7 @@ struct RunningSession {
     id: String,
     backend: Arc<Mutex<AnyBackend>>,
     kind: BackendKind,
+    transport: String,
     serial: String,
     tunnels: Arc<Tunnels>,
     stop_keeper: Arc<AtomicBool>,
@@ -143,7 +144,7 @@ impl Daemon {
                 let tunnels = blocking(move || tunnels::status(&serial, &tunnels)).await?;
                 Some(RunningDetails {
                     head_unit: head?,
-                    transport: "usb".into(),
+                    transport: r.transport.clone(),
                     daemon_pid: std::process::id(),
                     dhu_pid,
                     tunnels,
@@ -544,6 +545,12 @@ fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Resu
         id,
         backend: Arc::new(Mutex::new(backend)),
         kind: req.backend,
+        transport: if req.native_tcp.is_some() {
+            "tcp"
+        } else {
+            "usb"
+        }
+        .into(),
         serial,
         tunnels,
         stop_keeper,

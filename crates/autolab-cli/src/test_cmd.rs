@@ -26,6 +26,10 @@ pub enum ReportFormat {
 
 pub struct Options {
     pub paths: Vec<PathBuf>,
+    pub validate: bool,
+    pub cancel: Option<Arc<AtomicBool>>,
+    pub app: Option<crate::suite::Application>,
+    pub runtime_dir: Option<PathBuf>,
     pub report: Vec<ReportFormat>,
     pub artifacts_dir: Option<PathBuf>,
     pub skip_unsupported: bool,
@@ -33,7 +37,7 @@ pub struct Options {
 }
 
 /// Expand files and directories (recursively, sorted) into test files.
-fn collect(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+pub(crate) fn collect(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)?
             .filter_map(|e| e.ok().map(|e| e.path()))
@@ -77,7 +81,7 @@ fn is_yaml(p: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"))
 }
 
-fn parse_all(files: &[PathBuf]) -> Result<Vec<(String, TestFile)>> {
+pub(crate) fn parse_all(files: &[PathBuf]) -> Result<Vec<(String, TestFile)>> {
     let mut tests = Vec::new();
     let mut errors = Vec::new();
     for f in files {
@@ -146,7 +150,7 @@ fn print_test(t: &TestResult) {
 
 /// First Ctrl+C or SIGTERM asks the run to stop cleanly. A second one exits at once, in case a
 /// backend call is stuck and the clean stop never comes.
-fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
+pub(crate) fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
     let flag = Arc::clone(flag);
     ctrlc::set_handler(move || {
         if flag.swap(true, Ordering::SeqCst) {
@@ -157,8 +161,22 @@ fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
 }
 
 pub fn run(opts: Options) -> Result<u8> {
+    if opts.paths.len() == 1 && crate::suite::is_suite(&opts.paths[0])? {
+        return crate::suite::run(opts);
+    }
     let files = collect(&opts.paths)?;
     let tests = parse_all(&files)?; // exit 2 before the session is touched
+    if opts.validate {
+        if opts.json {
+            println!(
+                "{}",
+                serde_json::json!({"valid": true, "tests": tests.len()})
+            );
+        } else {
+            println!("Validated {} test files", tests.len());
+        }
+        return Ok(0);
+    }
     let needs_shots = tests.iter().any(|(_, t)| {
         t.steps
             .iter()
@@ -166,10 +184,20 @@ pub fn run(opts: Options) -> Result<u8> {
     });
     let dir = artifacts_dir(opts.artifacts_dir, needs_shots)?;
 
-    let mut backend = DaemonBackend::new(daemon_ctl::connect()?);
+    let client = match &opts.runtime_dir {
+        Some(dir) => autolab_daemon::Client::connect_in(dir)?,
+        None => daemon_ctl::connect()?,
+    };
+    let mut backend = DaemonBackend::new(client);
     let head = backend.status()?; // no session or dead DHU: exit 3 before any test runs
-    let cancel = Arc::new(AtomicBool::new(false));
-    install_interrupt_handler(&cancel)?;
+    let cancel = match opts.cancel {
+        Some(cancel) => cancel,
+        None => {
+            let cancel = Arc::new(AtomicBool::new(false));
+            install_interrupt_handler(&cancel)?;
+            cancel
+        }
+    };
     let clock = SystemClock::with_cancel(Arc::clone(&cancel));
     let started_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -179,6 +207,7 @@ pub fn run(opts: Options) -> Result<u8> {
         println!("AutoLab Test Runner\n");
     }
     let cfg = RunConfig {
+        app_label: opts.app.as_ref().map(|app| app.label.as_str()),
         artifacts_dir: &dir,
         skip_unsupported: opts.skip_unsupported,
         clock: &clock,
@@ -187,6 +216,9 @@ pub fn run(opts: Options) -> Result<u8> {
     for (file, test) in &tests {
         if cancel.load(Ordering::SeqCst) {
             break;
+        }
+        if let Some(app) = &opts.app {
+            app.reset()?;
         }
         let r = run_test(test, file, &mut backend, &cfg);
         if !opts.json {

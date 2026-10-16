@@ -2,9 +2,11 @@
 //! trait) reaches the session, so it never talks to the DHU directly.
 
 use std::path::Path;
+use std::time::Duration;
 
 use autolab_core::{
-    Capabilities, Error, HeadUnitBackend, HeadUnitStatus, OperationResult, Result, ScreenshotResult,
+    Capabilities, Error, HeadUnitBackend, HeadUnitStatus, InputResult, Key, OperationResult,
+    Result, ScreenshotResult,
 };
 use autolab_daemon::Client;
 use autolab_daemon::api::Phase;
@@ -44,6 +46,23 @@ impl HeadUnitBackend for DaemonBackend {
 
     fn screenshot(&mut self, path: &Path) -> Result<ScreenshotResult> {
         Ok(self.client.screenshot(path)?.result)
+    }
+
+    fn tap(&mut self, x: u32, y: u32) -> Result<InputResult> {
+        Ok(self.client.tap(x, y)?.result)
+    }
+
+    fn swipe(
+        &mut self,
+        from: (u32, u32),
+        to: (u32, u32),
+        duration: Duration,
+    ) -> Result<InputResult> {
+        Ok(self.client.swipe(from, to, duration)?.result)
+    }
+
+    fn press_key(&mut self, key: Key, long_press: bool) -> Result<InputResult> {
+        Ok(self.client.key(key, long_press)?.result)
     }
 
     fn stop(&mut self) -> Result<()> {

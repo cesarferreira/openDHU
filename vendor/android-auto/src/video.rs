@@ -141,7 +141,11 @@ impl ChannelHandlerTrait for VideoChannelHandler {
                 }
                 AvChannelMessage::SetupResponse(_chan, _m) => unimplemented!(),
                 AvChannelMessage::VideoFocusRequest(_chan, m) => {
-                    log::info!("PHONE video FocusRequest mode={:?} reason={:?}", m.focus_mode(), m.focus_reason());
+                    log::info!(
+                        "PHONE video FocusRequest mode={:?} reason={:?}",
+                        m.focus_mode(),
+                        m.focus_reason()
+                    );
                     let mut m2 = Wifi::VideoFocusIndication::new();
                     main.set_focus(m.focus_mode() == Wifi::video_focus_mode::Enum::FOCUSED)
                         .await;

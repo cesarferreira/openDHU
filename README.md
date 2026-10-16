@@ -67,6 +67,7 @@ aa tap 400 240                 # native: touch a pixel of a screenshot
 aa swipe 300 200 100 200 --duration-ms 400
 aa audio out.wav --seconds 10  # native: record what the phone plays
 aa test examples/native-phone-confirms.yaml
+aa test --validate e2e/suite.yaml  # validate a headless emulator suite before device setup
 aa status --json
 aa stop
 ```
@@ -181,7 +182,7 @@ phone, but had no visible effect on a Pixel 6, so they are marked experimental.
 - Starting a session re-enumerates the phone over USB, which drops `adb reverse` tunnels. `--reverse PORT` restores the
   ones you ask for, and AutoLab re-applies them if the phone drops them later.
 - Unplugging the phone ends the session (observed once). Plug it back in and run `aa start` again.
-- USB only, and one head unit can hold a phone at a time: stop any DHU before using the native backend, and the other
+- Native sessions support USB or forwarded loopback TCP. One head unit can hold a phone at a time: stop any DHU before using the native backend, and the other
   way round. With several phones attached, the native backend refuses to guess.
 - The native backend is an unofficial implementation of an undocumented protocol. An Android Auto update on the phone
   can break it; run `make hw-native` after updating.

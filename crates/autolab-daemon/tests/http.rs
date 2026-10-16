@@ -944,6 +944,7 @@ fn touch_on_the_native_backend_emits_input_events_and_stays_out_of_the_focus_eve
     d.client
         .start(&StartRequest {
             backend: autolab_daemon::api::BackendKind::Native,
+            native_tcp: Some("127.0.0.1:15277".into()),
             serial: Some("FAKE0001".into()),
             ..Default::default()
         })
@@ -1024,6 +1025,7 @@ fn live_video_streams_from_a_keyframe_and_ends_with_the_session() {
     d.client
         .start(&StartRequest {
             backend: autolab_daemon::api::BackendKind::Native,
+            native_tcp: Some("127.0.0.1:15277".into()),
             serial: Some("FAKE0001".into()),
             ..Default::default()
         })
@@ -1095,6 +1097,7 @@ fn audio_validates_the_channel_needs_a_session_and_the_native_backend_and_stream
     d.client
         .start(&StartRequest {
             backend: autolab_daemon::api::BackendKind::Native,
+            native_tcp: Some("127.0.0.1:15277".into()),
             serial: Some("FAKE0001".into()),
             ..Default::default()
         })

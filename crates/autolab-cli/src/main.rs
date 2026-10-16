@@ -1,9 +1,11 @@
 mod audio_cmd;
 mod config;
 mod daemon_ctl;
+mod device;
 mod doctor;
 mod output_path;
 mod session_backend;
+mod suite;
 mod test_cmd;
 
 use std::path::PathBuf;
@@ -43,6 +45,9 @@ enum Command {
         /// Android device serial (default: the only authorized adb device)
         #[arg(long)]
         serial: Option<String>,
+        /// Connect native backend to an existing loopback ADB forward (IP:port)
+        #[arg(long)]
+        native_tcp: Option<String>,
         /// DHU .ini configuration file
         #[arg(long)]
         config: Option<PathBuf>,
@@ -123,6 +128,9 @@ enum Command {
         /// Skip, instead of fail, tests whose required capabilities the backend lacks
         #[arg(long)]
         skip_unsupported: bool,
+        /// Validate suite and test files without starting a device or session
+        #[arg(long)]
+        validate: bool,
     },
     /// Check the environment without touching a running session
     Doctor {
@@ -208,6 +216,7 @@ fn run(cli: Cli) -> Result<u8> {
             backend,
             dhu_path,
             serial,
+            native_tcp,
             config,
             headless,
             reverse,
@@ -221,6 +230,7 @@ fn run(cli: Cli) -> Result<u8> {
             let from_file = backend == BackendArg::Dhu;
             let req = StartRequest {
                 backend: backend.into(),
+                native_tcp,
                 serial: config::first(serial, cfg.serial.clone()),
                 dhu_path: config::dhu_path(
                     dhu_path.map(|p| output_path::absolute(&p, &cwd)),
@@ -326,6 +336,7 @@ fn run(cli: Cli) -> Result<u8> {
             report,
             artifacts_dir,
             skip_unsupported,
+            validate,
         } => {
             let cfg = load()?;
             test_cmd::run(test_cmd::Options {
@@ -337,6 +348,10 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
+                validate,
+                cancel: None,
+                app: None,
+                runtime_dir: None,
                 json,
             })
         }

@@ -92,7 +92,7 @@ async fn main() {
     });
 
     let reason = match headunit::run(Arc::clone(&hu), &setup).await {
-        Ok(()) => "the USB link to the phone ended".to_string(),
+        Ok(()) => "the link to the phone ended".to_string(),
         Err(e) => format!("the Android Auto session failed: {e}"),
     };
     emit(&Line::Event(Event::Disconnected { reason }));

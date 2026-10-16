@@ -101,12 +101,29 @@ impl VideoHub {
     }
 }
 
-/// How to launch the head unit. The phone is found by the child itself over USB.
+/// How to launch the head unit over USB or an existing ADB-forwarded TCP connection.
 #[derive(Debug, Clone)]
 pub struct NativeLaunch {
     pub program: PathBuf,
-    /// The adb serial, for status and tunnels only. The child cannot choose among several phones.
+    /// The adb serial, for status and tunnels. USB cannot choose among several phones.
     pub serial: Option<String>,
+    /// A loopback ADB-forwarded Android Auto head-unit server. None uses USB.
+    pub tcp: Option<String>,
+}
+
+/// Only explicit loopback addresses are accepted: this transport is an ADB tunnel.
+pub fn validate_tcp_endpoint(endpoint: &str) -> Result<std::net::SocketAddr> {
+    let address: std::net::SocketAddr = endpoint.parse().map_err(|_| {
+        Error::InvalidArgs(
+            "native TCP endpoint must be a loopback IP:port (for example 127.0.0.1:5277)".into(),
+        )
+    })?;
+    if !address.ip().is_loopback() || address.port() == 0 {
+        return Err(Error::InvalidArgs(
+            "native TCP endpoint must use a loopback address and a nonzero port".into(),
+        ));
+    }
+    Ok(address)
 }
 
 enum Incoming {
@@ -146,7 +163,16 @@ impl NativeBackend {
         args: &[S],
         ready_timeout: Duration,
     ) -> Result<Self> {
-        let mut child = Command::new(&launch.program)
+        if let Some(tcp) = &launch.tcp {
+            validate_tcp_endpoint(tcp)?;
+        }
+        let mut command = Command::new(&launch.program);
+        // Always clear inherited transport configuration; it belongs to this session.
+        command.env_remove("AUTOLAB_NATIVE_TCP");
+        if let Some(tcp) = &launch.tcp {
+            command.env("AUTOLAB_NATIVE_TCP", tcp);
+        }
+        let mut child = command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -642,5 +668,28 @@ mod hub_tests {
             "a viewer that never reads is dropped, not waited for"
         );
         drop(slow);
+    }
+}
+
+#[cfg(test)]
+mod tcp_tests {
+    #[test]
+    fn tcp_endpoint_requires_an_explicit_loopback_socket_and_nonzero_port() {
+        assert_eq!(
+            super::validate_tcp_endpoint("127.0.0.1:15277")
+                .unwrap()
+                .port(),
+            15277
+        );
+        assert!(super::validate_tcp_endpoint("[::1]:5277").is_ok());
+        for invalid in [
+            "localhost:5277",
+            "0.0.0.0:5277",
+            "192.168.1.1:5277",
+            "127.0.0.1:0",
+            "bad",
+        ] {
+            assert!(super::validate_tcp_endpoint(invalid).is_err(), "{invalid}");
+        }
     }
 }

@@ -111,7 +111,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   rather than guess.
 - **Screenshots and the live view need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
   screenshot fails and says so.
-- **USB only.** Wireless Android Auto is not wired up.
+- **USB or forwarded TCP.** Emulator head-unit servers can use loopback TCP (see below). Wireless Bluetooth pairing is not wired up.
 - **Resolution** defaults to 800×480 (480p). `AUTOLAB_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
   daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;
   an unrecognised value falls back to 480p with a warning in the head unit's log.
@@ -131,3 +131,17 @@ scanner will flag them. Allow-list that file.
 
 Check that the patched `rustls-webpki` is really in use with `cargo tree -i rustls-webpki`: it must print a
 `vendor/rustls-webpki` path. Otherwise the phone's X.509 v1 root certificate is rejected and the handshake fails.
+
+## ADB-forwarded TCP transport
+
+To connect an emulator or a phone's Android Auto head-unit server without USB accessory mode:
+
+```bash
+adb -s emulator-5554 forward tcp:15277 tcp:5277
+aa start --backend native --serial emulator-5554 --native-tcp 127.0.0.1:15277
+```
+
+The server must be started in Android Auto's developer settings first. The TCP endpoint must be
+loopback; it is scoped to that session and uses the same TLS authentication and protocol as USB.
+`aa status` reports `Transport: tcp`. Remove manually created forwards when finished. A YAML suite
+manages the server, an ephemeral forward and its isolated session automatically; see [testing](testing.md).

@@ -22,6 +22,10 @@ Changes against upstream:
    dropped the git `[patch]` (the workspace root carries it, pointing at `vendor/rustls-webpki`), and pinned
    `rustls` to `=0.23.37`. The `examples/` directory is not copied.
 
+5. **ADB-forwarded TCP transport** (`src/lib.rs`). Added `AndroidAutoMainTrait::run_tcp` to connect
+   to an existing head-unit server tunnel with a bounded connection timeout. It reuses the USB
+   framing/TLS/discovery handlers and never enumerates or claims USB devices.
+
 `src/cert.rs` holds the head-unit client certificate and its private key that upstream ships. They are the
 public, long-known credentials from the old HeadUnit project, not secrets of ours. They are in the repository on
 purpose: a secret scanner will flag them, and that finding can be allow-listed.

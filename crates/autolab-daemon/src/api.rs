@@ -74,6 +74,9 @@ pub struct StartRequest {
     /// Android device serial. Default: the only authorized adb device.
     #[serde(default)]
     pub serial: Option<String>,
+    /// Native connection to an existing loopback ADB forward; default uses USB.
+    #[serde(default)]
+    pub native_tcp: Option<String>,
     /// DHU executable. Default: discovered from the environment and the Android SDK.
     #[serde(default)]
     pub dhu_path: Option<PathBuf>,

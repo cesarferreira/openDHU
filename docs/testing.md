@@ -66,10 +66,10 @@ videoFocus:
   mean the phone confirmed anything. The step's detail says so every time ("not confirmed by the phone"). With the
   native backend (`backend: native`) a pass means the phone itself sent the matching video start or stop message.
 - `unknown` never satisfies an expectation, and `unknown` cannot be written in a test. Phone-side confirmation is
-  available with the DHU, so there `observed` is always unknown and an assertion on it fails, by design, rather
+  unavailable with the DHU, so there `observed` is always unknown and an assertion on it fails, by design, rather
   than passing on nothing. The native backend does report it ([native-backend.md](native-backend.md)).
-- The PRD's recovery example checks commands and a screenshot. It does not check that an app recovered.
-  That needs an app-level assertion, which does not exist yet.
+- Screenshots alone do not establish recovery. Suite tests can use `ui.expect` to assert visible projected
+  app controls after restoring focus; backend state needs separate assertions.
 - The DHU refuses screenshots while video focus is off, so take screenshots with focus on.
 
 ## Isolation
@@ -136,3 +136,78 @@ Retry policies, image assertions, key steps, event assertions and a Kotlin DSL.
 
 A `tap` or `swipe` step passing means the touch was **sent**. The phone does not acknowledge touch, and the step
 says so. To check that something happened, follow it with a `screenshot` and compare the pictures outside the test.
+
+## Headless Android Auto suites
+
+A suite owns an isolated native TCP session and discovers ordinary test YAML files. Validate it
+without an emulator, APK, or running daemon:
+
+```bash
+aa test --validate e2e/suite.yaml
+aa test e2e/suite.yaml --artifacts-dir test-results/run-001
+```
+
+```yaml
+version: 1
+environment:
+  emulator: medium_phone
+  headless: true
+  apk: ../car-storybook/build/outputs/apk/debug/car-storybook-debug.apk
+  package: ai.wayve.robotui.storybook
+  appLabel: RobotUI Storybook
+tests:
+  - tests/*.yaml
+```
+
+APK and test paths resolve relative to the suite file. The emulator must be a dedicated, provisioned
+Google Play phone AVD with Android Auto installed, developer mode enabled, and initial projection
+consent accepted. `adb`, `ffmpeg`, and `tesseract` with English data must be on PATH. Set `ANDROID_HOME`
+or `ANDROID_SDK_ROOT` to locate the Android SDK emulator, or put `emulator` on PATH.
+
+AutoLab reuses a matching running AVD or starts the SDK emulator with `-no-window` and
+`-no-snapshot-save`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
+Auto's head-unit server through its Settings UI if needed, allocates a device-scoped ADB forward,
+and starts a private daemon. This does not replace an existing physical-phone session. Cleanup
+removes the forward and private daemon; it stops only an emulator that the suite itself started.
+The AVD's user data is preserved: this is not a fresh device image or a production backend test.
+
+Each test force-stops the configured application to reset its navigation stack. It does not erase
+app data or grant permissions. Provisioning is a prerequisite, including English host/device UI.
+
+New projected UI actions:
+
+```yaml
+name: Storybook catalog
+backend: native
+requirements: [touchInput, screenshots]
+steps:
+  - action: app.open
+  - action: ui.waitFor
+    text: RobotUI Storybook
+    timeout: 30s
+  - action: ui.tap
+    text: Navigation / Active route
+    until: Exit map
+    timeout: 30s
+  - action: ui.expect
+    text: Exit map
+    timeout: 30s
+```
+
+`ui.waitFor` and `ui.expect` pass only when text is observed in a screenshot of the projected
+surface. Text matching is case-insensitive and normalizes whitespace. `ui.tap` locates observed
+text and sends a real projected touch; follow it with an assertion of the result. Optional `until`
+requires that result text to become visible and retries the source tap while its text remains visible.
+Use this for navigation where the host can display a cached template during cold startup. All timeouts are
+bounded and interruptible. There is no automatic scrolling: use an explicit swipe for off-screen
+items. `app.open` uses the host launcher and a truncated label prefix; this first implementation
+supports the native 800x480 display profile, which suites explicitly select. OCR requires visible,
+legible text and should not be used to assert map pixels, clocks, or animation timing.
+
+Each suite restarts Android Auto on its dedicated AVD before starting the head-unit server, to
+discard projection threads restored by Quick Boot.
+
+Suites default to fresh `test-results/run-*` directories and both JSON and JUnit reports. They also
+save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screenshots, scaled images, OCR TSVs and
+OCR diagnostics. The private daemon authentication file is removed rather than archived. Inspect
+these artifacts for setup and assertion failures; screenshots alone do not make a test pass.

@@ -497,6 +497,28 @@ pub trait AndroidAutoMainTrait:
         }
     }
 
+    /// Connect directly to Android Auto's head-unit server through an ADB TCP forward.
+    /// This uses the same framing, TLS and discovery as USB, without accessing USB hardware.
+    async fn run_tcp(
+        self: Box<Self>,
+        config: AndroidAutoConfiguration,
+        endpoint: std::net::SocketAddr,
+    ) -> Result<(), String> {
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::net::TcpStream::connect(endpoint),
+        )
+        .await
+        .map_err(|_| format!("TCP connection to {endpoint} timed out"))?
+        .map_err(|e| format!("cannot connect to {endpoint}: {e}"))?;
+        stream.set_nodelay(true).map_err(|e| e.to_string())?;
+        self.connect().await;
+        let (reader, writer) = stream.into_split();
+        let result = handle_client_generic(reader, writer, config, &self).await;
+        self.disconnect().await;
+        result.map_err(|e| format!("TCP Android Auto session: {e:?}"))
+    }
+
     /// Runs the android auto server
     async fn run(
         self: Box<Self>,

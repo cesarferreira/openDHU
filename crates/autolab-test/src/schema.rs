@@ -46,6 +46,20 @@ impl Requirement {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Step {
+    #[serde(rename = "app.open")]
+    AppOpen,
+    #[serde(rename = "ui.waitFor")]
+    UiWaitFor { text: String, timeout: Dur },
+    #[serde(rename = "ui.expect")]
+    UiExpect { text: String, timeout: Dur },
+    #[serde(rename = "ui.tap")]
+    UiTap {
+        text: String,
+        timeout: Dur,
+        /// Retry visible target taps until this result is visible. Omitted means one tap.
+        #[serde(default)]
+        until: Option<String>,
+    },
     #[serde(rename = "focus.video")]
     FocusVideo { value: OnOff },
     #[serde(rename = "wait")]
@@ -82,6 +96,10 @@ pub enum Step {
 impl Step {
     pub fn action(&self) -> &'static str {
         match self {
+            Self::AppOpen => "app.open",
+            Self::UiWaitFor { .. } => "ui.waitFor",
+            Self::UiExpect { .. } => "ui.expect",
+            Self::UiTap { .. } => "ui.tap",
             Self::FocusVideo { .. } => "focus.video",
             Self::Wait { .. } => "wait",
             Self::Screenshot { .. } => "screenshot",
@@ -296,6 +314,22 @@ fn validate(t: &TestFile) -> Result<()> {
         let i = n + 1;
         let a = step.action();
         match step {
+            Step::AppOpen => {}
+            Step::UiWaitFor { text, timeout }
+            | Step::UiExpect { text, timeout }
+            | Step::UiTap { text, timeout, .. } => {
+                check_duration(i, a, "timeout", *timeout)?;
+                if let Step::UiTap {
+                    until: Some(until), ..
+                } = step
+                    && until.trim().is_empty()
+                {
+                    return Err(bad(i, a, "until must not be empty"));
+                }
+                if text.trim().is_empty() {
+                    return Err(bad(i, a, "text must not be empty"));
+                }
+            }
             Step::FocusVideo { .. } => {}
             Step::Wait { duration } => check_duration(i, a, "duration", *duration)?,
             Step::WaitFor { condition, timeout } => {

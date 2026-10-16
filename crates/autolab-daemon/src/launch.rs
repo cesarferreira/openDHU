@@ -17,6 +17,14 @@ const DEVICE_WAIT: Duration = Duration::from_secs(10);
 /// Start the head unit the request asks for. Returns it with the phone's adb serial, which the
 /// session needs for tunnels and status.
 pub fn launch_backend(req: &StartRequest) -> Result<(AnyBackend, String)> {
+    if let Some(tcp) = &req.native_tcp {
+        if req.backend != BackendKind::Native {
+            return Err(Error::InvalidArgs(
+                "`nativeTcp` belongs to the native backend".into(),
+            ));
+        }
+        autolab_native::validate_tcp_endpoint(tcp)?;
+    }
     match req.backend {
         BackendKind::Dhu => {
             let launch = resolve(req)?;
@@ -80,7 +88,8 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
     )?;
     // The native head unit takes whichever Android phone is on USB, so a second phone would make
     // the choice ambiguous. Refuse instead of guessing.
-    if let Ok(adb) = adb_path()
+    if req.native_tcp.is_none()
+        && let Ok(adb) = adb_path()
         && let Ok(devices) = adb::list_devices(&adb)
         && devices.iter().filter(|d| d.state == "device").count() > 1
     {
@@ -100,6 +109,7 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
         NativeLaunch {
             program,
             serial: Some(serial.clone()),
+            tcp: req.native_tcp.clone(),
         },
         serial,
     ))
@@ -242,6 +252,27 @@ mod tests {
         let err = resolve(&req).unwrap_err();
         assert_eq!(err.exit_code(), 3);
         assert!(err.to_string().contains("/no/such/dhu"));
+    }
+
+    #[test]
+    fn tcp_is_rejected_for_dhu_before_discovery_or_device_access() {
+        let req = StartRequest {
+            native_tcp: Some("127.0.0.1:5277".into()),
+            ..Default::default()
+        };
+        let err = launch_backend(&req).err().unwrap();
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("native backend"));
+    }
+
+    #[test]
+    fn non_loopback_tcp_is_rejected_before_discovery_or_device_access() {
+        let req = StartRequest {
+            backend: BackendKind::Native,
+            native_tcp: Some("192.168.1.2:5277".into()),
+            ..Default::default()
+        };
+        assert_eq!(launch_backend(&req).err().unwrap().exit_code(), 2);
     }
 
     #[test]
