@@ -208,9 +208,11 @@ Options for teams that already launch the DHU from their own script (not impleme
 ## 7a. Side effect: USB re-enumeration and adb tunnels
 
 - **Observed:** the first logcat capture shows the phone failing to reach `127.0.0.1:10101`
-  (`TcpMetricsLogger: connect … dst=[127.0.0.1]:10101 … err=111`, connection refused), and the projected app showed a retry state. After the AutoLab sessions, `adb reverse --list` was empty.
+  (`TcpMetricsLogger: connect … dst=[127.0.0.1]:10101 … err=111`, connection refused), and the projected
+  app showed a retry state. After the AutoLab sessions, `adb reverse --list` was empty.
 - **Inferred:** the accessory-mode switch re-enumerates the phone over USB, which drops `adb reverse` and
-  `adb forward` tunnels. The user's own launch script says the same in a comment and re-applies its `adb reverse` tunnel after the switch.
+  `adb forward` tunnels. The user's own launch script says the same in a comment and re-applies
+  its `adb reverse` tunnel after the switch.
 - **Handled:** `autolab start --reverse PORT` (repeatable) runs `adb reverse tcp:PORT tcp:PORT` once the DHU is
   attached, because the switch is what drops them. A tunnel counts only after `adb reverse --list` shows it;
   otherwise `start` fails and the DHU is stopped, so a session never looks healthy while the app cannot reach its
