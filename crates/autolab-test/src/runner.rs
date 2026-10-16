@@ -73,7 +73,15 @@ impl Clock for SystemClock {
     }
 }
 
+/// Device operations scoped to the suite's selected application and phone.
+pub trait ApplicationControl {
+    /// Stop the application process. The runner opens it through the projected launcher afterward.
+    fn restart(&self) -> autolab_core::Result<()>;
+    fn input_text(&self, text: &str) -> autolab_core::Result<()>;
+}
+
 pub struct RunConfig<'a> {
+    pub application: Option<&'a dyn ApplicationControl>,
     pub app_label: Option<&'a str>,
     /// Screenshot paths in tests are relative to this directory.
     pub artifacts_dir: &'a Path,
@@ -365,7 +373,58 @@ fn restore_focus(backend: &mut dyn HeadUnitBackend) -> End {
 
 fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     match step {
+        Step::HttpRequest {
+            method,
+            url,
+            json,
+            expect,
+            timeout,
+        } => match crate::http::execute(*method, url, json.as_ref(), expect, timeout.0, cfg) {
+            Ok(result) => End {
+                outcome: result.outcome,
+                detail: result.detail,
+                code: result.code,
+            },
+            Err(error) => End::error(&error),
+        },
+        Step::KeyboardType { text, timeout } => {
+            match crate::keyboard::type_text(text, timeout.0, backend, cfg) {
+                Ok(detail) => End::pass(detail),
+                Err(error) if cfg.clock.cancelled() => End::interrupted(error.message()),
+                Err(error) => End::error(&error),
+            }
+        }
         Step::AppOpen => open_app(backend, cfg),
+        Step::AppRestart => {
+            let Some(application) = cfg.application else {
+                return End::error(&Error::InvalidArgs(
+                    "app.restart requires a suite application context".into(),
+                ));
+            };
+            if cfg.app_label.is_none() {
+                return End::error(&Error::InvalidArgs(
+                    "app.restart requires a suite environment.appLabel".into(),
+                ));
+            }
+            match application.restart() {
+                Ok(()) => open_app(backend, cfg),
+                Err(error) => End::error(&error),
+            }
+        }
+        Step::DeviceInputText { text } => {
+            if let Err(error) = schema::validate_input_text(text) {
+                return End::error(&error);
+            }
+            let Some(application) = cfg.application else {
+                return End::error(&Error::InvalidArgs(
+                    "device.inputText requires a suite application context".into(),
+                ));
+            };
+            match application.input_text(text) {
+                Ok(()) => End::pass("device text input sent"),
+                Err(error) => End::error(&error),
+            }
+        }
         Step::UiWaitFor { text, timeout } | Step::UiExpect { text, timeout } => {
             screen_text(text, timeout.0, false, false, None, backend, cfg)
         }
@@ -613,19 +672,27 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     };
     // Host launcher position is part of the currently supported native 800x480 profile.
     // From an app the first tap opens the dashboard; a second opens its app grid.
-    for _ in 0..3 {
+    let deadline = cfg.clock.now() + Duration::from_secs(30);
+    while cfg.clock.now() < deadline {
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while opening app");
         }
         if let Err(e) = backend.tap(770, 452) {
             return End::error(&e);
         }
-        cfg.clock.sleep(Duration::from_secs(1));
+        cfg.clock
+            .sleep(Duration::from_secs(1).min(deadline.saturating_sub(cfg.clock.now())));
+        if cfg.clock.cancelled() {
+            return End::interrupted("interrupted while opening app");
+        }
+        if cfg.clock.now() >= deadline {
+            break;
+        }
         // Launcher labels may be ellipsized. A stable prefix is sufficient; app content is asserted next.
         let prefix: String = label.chars().take(12).collect();
         let result = screen_text(
             &prefix,
-            Duration::from_secs(2),
+            Duration::from_secs(2).min(deadline.saturating_sub(cfg.clock.now())),
             true,
             true,
             None,

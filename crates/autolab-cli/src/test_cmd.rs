@@ -207,6 +207,10 @@ pub fn run(opts: Options) -> Result<u8> {
         println!("AutoLab Test Runner\n");
     }
     let cfg = RunConfig {
+        application: opts
+            .app
+            .as_ref()
+            .map(|app| app as &dyn autolab_test::runner::ApplicationControl),
         app_label: opts.app.as_ref().map(|app| app.label.as_str()),
         artifacts_dir: &dir,
         skip_unsupported: opts.skip_unsupported,

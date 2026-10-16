@@ -162,8 +162,6 @@ fn start_from_settings(program: &Path, serial: &str, path: &str) -> Result<()> {
                 tap(program, serial, x, y)?;
                 opened_menu = true;
             }
-        } else if node_center(&xml, "text", "Developer settings").is_none() {
-            return Err(provisioning_error());
         }
         if Instant::now() >= deadline {
             return Err(provisioning_error());
@@ -279,7 +277,10 @@ case "$*" in
     ;;
   'shell uiautomator dump '*) ;;
   'shell cat '*)
-    if [ -f "$state/menu" ]; then
+    if [ -f "$state/menu" ] && [ ! -f "$state/stale-read" ]; then
+      touch "$state/stale-read"
+      echo '<hierarchy><node content-desc="More options" bounds="[10,20][30,40]"/></hierarchy>'
+    elif [ -f "$state/menu" ]; then
       echo '<hierarchy><node text="Start head unit server" bounds="[40,50][80,90]"/></hierarchy>'
     else
       echo '<hierarchy><node content-desc="More options" bounds="[10,20][30,40]"/></hierarchy>'

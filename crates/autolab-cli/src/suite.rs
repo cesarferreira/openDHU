@@ -18,6 +18,8 @@ struct Suite {
     version: u32,
     environment: Environment,
     tests: Vec<String>,
+    #[serde(default)]
+    services: Vec<crate::services::Service>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,7 +31,19 @@ struct Environment {
     apk: PathBuf,
     package: String,
     app_label: String,
+    #[serde(default)]
+    permissions: Vec<String>,
+    launch_activity: Option<String>,
+    #[serde(default)]
+    reverse_ports: Vec<ReversePort>,
 }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReversePort {
+    device: u16,
+    host: u16,
+}
+
 fn yes() -> bool {
     true
 }
@@ -46,6 +60,21 @@ impl Application {
             &self.adb,
             &self.serial,
             &["shell", "am", "force-stop", &self.package],
+        )?;
+        Ok(())
+    }
+}
+
+impl autolab_test::runner::ApplicationControl for Application {
+    fn restart(&self) -> Result<()> {
+        self.reset()
+    }
+    fn input_text(&self, text: &str) -> Result<()> {
+        autolab_test::schema::validate_input_text(text)?;
+        device::adb(
+            &self.adb,
+            &self.serial,
+            &["shell", "input", "text", &text.replace(' ', "%s")],
         )?;
         Ok(())
     }
@@ -94,6 +123,44 @@ fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
         return Err(Error::InvalidArgs(
             "suite package must be an Android package identifier".into(),
         ));
+    }
+    if env.permissions.iter().any(|permission| {
+        !permission.starts_with("android.permission.")
+            || !permission
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    }) {
+        return Err(Error::InvalidArgs(
+            "suite permissions must be Android permission names".into(),
+        ));
+    }
+    if env.launch_activity.as_ref().is_some_and(|activity| {
+        activity.is_empty()
+            || !activity
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '$')
+    }) {
+        return Err(Error::InvalidArgs(
+            "suite launchActivity must be a class name".into(),
+        ));
+    }
+    let mut ports = std::collections::BTreeSet::new();
+    for port in &env.reverse_ports {
+        if port.device == 0 || port.host == 0 || !ports.insert(port.device) {
+            return Err(Error::InvalidArgs(
+                "suite reverse port numbers must be nonzero and device ports unique".into(),
+            ));
+        }
+    }
+    let mut services = std::collections::BTreeSet::new();
+    let mut ready_ports = std::collections::BTreeSet::new();
+    for service in &suite.services {
+        service.validate()?;
+        if !services.insert(&service.name) || !ready_ports.insert(service.ready_port) {
+            return Err(Error::InvalidArgs(
+                "suite service names and ready ports must be unique".into(),
+            ));
+        }
     }
     let base = path.parent().unwrap_or(Path::new("."));
     if !suite.environment.apk.is_absolute() {
@@ -192,6 +259,8 @@ struct Lease {
     adb: PathBuf,
     serial: Option<String>,
     forward: Option<String>,
+    reverses: Vec<crate::reverse::ReverseLease>,
+    services: Vec<crate::services::OwnedService>,
     emulator_child: Option<std::process::Child>,
     _lock: std::fs::File,
     logcat: Option<std::process::Child>,
@@ -224,6 +293,11 @@ impl Lease {
             let _ = child.wait();
         }
         if let Some(serial) = &self.serial {
+            for mut reverse in self.reverses.drain(..).rev() {
+                if let Err(e) = reverse.cleanup() {
+                    errors.push(e.message().to_string());
+                }
+            }
             if let Some(port) = self.forward.take()
                 && let Err(e) = device::adb(&self.adb, serial, &["forward", "--remove", &port])
             {
@@ -236,6 +310,9 @@ impl Lease {
             }
             let _ = child.kill();
             let _ = child.wait();
+        }
+        while let Some(service) = self.services.pop() {
+            drop(service);
         }
         if errors.is_empty() {
             Ok(())
@@ -340,11 +417,25 @@ fn run_prepared(
         adb,
         serial: None,
         forward: None,
+        reverses: Vec::new(),
+        services: Vec::new(),
         emulator_child: None,
         _lock: lock,
         logcat: None,
         artifacts: artifacts.clone(),
     };
+    let base = opts.paths[0].parent().unwrap_or(Path::new("."));
+    for spec in &suite.services {
+        check_cancel(&cancel)?;
+        lease.services.push(crate::services::OwnedService::spawn(
+            spec, base, &artifacts,
+        )?);
+        lease
+            .services
+            .last_mut()
+            .unwrap()
+            .wait_ready(spec, &cancel)?;
+    }
     let serial = match find_emulator(&lease.adb, &suite.environment.emulator)? {
         Some(serial) => serial,
         None => {
@@ -356,7 +447,7 @@ fn run_prepared(
             let file = std::fs::File::create(artifacts.join("emulator.log"))
                 .map_err(|e| Error::Other(e.to_string()))?;
             let mut command = Command::new(emulator);
-            command.args(["-avd", &suite.environment.emulator, "-no-snapshot-save"]);
+            command.args(["-avd", &suite.environment.emulator, "-no-snapshot"]);
             if suite.environment.headless {
                 command.arg("-no-window");
             }
@@ -416,6 +507,37 @@ fn run_prepared(
     check_cancel(&cancel)?;
     device::adb(&lease.adb, &serial, &["install", "-r", "-t", apk])?;
     check_cancel(&cancel)?;
+    for permission in &suite.environment.permissions {
+        check_cancel(&cancel)?;
+        device::adb(
+            &lease.adb,
+            &serial,
+            &[
+                "shell",
+                "pm",
+                "grant",
+                &suite.environment.package,
+                permission,
+            ],
+        )?;
+    }
+    for port in &suite.environment.reverse_ports {
+        check_cancel(&cancel)?;
+        lease.reverses.push(crate::reverse::ReverseLease::acquire(
+            &lease.adb,
+            &serial,
+            port.device,
+            port.host,
+        )?);
+    }
+    if let Some(activity) = &suite.environment.launch_activity {
+        let component = format!("{}/{activity}", suite.environment.package);
+        device::adb(
+            &lease.adb,
+            &serial,
+            &["shell", "am", "start", "-W", "-n", &component],
+        )?;
+    }
     device::restart_head_unit_server(&lease.adb, &serial)?;
     check_cancel(&cancel)?;
     let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;

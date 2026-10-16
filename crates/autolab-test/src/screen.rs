@@ -93,6 +93,17 @@ pub fn locate_in_region(words: &[Word], text: &str, top: u32, bottom: u32) -> Op
     locate(&visible, text)
 }
 
+/// Case-sensitive single-key observations anchored to a known projected keyboard layout.
+pub fn exact_glyph_near(words: &[Word], glyph: &str, x: u32, y: u32, tolerance: u32) -> bool {
+    words.iter().any(|word| {
+        word.text == glyph
+            && word.width <= 32
+            && word.height <= 36
+            && word.left.saturating_add(word.width / 2).abs_diff(x) <= tolerance
+            && word.top.saturating_add(word.height / 2).abs_diff(y) <= tolerance
+    })
+}
+
 pub fn text(words: &[Word]) -> String {
     words
         .iter()
@@ -201,6 +212,15 @@ mod tests {
         let words = parse_tsv(tsv).unwrap();
         assert_eq!(locate(&words, "robotui storybook"), Some((172, 50)));
         assert_eq!(locate(&words, "absent"), None);
+    }
+
+    #[test]
+    fn keyboard_glyphs_require_exact_case_and_spatially_matching_bounds() {
+        let words = parse_tsv("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t158\t275\t12\t16\t99\tq\n").unwrap();
+        assert!(exact_glyph_near(&words, "q", 164, 283, 18));
+        assert!(!exact_glyph_near(&words, "Q", 164, 283, 18));
+        assert!(!exact_glyph_near(&words, "q", 211, 283, 18));
+        assert!(!exact_glyph_near(&words, "q", 164, 245, 18));
     }
 
     #[test]

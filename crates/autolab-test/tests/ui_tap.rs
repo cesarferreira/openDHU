@@ -98,6 +98,7 @@ fn tapping_until_observes_completion_retries_and_preserves_timeout_and_cancellat
             "tap.yaml",
             &mut projection,
             &RunConfig {
+                application: None,
                 app_label: None,
                 artifacts_dir: &dir,
                 skip_unsupported: false,

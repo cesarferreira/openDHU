@@ -46,8 +46,23 @@ impl Requirement {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Step {
+    #[serde(rename = "http.request")]
+    HttpRequest {
+        method: HttpMethod,
+        url: String,
+        #[serde(default, deserialize_with = "optional_json")]
+        json: Option<serde_json::Value>,
+        expect: HttpExpect,
+        timeout: Dur,
+    },
     #[serde(rename = "app.open")]
     AppOpen,
+    #[serde(rename = "app.restart")]
+    AppRestart,
+    #[serde(rename = "keyboard.type")]
+    KeyboardType { text: String, timeout: Dur },
+    #[serde(rename = "device.inputText")]
+    DeviceInputText { text: String },
     #[serde(rename = "ui.waitFor")]
     UiWaitFor { text: String, timeout: Dur },
     #[serde(rename = "ui.expect")]
@@ -96,7 +111,11 @@ pub enum Step {
 impl Step {
     pub fn action(&self) -> &'static str {
         match self {
+            Self::HttpRequest { .. } => "http.request",
             Self::AppOpen => "app.open",
+            Self::AppRestart => "app.restart",
+            Self::DeviceInputText { .. } => "device.inputText",
+            Self::KeyboardType { .. } => "keyboard.type",
             Self::UiWaitFor { .. } => "ui.waitFor",
             Self::UiExpect { .. } => "ui.expect",
             Self::UiTap { .. } => "ui.tap",
@@ -110,6 +129,45 @@ impl Step {
             Self::WaitFor { .. } => "waitFor",
         }
     }
+}
+
+/// Validate text before passing it through Android's remote input shell command.
+pub fn validate_input_text(text: &str) -> Result<()> {
+    if text.trim().is_empty()
+        || text.len() > 256
+        || !text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '/' | '@' | '.' | '-'))
+    {
+        return Err(Error::InvalidArgs(
+            "device.inputText requires 1–256 ASCII letters, digits, spaces or _/@.- characters"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Local fixture API operations. POST is sent once; only GET assertions are polled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+pub enum HttpMethod {
+    #[serde(rename = "GET")]
+    Get,
+    #[serde(rename = "POST")]
+    Post,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpExpect {
+    pub status: u16,
+    #[serde(default, deserialize_with = "optional_json")]
+    pub json: Option<serde_json::Value>,
+}
+
+fn optional_json<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 /// `on` / `off`. YAML 1.1 readers turn these into booleans, so both spellings are accepted.
@@ -314,7 +372,24 @@ fn validate(t: &TestFile) -> Result<()> {
         let i = n + 1;
         let a = step.action();
         match step {
-            Step::AppOpen => {}
+            Step::HttpRequest {
+                method,
+                url,
+                json,
+                expect,
+                timeout,
+            } => {
+                check_duration(i, a, "timeout", *timeout)?;
+                crate::http::validate(*method, url, json.as_ref(), expect)
+                    .map_err(|error| bad(i, a, error.to_string()))?;
+            }
+            Step::KeyboardType { text, timeout } => {
+                check_duration(i, a, "timeout", *timeout)?;
+                crate::keyboard::validate_text(text)
+                    .map_err(|error| bad(i, a, error.to_string()))?;
+            }
+            Step::AppOpen | Step::AppRestart => {}
+            Step::DeviceInputText { text } => validate_input_text(text)?,
             Step::UiWaitFor { text, timeout }
             | Step::UiExpect { text, timeout }
             | Step::UiTap { text, timeout, .. } => {

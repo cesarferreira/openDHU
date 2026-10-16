@@ -165,7 +165,7 @@ consent accepted. `adb`, `ffmpeg`, and `tesseract` with English data must be on 
 or `ANDROID_SDK_ROOT` to locate the Android SDK emulator, or put `emulator` on PATH.
 
 AutoLab reuses a matching running AVD or starts the SDK emulator with `-no-window` and
-`-no-snapshot-save`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
+`-no-snapshot`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
 Auto's head-unit server through its Settings UI if needed, allocates a device-scoped ADB forward,
 and starts a private daemon. This does not replace an existing physical-phone session. Cleanup
 removes the forward and private daemon; it stops only an emulator that the suite itself started.
@@ -211,3 +211,93 @@ Suites default to fresh `test-results/run-*` directories and both JSON and JUnit
 save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screenshots, scaled images, OCR TSVs and
 OCR diagnostics. The private daemon authentication file is removed rather than archived. Inspect
 these artifacts for setup and assertion failures; screenshots alone do not make a test pass.
+
+## Production-app journeys with local services
+
+A suite can own local fixture services and prepare its emulator's network and runtime permissions:
+
+```yaml
+version: 1
+environment:
+  emulator: medium_phone
+  headless: true
+  apk: ../app/build/outputs/apk/dev/debug/app-dev-debug.apk
+  package: example.app.dev.debug
+  appLabel: Example App
+  permissions: [android.permission.ACCESS_COARSE_LOCATION, android.permission.ACCESS_FINE_LOCATION]
+  launchActivity: example.app.MainActivity
+  reversePorts: [{device: 10101, host: 19101}]
+services:
+  - name: backend
+    command: [node, backend/start.mjs]
+    readyPort: 56551
+    timeout: 60s
+    env: {FIXTURE_MODE: '1'}
+tests: [production/*.yaml]
+```
+
+Commands are argument arrays, run relative to the suite directory; optional `cwd` is also relative
+to that directory. Service stdout/stderr goes to `<name>.log`. Services receive
+`AUTOLAB_ARTIFACTS_DIR` so fixture code can create run-specific state there. AutoLab waits for each
+loopback `readyPort`, fails if the port is occupied or leased by another suite, and stops owned
+process groups on completion, startup failure or interruption. Service readiness should be exposed
+only after dependencies are initialized; tests still assert actual backend responses.
+
+The suite installs the APK, grants the declared runtime permissions, acquires device-to-host ADB
+reverse mappings without replacing existing ones, and optionally opens `launchActivity` once before
+projection. It removes its own reverse mappings during cleanup. These operations affect the dedicated
+test AVD only. They do not clear application data.
+
+Backend steps use a loopback fixture API, while the app uses its normal production network clients:
+
+```yaml
+- action: http.request
+  method: POST
+  url: http://127.0.0.1:56551/reset
+  expect: {status: 200, json: {reset: true}}
+  timeout: 10s
+- action: app.open
+- action: ui.tap
+  text: VSO
+  until: Search
+  timeout: 30s
+- action: ui.tap
+  text: Search VSOs
+  timeout: 15s
+- action: keyboard.type
+  text: aut
+  timeout: 30s
+- action: ui.tap
+  text: AutoLab Driver
+  timeout: 15s
+- action: http.request
+  method: GET
+  url: http://127.0.0.1:56551/assertions/driver-selected
+  expect: {status: 200, json: {completed: true}}
+  timeout: 15s
+- action: app.restart
+- action: ui.expect
+  text: AutoLab Driver
+  timeout: 30s
+```
+
+`http.request` requires GET or POST, a plain HTTP URL with an explicit loopback IP, an expected status,
+and a bounded timeout. Optional `json` is a POST body. `expect.json` matches object fields recursively;
+arrays and scalars match exactly. GET polls mismatches; POST sends once and never retries a mutation.
+Redirects, proxies, authentication headers and remote URLs are unsupported. Request/response evidence
+is retained in `http/`; use synthetic fixture data. A failed backend assertion fails the test.
+
+`keyboard.type` types through projected touchscreen keys. It currently supports only the native
+800×480 English lowercase QWERTY layout: 1–128 lowercase ASCII letters, digits and spaces. It waits
+for keyboard glyphs at their expected positions, including distinguishing `y`/`z` anchors, before
+every touch, and fails without
+further input if the layout disappears or the timeout expires. Focus the projected search field first;
+assert on the resulting text or results afterward. Frames and OCR are retained under `keyboard/`.
+
+`device.inputText` uses ADB to inject text into the focused phone input on the suite emulator. Its
+behavior depends on the phone IME and display focus; use `keyboard.type` for the supported projected
+Android Auto keyboard. Focus the phone field first. Input must be nonempty, at most 256 safe ASCII
+characters (letters, digits, spaces, `_`, `@`, `.`, `-`); shell syntax is rejected before device access.
+`app.restart` force-stops only the suite package and reopens it through the projected launcher, without
+erasing data or preparing backend state. Combine backend request assertions with projected UI checks:
+calling a fixture preparation endpoint alone does not prove the application used the backend.

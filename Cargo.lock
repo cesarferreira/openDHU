@@ -201,6 +201,7 @@ dependencies = [
  "ctrlc",
  "fs2",
  "glob",
+ "libc",
  "serde",
  "serde_json",
  "serde_norway",
@@ -281,6 +282,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "ureq",
 ]
 
 [[package]]

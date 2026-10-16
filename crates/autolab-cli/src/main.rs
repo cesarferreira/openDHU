@@ -4,6 +4,8 @@ mod daemon_ctl;
 mod device;
 mod doctor;
 mod output_path;
+mod reverse;
+mod services;
 mod session_backend;
 mod suite;
 mod test_cmd;
