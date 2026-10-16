@@ -647,7 +647,7 @@ fn screen_text(
             ));
         }
         let found = if launcher {
-            crate::screen::locate_in_region(&words, text, 70, 410)
+            crate::screen::locate_launcher_label(&words, text, 70, 410)
         } else {
             crate::screen::locate(&words, text)
         };
@@ -720,10 +720,10 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
         if cfg.clock.now() >= deadline {
             break;
         }
-        // Launcher labels may be ellipsized. A stable prefix is sufficient; app content is asserted next.
-        let prefix: String = label.chars().take(12).collect();
+        // Only complete launcher labels or explicit matching ellipsis count as app icons.
+        // A prefix also appears in host errors and another app's similarly named content.
         let result = screen_text(
-            &prefix,
+            label,
             Duration::from_secs(2).min(deadline.saturating_sub(cfg.clock.now())),
             true,
             true,

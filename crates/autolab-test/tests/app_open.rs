@@ -14,6 +14,7 @@ struct Projection {
     inner: MockBackend,
     launcher_probes: usize,
     ready_after: usize,
+    pending_text: &'static str,
 }
 impl HeadUnitBackend for Projection {
     fn capabilities(&mut self) -> Result<Capabilities> {
@@ -38,7 +39,7 @@ impl HeadUnitBackend for Projection {
         let text = if self.launcher_probes >= self.ready_after {
             "Robot UI"
         } else {
-            "Home screen"
+            self.pending_text
         };
         std::fs::write(path,format!("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t20\t200\t100\t20\t99\t{text}\n")).unwrap();
         Ok(ScreenshotResult {
@@ -76,15 +77,31 @@ fn app_open_waits_for_recreated_session_with_a_deadline_and_cancellation() {
     }
     let test =
         parse("name: Wait for Android Auto restart\nsteps:\n  - action: app.open\n").unwrap();
-    for (ready_after, cancel_after, outcome, code) in [
-        (5, None, Outcome::Passed, 0),
-        (usize::MAX, None, Outcome::Failed, 6),
-        (usize::MAX, Some(2), Outcome::Error, 130),
+    for (pending_text, ready_after, cancel_after, outcome, code) in [
+        ("Home screen", 5, None, Outcome::Passed, 0),
+        (
+            "Robot UI has encountered an unexpected error",
+            5,
+            None,
+            Outcome::Passed,
+            0,
+        ),
+        ("Robot UI Storybook", 5, None, Outcome::Passed, 0),
+        (
+            "Robot UI has encountered an unexpected error",
+            usize::MAX,
+            None,
+            Outcome::Failed,
+            6,
+        ),
+        ("Home screen", usize::MAX, None, Outcome::Failed, 6),
+        ("Home screen", usize::MAX, Some(2), Outcome::Error, 130),
     ] {
         let mut projection = Projection {
             inner: MockBackend::new(),
             launcher_probes: 0,
             ready_after,
+            pending_text,
         };
         let clock = FakeClock::default();
         clock.cancel_after_sleeps.set(cancel_after);
