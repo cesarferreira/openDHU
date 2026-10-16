@@ -17,6 +17,10 @@ the terminal. `autolab` must sit next to `autolab-gui` or be on `PATH`.
 
 - **Session**: backend and version, phone serial, transport, process ids, and each `--reverse` tunnel with its live
   state. **Stop session** ends it.
+- **Live view** (native backend): the phone's screen, live. The window reads `GET /v1/video` and decodes it with
+  `ffmpeg`, so `ffmpeg` must be installed. **Click** the picture to tap, **drag** to swipe; the drag takes as long as
+  you took (50 ms to 2 s). These are real touches on the real phone. Untick "Show the phone's screen" to stop the
+  stream. The DHU draws its own window, so there is no live view for it.
 - **Video focus**: what AutoLab requested, what the head unit reports, and the phone-side value. With the DHU that
   is always `unknown`. With the native backend it is the phone's own word. **Focus on** and **Focus off** send the command.
 - **Screenshot**: saves a PNG to the path you type (absolute, ends in `.png`, no spaces) and previews it. On the

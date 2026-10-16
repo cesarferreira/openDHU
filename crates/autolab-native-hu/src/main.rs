@@ -21,6 +21,16 @@ pub fn emit(line: &Line) {
     let _ = out.flush();
 }
 
+/// A `VideoData` line followed by that many raw bytes, written under one lock so nothing can come
+/// between them.
+pub fn emit_video(data: &[u8]) {
+    let head = protocol::encode(&Line::Event(Event::VideoData { len: data.len() }));
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(head.as_bytes());
+    let _ = out.write_all(data);
+    let _ = out.flush();
+}
+
 #[tokio::main]
 async fn main() {
     if std::env::var_os("AUTOLAB_NATIVE_LOG").is_some() {

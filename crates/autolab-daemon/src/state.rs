@@ -290,6 +290,12 @@ impl Daemon {
         .await
     }
 
+    /// A live feed of the phone's video, for `GET /v1/video`.
+    pub async fn video(&self) -> Result<std::sync::mpsc::Receiver<autolab_native::VideoChunk>> {
+        let r = self.running()?;
+        with_backend(r.backend, |b| b.subscribe_video()).await?
+    }
+
     pub async fn screenshot(&self, path: PathBuf) -> Result<ScreenshotResponse> {
         validate_screenshot_path(&path)?;
         let r = self.running()?;

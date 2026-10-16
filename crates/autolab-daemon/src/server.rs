@@ -101,6 +101,40 @@ async fn input_swipe(
     ))
 }
 
+/// The phone's raw H.264 video (Annex-B), starting at a keyframe, until the client leaves or the
+/// session ends. A client that cannot keep up is disconnected rather than sent a corrupt picture.
+async fn video(State(d): State<Daemon>) -> std::result::Result<axum::response::Response, ApiError> {
+    let rx = d.video().await?;
+    let (tx, out) = tokio::sync::mpsc::channel::<std::result::Result<Vec<u8>, Infallible>>(64);
+    // The backend delivers over a blocking channel, so a blocking task bridges it. Dropping `out`
+    // (the client left) makes `blocking_send` fail, which ends the task and drops the viewer.
+    tokio::task::spawn_blocking(move || {
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(chunk) => {
+                    if tx.blocking_send(Ok((*chunk).clone())).is_err() {
+                        break;
+                    }
+                }
+                // A still screen sends nothing. A filler NAL unit (type 12, which decoders skip) every
+                // second tells the client the stream is alive, and shows here when the client is gone.
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if tx.blocking_send(Ok(vec![0, 0, 0, 1, 0x0c, 0xff])).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(out));
+    Ok(axum::response::Response::builder()
+        .header("content-type", "video/h264")
+        .header("cache-control", "no-store")
+        .body(body)
+        .expect("static headers are valid"))
+}
+
 async fn daemon_shutdown(State(d): State<Daemon>) -> Json<serde_json::Value> {
     d.shutdown().await;
     Json(json!({ "shuttingDown": true }))
@@ -189,6 +223,7 @@ pub fn router(daemon: Daemon) -> Router {
         .route("/v1/session/start", post(session_start))
         .route("/v1/session/stop", post(session_stop))
         .route("/v1/focus/video", post(focus_video))
+        .route("/v1/video", get(video))
         .route("/v1/focus/audio", post(focus_audio))
         .route("/v1/focus/navigation", post(focus_navigation))
         .route("/v1/display/configure", post(display_configure))

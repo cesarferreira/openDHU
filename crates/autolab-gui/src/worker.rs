@@ -26,6 +26,11 @@ pub enum Cmd {
     Focus(bool),
     Screenshot(PathBuf),
     Tap(u32, u32),
+    Swipe {
+        from: (u32, u32),
+        to: (u32, u32),
+        duration_ms: u64,
+    },
 }
 
 fn send(tx: &mpsc::Sender<Update>, ctx: &egui::Context, u: Update) -> bool {
@@ -102,6 +107,24 @@ pub fn run(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
     });
 }
 
+/// A touch from the live picture. Unlike a button press it does not hold the buttons disabled, so
+/// several can follow each other, and it reports only through the notice line.
+#[cfg_attr(test, allow(dead_code))]
+pub fn run_touch(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
+    thread::spawn(move || {
+        let result = execute(&cmd, &ctx, &tx);
+        let (text, is_error) = match result {
+            Ok(t) => (t, false),
+            Err(t) => (t, true),
+        };
+        send(
+            &tx,
+            &ctx,
+            Update::Notice(crate::model::Notice { text, is_error }),
+        );
+    });
+}
+
 fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<String, String> {
     match cmd {
         Cmd::Start {
@@ -131,6 +154,20 @@ fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<
             client.tap(*x, *y).map_err(|e| e.to_string())?;
             // The phone never acknowledges touch, so say only that it was sent.
             Ok(format!("Tap sent at ({x}, {y})"))
+        }
+        Cmd::Swipe {
+            from,
+            to,
+            duration_ms,
+        } => {
+            let client = Client::connect().map_err(|e| e.to_string())?;
+            client
+                .swipe(*from, *to, Duration::from_millis(*duration_ms))
+                .map_err(|e| e.to_string())?;
+            Ok(format!(
+                "Swipe sent ({}, {}) to ({}, {})",
+                from.0, from.1, to.0, to.1
+            ))
         }
         Cmd::Screenshot(path) => {
             let client = Client::connect().map_err(|e| e.to_string())?;

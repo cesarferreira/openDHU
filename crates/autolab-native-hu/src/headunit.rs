@@ -32,7 +32,7 @@ const GOP_CAP: usize = 16 * 1024 * 1024;
 /// How long a tap holds the finger down.
 const TAP_HOLD: Duration = Duration::from_millis(60);
 /// How long to watch the video after a touch.
-const WATCH_AFTER: Duration = Duration::from_millis(500);
+const WATCH_AFTER: Duration = Duration::from_millis(150);
 
 const BACKEND_VERSION: &str = "android-auto 0.3.8";
 const BACKEND_BUILD: &str = "vendored 06c68d5 + AutoLab patches";
@@ -51,6 +51,8 @@ struct Inner {
     /// Every frame since the last keyframe, including it.
     gop: Vec<u8>,
     have_keyframe: bool,
+    /// A viewer is watching: every frame is also sent to the daemon.
+    streaming: bool,
 }
 
 pub struct Shared {
@@ -77,6 +79,7 @@ impl Shared {
                 pps: Vec::new(),
                 gop: Vec::new(),
                 have_keyframe: false,
+                streaming: false,
             }),
             ready: AtomicBool::new(false),
             tx,
@@ -133,6 +136,20 @@ impl Shared {
                     );
                 }
                 self.touch((x1, y1), (x2, y2), duration_ms).await
+            }
+            Command::VideoStream { enabled } => {
+                let mut i = self.lock();
+                i.streaming = enabled;
+                if enabled {
+                    // Start at a keyframe: parameter sets first, then the last keyframe and what followed.
+                    let mut burst = i.sps.clone();
+                    burst.extend_from_slice(&i.pps);
+                    burst.extend_from_slice(&i.gop);
+                    if i.have_keyframe && !burst.is_empty() {
+                        crate::emit_video(&burst);
+                    }
+                }
+                Outcome::Ok(Reply::Done)
             }
             Command::Quit => Outcome::Ok(Reply::Done),
         }
@@ -343,6 +360,11 @@ impl Shared {
         let picture_ready = {
             let mut i = self.lock();
             Self::take_frame(&mut i, data);
+            // Sent under the same lock that updated the buffers, so a viewer that joins gets every
+            // frame exactly once: either in its first burst or live.
+            if i.streaming {
+                crate::emit_video(data);
+            }
             i.have_keyframe && !i.sps.is_empty() && !i.pps.is_empty()
         };
         // "Ready" means a screenshot is possible: the phone said it is projecting AND a decodable

@@ -989,3 +989,76 @@ fn touch_on_the_native_backend_emits_input_events_and_stays_out_of_the_focus_eve
         "{kinds:?}"
     );
 }
+
+#[test]
+fn video_needs_auth_a_session_and_the_native_backend() {
+    let d = TestDaemon::start(false);
+    // No token: refused before anything else, like every route.
+    let host = ("Host", format!("127.0.0.1:{}", d.port()));
+    let (st, _) = raw(
+        d.port(),
+        "GET",
+        "/v1/video",
+        std::slice::from_ref(&host),
+        None,
+    );
+    assert_eq!(st, 401);
+    let h = authed(&d);
+    let (st, b) = raw(d.port(), "GET", "/v1/video", &h, None);
+    assert_eq!((st, error_of(&b).0), (503, "backend_unavailable"), "{b}");
+    d.client.start(&d.dhu()).unwrap();
+    let (st, b) = raw(d.port(), "GET", "/v1/video", &h, None);
+    assert_eq!((st, error_of(&b)), (501, ("unsupported", 5)), "{b}");
+    d.client.stop().unwrap();
+}
+
+#[test]
+fn live_video_streams_from_a_keyframe_and_ends_with_the_session() {
+    let fake = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../autolab-native/tests/fixtures/fake-native-hu.sh"
+    );
+    // SAFETY: no other test in this file reads this variable, and each sets the same value.
+    unsafe { std::env::set_var("AUTOLAB_NATIVE_HU", fake) };
+    let d = TestDaemon::start(false);
+    d.client
+        .start(&StartRequest {
+            backend: autolab_daemon::api::BackendKind::Native,
+            serial: Some("FAKE0001".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut video = d.client.video().unwrap();
+    let mut got = [0u8; 9 + 8];
+    video.read_exact(&mut got).unwrap();
+    assert_eq!(
+        &got[..9],
+        b"SPSPPSIDR",
+        "starts with the parameter sets and keyframe"
+    );
+    assert_eq!(
+        &got[9..14],
+        b"FRAME",
+        "then live frames: {:?}",
+        String::from_utf8_lossy(&got)
+    );
+
+    // The daemon keeps answering while someone watches, and a second viewer is fine.
+    assert_eq!(
+        d.client.status().unwrap().session.unwrap().phase,
+        Phase::Running
+    );
+    let mut second = d.client.video().unwrap();
+    let mut burst = [0u8; 9];
+    second.read_exact(&mut burst).unwrap();
+    assert_eq!(&burst, b"SPSPPSIDR");
+
+    // Ending the session ends the stream instead of leaving the viewer hanging.
+    d.client.stop().unwrap();
+    let mut rest = Vec::new();
+    let end = video.read_to_end(&mut rest);
+    assert!(
+        end.is_ok() || !rest.is_empty(),
+        "the stream must end: {end:?}"
+    );
+}

@@ -15,6 +15,10 @@ pub struct Form {
     pub reverse: String,
     pub native: bool,
     pub headless: bool,
+    /// Show the live picture while a native session runs.
+    pub live: bool,
+    /// A drag in progress on the live picture: where it began, and when.
+    pub drag: Option<((u32, u32), std::time::Instant)>,
     pub shot_path: String,
 }
 
@@ -29,6 +33,8 @@ impl Form {
             reverse: String::new(),
             native: false,
             headless: false,
+            live: true,
+            drag: None,
             shot_path: format!("{}/autolab-screenshot.png", dir.trim_end_matches('/')),
         }
     }
@@ -154,14 +160,12 @@ pub fn draw(
                 Conn::Disconnected => None,
             };
             session_card(ui, session.as_ref(), controls.can_stop, tx, ctx, state);
+            live_card(ui, form, tx, ctx, state);
             if session.is_none() {
                 start_card(ui, form, controls.can_start, tx, ctx, state);
             }
             focus_card(ui, session.as_ref(), controls.can_focus, tx, ctx, state);
-            let native = session
-                .as_ref()
-                .and_then(|s| s.details.as_ref())
-                .is_some_and(|d| d.head_unit.backend == "native");
+            let native = state.native_running();
             screenshot_card(
                 ui,
                 form,
@@ -172,6 +176,92 @@ pub fn draw(
                 state,
             );
         });
+    });
+}
+
+/// What a gesture on the live picture means: a short or still press is a tap at where it began, and
+/// anything longer is a swipe that takes as long as the drag did (50 ms to 2 s).
+pub fn gesture(start: (u32, u32), end: (u32, u32), held: std::time::Duration) -> Cmd {
+    let (dx, dy) = (
+        i64::from(end.0) - i64::from(start.0),
+        i64::from(end.1) - i64::from(start.1),
+    );
+    if dx * dx + dy * dy < 12 * 12 {
+        return Cmd::Tap(start.0, start.1);
+    }
+    let ms = u64::try_from(held.as_millis())
+        .unwrap_or(u64::MAX)
+        .clamp(50, 2000);
+    Cmd::Swipe {
+        from: start,
+        to: end,
+        duration_ms: ms,
+    }
+}
+
+/// A touch from the live picture: no disabled buttons, no "busy" state.
+fn touch(cmd: Cmd, tx: &mpsc::Sender<crate::model::Update>, ctx: &egui::Context) {
+    #[cfg(test)]
+    {
+        let _ = (tx, ctx);
+        tests::SENT.with(|s| s.borrow_mut().push(cmd));
+    }
+    #[cfg(not(test))]
+    crate::worker::run_touch(cmd, ctx.clone(), tx.clone());
+}
+
+fn live_card(
+    ui: &mut egui::Ui,
+    form: &mut Form,
+    tx: &mpsc::Sender<crate::model::Update>,
+    ctx: &egui::Context,
+    state: &State,
+) {
+    card(ui, "Live view", |ui| {
+        if !state.native_running() {
+            ui.label(
+                RichText::new("Needs a running native session. The DHU draws its own window.")
+                    .color(DIM),
+            );
+            return;
+        }
+        ui.checkbox(&mut form.live, "Show the phone's screen");
+        if !form.live {
+            return;
+        }
+        let Some(texture) = &state.live_texture else {
+            match &state.live_problem {
+                Some(p) => ui.label(RichText::new(format!("No picture: {p}")).color(BAD)),
+                None => ui.label(RichText::new("Waiting for the first picture…").color(DIM)),
+            };
+            return;
+        };
+        let width = ui.available_width().min(800.0);
+        let size = egui::vec2(width, width * 480.0 / 800.0);
+        let response =
+            ui.add(egui::Image::new((texture.id(), size)).sense(egui::Sense::click_and_drag()));
+        ui.label(
+            RichText::new("Click to tap, drag to swipe. These are real touches on the phone.")
+                .color(DIM),
+        );
+        let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size());
+        if response.drag_started()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            form.drag = Some((at(p), std::time::Instant::now()));
+        }
+        if response.drag_stopped() {
+            if let (Some((start, began)), Some(p)) =
+                (form.drag.take(), ctx.input(|i| i.pointer.latest_pos()))
+            {
+                touch(gesture(start, at(p), began.elapsed()), tx, ctx);
+            }
+        } else if response.clicked()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let (x, y) = at(p);
+            touch(Cmd::Tap(x, y), tx, ctx);
+        }
     });
 }
 
@@ -714,6 +804,66 @@ mod tests {
             state.busy = 0;
         }
         assert_eq!(started, Some(true), "Start must carry the native choice");
+    }
+
+    #[test]
+    fn a_still_press_is_a_tap_and_a_drag_is_a_swipe_as_long_as_it_took() {
+        use std::time::Duration;
+        let tap = gesture((10, 20), (14, 23), Duration::from_millis(400));
+        assert!(matches!(tap, Cmd::Tap(10, 20)), "{tap:?}");
+        let swipe = gesture((10, 20), (300, 20), Duration::from_millis(400));
+        assert!(
+            matches!(
+                swipe,
+                Cmd::Swipe {
+                    from: (10, 20),
+                    to: (300, 20),
+                    duration_ms: 400
+                }
+            ),
+            "{swipe:?}"
+        );
+        // Very quick and very slow drags are held inside what the head unit accepts.
+        let quick = gesture((0, 0), (100, 0), Duration::from_millis(5));
+        assert!(
+            matches!(
+                quick,
+                Cmd::Swipe {
+                    duration_ms: 50,
+                    ..
+                }
+            ),
+            "{quick:?}"
+        );
+        let slow = gesture((0, 0), (100, 0), Duration::from_secs(30));
+        assert!(
+            matches!(
+                slow,
+                Cmd::Swipe {
+                    duration_ms: 2000,
+                    ..
+                }
+            ),
+            "{slow:?}"
+        );
+    }
+
+    #[test]
+    fn the_live_card_draws_waiting_with_a_problem_and_with_a_picture() {
+        let ctx = egui::Context::default();
+        let mut form = Form::new();
+        let mut state = native_state_with_a_shot(&ctx);
+        frame(&mut state, &mut form); // native running, no picture yet
+        state.live_problem = Some("ffmpeg not found".into());
+        frame(&mut state, &mut form);
+        state.live_texture = Some(ctx.load_texture(
+            "live",
+            egui::ColorImage::filled([800, 480], Color32::BLUE),
+            egui::TextureOptions::LINEAR,
+        ));
+        frame(&mut state, &mut form);
+        form.live = false;
+        frame(&mut state, &mut form);
     }
 
     #[test]

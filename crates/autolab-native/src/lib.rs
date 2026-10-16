@@ -20,10 +20,11 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
 }
 
 use std::ffi::OsStr;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -45,6 +46,42 @@ const SHOT_TIMEOUT: Duration = Duration::from_secs(20);
 const TOUCH_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// One chunk of the phone's video: Annex-B H.264, one or more NAL units.
+pub type VideoChunk = Arc<Vec<u8>>;
+
+/// Viewers of the live video. The reader thread publishes to all of them. A viewer that falls
+/// behind or goes away is dropped: skipping frames would corrupt its picture, and a viewer can
+/// always subscribe again, which restarts the stream at a keyframe.
+#[derive(Default)]
+struct VideoHub {
+    viewers: Mutex<Vec<SyncSender<VideoChunk>>>,
+}
+
+/// How many chunks a viewer may lag by before it is dropped.
+const VIEWER_BACKLOG: usize = 256;
+
+impl VideoHub {
+    fn add(&self) -> Receiver<VideoChunk> {
+        let (tx, rx) = mpsc::sync_channel(VIEWER_BACKLOG);
+        self.viewers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// Send to everyone still listening. Returns how many viewers remain.
+    fn publish(&self, chunk: &VideoChunk) -> usize {
+        let mut viewers = self.viewers.lock().unwrap_or_else(|e| e.into_inner());
+        viewers.retain(|v| v.try_send(Arc::clone(chunk)).is_ok());
+        viewers.len()
+    }
+
+    fn count(&self) -> usize {
+        self.viewers.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
+
 /// How to launch the head unit. The phone is found by the child itself over USB.
 #[derive(Debug, Clone)]
 pub struct NativeLaunch {
@@ -62,7 +99,8 @@ enum Incoming {
 
 pub struct NativeBackend {
     child: Child,
-    stdin: Option<ChildStdin>,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    video: Arc<VideoHub>,
     rx: Receiver<Incoming>,
     next_id: u64,
     serial: Option<String>,
@@ -97,25 +135,18 @@ impl NativeBackend {
             .map_err(|e| {
                 Error::BackendUnavailable(format!("cannot start {}: {e}", launch.program.display()))
             })?;
-        let stdin = child.stdin.take();
+        let stdin = Arc::new(Mutex::new(child.stdin.take()));
         let stdout = child.stdout.take().expect("stdout is piped");
+        let video = Arc::new(VideoHub::default());
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                let item = match protocol::decode_line(&line) {
-                    Ok(l) => Incoming::Line(l),
-                    Err(_) => Incoming::Junk(line),
-                };
-                if tx.send(item).is_err() {
-                    return;
-                }
-            }
-            let _ = tx.send(Incoming::Eof);
-        });
+        {
+            let (video, stdin) = (Arc::clone(&video), Arc::clone(&stdin));
+            thread::spawn(move || read_child(stdout, &tx, &video, &stdin));
+        }
         let mut backend = Self {
             child,
             stdin,
+            video,
             rx,
             next_id: 1,
             serial: launch.serial.clone(),
@@ -130,6 +161,24 @@ impl NativeBackend {
 
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// Watch the phone's video live. The first chunk is the parameter sets and the last keyframe,
+    /// so a viewer can start decoding at once. Dropping the receiver ends the subscription, and
+    /// the head unit stops streaming when the last viewer has gone.
+    pub fn subscribe_video(&mut self) -> Result<Receiver<VideoChunk>> {
+        let rx = self.video.add();
+        // Asking again also makes the head unit resend the keyframe for a viewer that joins late.
+        match self.send(Cmd::VideoStream { enabled: true }, STATUS_TIMEOUT) {
+            Ok(Reply::Done) => Ok(rx),
+            Ok(_) => Err(unexpected("video stream")),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// How many viewers are watching the video.
+    pub fn video_viewers(&self) -> usize {
+        self.video.count()
     }
 
     /// `Some(description)` once the child has exited or reported the link as gone.
@@ -219,14 +268,7 @@ impl NativeBackend {
         let id = self.next_id;
         self.next_id += 1;
         let line = protocol::encode(&Request { id, command });
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| Error::BackendUnavailable("the head unit is stopping".into()))?;
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| stdin.flush())
-            .map_err(|e| io_err("cannot write to the native head unit", e))?;
+        write_line(&self.stdin, &line)?;
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -268,6 +310,66 @@ impl NativeBackend {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn write_line(stdin: &Mutex<Option<ChildStdin>>, line: &str) -> Result<()> {
+    let mut guard = stdin.lock().unwrap_or_else(|e| e.into_inner());
+    let stdin = guard
+        .as_mut()
+        .ok_or_else(|| Error::BackendUnavailable("the head unit is stopping".into()))?;
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|()| stdin.flush())
+        .map_err(|e| io_err("cannot write to the native head unit", e))
+}
+
+/// Read the child's output: protocol lines for `rx`, and the raw video that follows a `VideoData`
+/// line for the viewers. When the last viewer is gone the child is told to stop streaming.
+fn read_child(
+    stdout: impl Read,
+    tx: &mpsc::Sender<Incoming>,
+    video: &VideoHub,
+    stdin: &Mutex<Option<ChildStdin>>,
+) {
+    let mut out = BufReader::new(stdout);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match out.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let text = line.trim_end();
+        match protocol::decode_line(text) {
+            Ok(Line::Event(Event::VideoData { len })) => {
+                let mut data = vec![0u8; len];
+                if out.read_exact(&mut data).is_err() {
+                    break;
+                }
+                if video.publish(&Arc::new(data)) == 0 {
+                    // Nobody is watching any more.
+                    let _ = write_line(
+                        stdin,
+                        &protocol::encode(&Request {
+                            id: 0,
+                            command: Cmd::VideoStream { enabled: false },
+                        }),
+                    );
+                }
+            }
+            Ok(l) => {
+                if tx.send(Incoming::Line(l)).is_err() {
+                    return;
+                }
+            }
+            Err(_) => {
+                if tx.send(Incoming::Junk(text.to_string())).is_err() {
+                    return;
+                }
+            }
+        }
+    }
+    let _ = tx.send(Incoming::Eof);
 }
 
 fn unexpected(what: &str) -> Error {
@@ -359,15 +461,14 @@ impl HeadUnitBackend for NativeBackend {
             return Ok(());
         }
         // Ask politely, then close stdin (the child's real shutdown signal), then insist.
-        if let Some(mut stdin) = self.stdin.take() {
-            let _ = stdin.write_all(
-                protocol::encode(&Request {
-                    id: 0,
-                    command: Cmd::Quit,
-                })
-                .as_bytes(),
-            );
-        }
+        let _ = write_line(
+            &self.stdin,
+            &protocol::encode(&Request {
+                id: 0,
+                command: Cmd::Quit,
+            }),
+        );
+        self.stdin.lock().unwrap_or_else(|e| e.into_inner()).take();
         let deadline = Instant::now() + STOP_GRACE;
         while Instant::now() < deadline {
             if self.child.try_wait().ok().flatten().is_some() {
@@ -385,7 +486,7 @@ impl HeadUnitBackend for NativeBackend {
 impl Drop for NativeBackend {
     fn drop(&mut self) {
         if self.child.try_wait().ok().flatten().is_none() {
-            self.stdin.take();
+            self.stdin.lock().unwrap_or_else(|e| e.into_inner()).take();
             thread::sleep(Duration::from_millis(100));
             if self.child.try_wait().ok().flatten().is_none() {
                 self.kill();

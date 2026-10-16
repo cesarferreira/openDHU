@@ -1,7 +1,7 @@
 //! Blocking client for the daemon API. This is how the CLI (and the test runner) reach the
 //! session, so the CLI and any other client share exactly one interface.
 
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::path::Path;
 use std::time::Duration;
 
@@ -262,6 +262,38 @@ impl Iterator for EventStream {
 }
 
 impl Client {
+    /// Open `GET /v1/video`: the phone's raw H.264 (Annex-B), starting at a keyframe. Native backend
+    /// only. Reads block until the next chunk, and end when the session ends or the daemon drops the
+    /// viewer for lagging.
+    pub fn video(&self) -> Result<Box<dyn Read + Send>> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(Duration::from_secs(5)))
+            // The daemon sends something at least every second, so silence means the link is dead.
+            .timeout_recv_body(Some(Duration::from_secs(10)))
+            .build()
+            .into();
+        let mut response = agent
+            .get(format!("{}/v1/video", self.base))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .call()
+            .map_err(|_| {
+                Error::BackendUnavailable(format!(
+                    "cannot reach the AutoLab daemon at {}",
+                    self.base
+                ))
+            })?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            let text = response.body_mut().read_to_string().unwrap_or_default();
+            return Err(match serde_json::from_str::<ErrorEnvelope>(&text) {
+                Ok(env) => Error::from_code(env.error.exit_code, env.error.message),
+                Err(_) => Error::Other(format!("the video stream answered HTTP {status}")),
+            });
+        }
+        Ok(Box::new(response.into_body().into_reader()))
+    }
+
     /// Open `GET /v1/events`. The first message is `stream.opened`; from then on the subscription
     /// is live. The call returns once the daemon has answered, and reads then block until an event
     /// or a keepalive (every 15 s) arrives.

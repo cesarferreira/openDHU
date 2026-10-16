@@ -155,3 +155,53 @@ fn dropping_the_backend_ends_the_child() {
         .success();
     assert!(!alive, "the child must not outlive the backend");
 }
+
+#[test]
+fn video_reaches_a_viewer_starting_with_a_burst_and_the_head_unit_stops_when_the_last_viewer_leaves()
+ {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let log = std::env::temp_dir().join(format!("al-native-video-{}.log", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    // SAFETY: tests take turns on LOCK, and nothing else reads this variable.
+    unsafe { std::env::set_var("FAKE_NATIVE_LOG", &log) };
+    let mut b = start("");
+    let rx = b.subscribe_video().unwrap();
+    assert_eq!(b.video_viewers(), 1);
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        first.as_slice(),
+        b"SPSPPSIDR",
+        "a viewer starts at the burst"
+    );
+    let next = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        next.starts_with(b"FRAME"),
+        "{:?}",
+        String::from_utf8_lossy(&next)
+    );
+
+    // A second viewer asks for the burst again and both keep getting frames.
+    let rx2 = b.subscribe_video().unwrap();
+    assert_eq!(b.video_viewers(), 2);
+    assert_eq!(
+        rx2.recv_timeout(Duration::from_secs(5)).unwrap().as_slice(),
+        b"SPSPPSIDR"
+    );
+
+    drop(rx);
+    drop(rx2);
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::read_to_string(&log).is_ok_and(|t| t.contains("stream-off"))
+    });
+    assert!(
+        stopped,
+        "the head unit must be told to stop when nobody watches"
+    );
+    assert_eq!(b.video_viewers(), 0);
+    // The protocol is still in step: normal requests keep working after the video stopped.
+    assert_eq!(b.status().unwrap().backend, "native");
+    unsafe { std::env::remove_var("FAKE_NATIVE_LOG") };
+    b.stop().unwrap();
+    let _ = std::fs::remove_file(&log);
+}

@@ -2,14 +2,15 @@
 //! each backend's process id and liveness, which are not part of `HeadUnitBackend`.
 
 use std::path::Path;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use autolab_core::{
-    Capabilities, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult, Result,
+    Capabilities, Error, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult, Result,
     ScreenshotResult,
 };
 use autolab_dhu::DhuBackend;
-use autolab_native::NativeBackend;
+use autolab_native::{NativeBackend, VideoChunk};
 
 pub enum AnyBackend {
     Dhu(DhuBackend),
@@ -21,6 +22,16 @@ impl AnyBackend {
         match self {
             Self::Dhu(b) => b.pid(),
             Self::Native(b) => b.pid(),
+        }
+    }
+
+    /// Watch the phone's video. Only the native backend has any: the DHU draws it in its own window.
+    pub fn subscribe_video(&mut self) -> Result<Receiver<VideoChunk>> {
+        match self {
+            Self::Native(b) => b.subscribe_video(),
+            Self::Dhu(_) => Err(Error::Unsupported(
+                "live video needs the native backend; the DHU shows it in its own window".into(),
+            )),
         }
     }
 

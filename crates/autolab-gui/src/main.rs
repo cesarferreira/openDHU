@@ -1,5 +1,6 @@
 //! `autolab-gui`: a desktop window onto the AutoLab daemon. It uses the same HTTP API as the CLI.
 
+mod live;
 mod model;
 mod ui;
 mod worker;
@@ -14,12 +15,15 @@ use model::State;
 /// the rendered window without a screen recorder, so nothing else on the desktop is captured.
 const SNAPSHOT_ENV: &str = "AUTOLAB_GUI_SNAPSHOT";
 const SNAPSHOT_AFTER: Duration = Duration::from_millis(2500);
+/// Overrides the wait, for a window that needs longer to fill, such as the live picture.
+const SNAPSHOT_AFTER_ENV: &str = "AUTOLAB_GUI_SNAPSHOT_AFTER_MS";
 
 struct App {
     state: State,
     form: ui::Form,
     tx: mpsc::Sender<model::Update>,
     rx: mpsc::Receiver<model::Update>,
+    live: live::Live,
     started: Instant,
     snapshot_to: Option<std::path::PathBuf>,
     snapshot_requested: bool,
@@ -34,6 +38,7 @@ impl App {
             form: ui::Form::new(),
             tx,
             rx,
+            live: live::Live::new(),
             started: Instant::now(),
             snapshot_to: std::env::var_os(SNAPSHOT_ENV).map(Into::into),
             snapshot_requested: false,
@@ -44,7 +49,11 @@ impl App {
         let Some(path) = self.snapshot_to.clone() else {
             return;
         };
-        if !self.snapshot_requested && self.started.elapsed() >= SNAPSHOT_AFTER {
+        let wait = std::env::var(SNAPSHOT_AFTER_ENV)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map_or(SNAPSHOT_AFTER, Duration::from_millis);
+        if !self.snapshot_requested && self.started.elapsed() >= wait {
             self.snapshot_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
@@ -77,6 +86,27 @@ impl eframe::App for App {
         while let Ok(update) = self.rx.try_recv() {
             self.state.apply(update);
         }
+        // The live picture runs only while a native session does and the box is ticked.
+        let want = self.state.native_running();
+        self.live.tick(ctx, want && self.form.live);
+        if let Some(img) = self.live.take_frame() {
+            match &mut self.state.live_texture {
+                Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+                None => {
+                    self.state.live_texture =
+                        Some(ctx.load_texture("live", img, egui::TextureOptions::LINEAR));
+                }
+            }
+        }
+        if !want {
+            self.state.live_texture = None;
+        }
+        self.state.live_problem = self
+            .live
+            .problem
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         ui::draw(ctx, &mut self.state, &mut self.form, &self.tx);
         self.snapshot_step(ctx);
     }

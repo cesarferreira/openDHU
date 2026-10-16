@@ -91,6 +91,7 @@ Request bodies are JSON and reject unknown fields. Keys are camelCase.
 | `POST /v1/focus/video` | `{"enabled": true\|false}` |
 | `POST /v1/screenshot` | `{"path": "/abs/file.png"}` |
 | `GET /v1/events` | server-sent events |
+| `GET /v1/video` | the phone's live video as raw H.264 (native backend only) |
 | `POST /v1/daemon/shutdown` | stop the session and exit the daemon |
 | `POST /v1/input/tap` | `{"x": 400, "y": 240}`: touch a pixel of the screenshot (800×480, origin top left) |
 | `POST /v1/input/swipe` | `{"x1":..,"y1":..,"x2":..,"y2":..,"durationMs": 300}`: drag; 50 to 10000 ms, default 300 |
@@ -188,6 +189,22 @@ DHU refuses screenshots while video focus is off, which comes back as an error c
 `supported` was verified on real hardware. `unverified` means the backend may offer it (the DHU console has the
 command) but AutoLab has not exercised it, so the matching endpoint returns `501`. `unsupported` means the
 backend has no way to do it. Requires a running session, because it asks the backend.
+
+### Live video: `GET /v1/video`
+
+A never-ending response (`video/h264`) of Annex-B H.264, exactly as the phone sends it: 800×480, about 45 frames per
+second while the screen moves. The first bytes are the parameter sets (SPS, PPS) and the last keyframe, so a viewer
+can start decoding at once; after that come the live frames. It needs the native backend and a running session:
+`503` with no session, `501 unsupported` with the DHU (which draws its own window).
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/v1/video | ffplay -f h264 -i -
+```
+
+Several viewers may watch at once. The head unit streams only while at least one does. A still screen sends no
+frames, so the daemon sends a filler NAL unit (type 12, which decoders skip) about once a second, which lets a
+client tell "quiet" from "dead". A viewer that falls too far behind is disconnected rather than sent a corrupt
+picture, and can reconnect. The stream ends when the session ends.
 
 ### Touch: `POST /v1/input/tap` and `/v1/input/swipe`
 

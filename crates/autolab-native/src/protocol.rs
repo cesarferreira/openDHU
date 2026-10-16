@@ -39,6 +39,11 @@ pub enum Command {
         y2: u32,
         duration_ms: u64,
     },
+    /// Start or stop streaming the phone's raw H.264 video as `Event::VideoData`. Starting resends the
+    /// parameter sets and the last keyframe first, so a late viewer can decode from the first byte.
+    VideoStream {
+        enabled: bool,
+    },
     Quit,
 }
 
@@ -108,6 +113,9 @@ pub enum Event {
     },
     /// The phone's own video state changed (it sent a start or stop indication).
     Video { state: FocusState },
+    /// `len` raw bytes follow this line, with no newline after them: Annex-B H.264, one or more NAL
+    /// units. Only sent while a `VideoStream` is on.
+    VideoData { len: usize },
     /// The USB link ended. The child exits right after.
     Disconnected { reason: String },
 }
@@ -150,6 +158,7 @@ mod tests {
                 y2: 4,
                 duration_ms: 300,
             },
+            Command::VideoStream { enabled: true },
             Command::Quit,
         ] {
             let req = Request {
@@ -183,6 +192,7 @@ mod tests {
             Line::Response(ok),
             Line::Response(err),
             Line::Event(ev),
+            Line::Event(Event::VideoData { len: 1234 }),
             Line::Event(Event::Disconnected {
                 reason: "unplugged".into(),
             }),

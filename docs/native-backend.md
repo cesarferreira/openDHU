@@ -38,6 +38,12 @@ Release of video focus is a `VideoFocusIndication` the head unit sends on its ow
 the phone answers a release with a stop message after about 0.5 s and frames stop; it answers a take-back with a
 start message within milliseconds and frames resume.
 
+## Live view
+
+The head unit has no window of its own. To watch the phone, run `autolab-gui` (or `make gui`): its **Live view** card
+shows the screen live, decoded with `ffmpeg`, and a click or drag on it touches the phone. Any other client can read
+the same stream from `GET /v1/video` ([api.md](api.md)). Screenshots remain the way to save a picture.
+
 ## Touch
 
 ```bash
@@ -70,7 +76,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   screenshot pixels (800×480). The phone never acknowledges them, so the result is `accepted` at best.
 - **One phone.** The head unit takes the Android phone it finds on USB. With several attached, `start` refuses
   rather than guess.
-- **Screenshots need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
+- **Screenshots and the live view need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
   screenshot fails and says so.
 - **USB only.** Wireless Android Auto is not wired up.
 - **Resolution** is fixed at 800×480 (480p).

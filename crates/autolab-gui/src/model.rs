@@ -32,6 +32,8 @@ pub struct Notice {
 pub enum Update {
     Conn(Conn),
     Event(LogLine),
+    /// A message that is not tied to a button press (a touch from the live picture).
+    Notice(Notice),
     /// A command finished. `Ok` carries a short success message.
     Done(Result<String, String>),
     Screenshot {
@@ -56,6 +58,10 @@ pub struct State {
     /// Commands still running. Buttons stay disabled while this is above zero.
     pub busy: usize,
     pub shot: Option<Shot>,
+    /// The newest frame of the live picture.
+    pub live_texture: Option<eframe::egui::TextureHandle>,
+    /// Why the live picture is not showing, if it is not.
+    pub live_problem: Option<String>,
 }
 
 /// Which buttons are usable right now.
@@ -74,6 +80,8 @@ impl State {
             notice: None,
             busy: 0,
             shot: None,
+            live_texture: None,
+            live_problem: None,
         }
     }
 
@@ -81,6 +89,19 @@ impl State {
         match &self.conn {
             Conn::Connected(s) => s.session.as_ref().map(|s| s.phase),
             Conn::Disconnected => None,
+        }
+    }
+
+    /// A native session is up and running: the only kind that has live video and touch.
+    pub fn native_running(&self) -> bool {
+        match &self.conn {
+            Conn::Connected(s) => s.session.as_ref().is_some_and(|s| {
+                s.phase == Phase::Running
+                    && s.details
+                        .as_ref()
+                        .is_some_and(|d| d.head_unit.backend == "native")
+            }),
+            Conn::Disconnected => false,
         }
     }
 
@@ -105,6 +126,7 @@ impl State {
     pub fn apply(&mut self, update: Update) {
         match update {
             Update::Conn(c) => self.conn = c,
+            Update::Notice(n) => self.notice = Some(n),
             Update::Event(line) => {
                 if self.log.len() == LOG_CAP {
                     self.log.pop_front();

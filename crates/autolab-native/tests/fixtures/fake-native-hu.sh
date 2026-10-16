@@ -15,6 +15,11 @@ case "$mode" in
   never-ready) cat >/dev/null; exit 0;;
 esac
 
+streamer=
+stop_stream() { [ -n "$streamer" ] && kill "$streamer" 2>/dev/null; streamer=; }
+trap 'stop_stream' EXIT
+log() { [ -n "$FAKE_NATIVE_LOG" ] && echo "$1" >> "$FAKE_NATIVE_LOG"; }
+
 echo '{"event":"ready","backend_version":"fake 0.0","backend_build":"fake-build"}'
 
 while IFS= read -r line; do
@@ -43,6 +48,18 @@ while IFS= read -r line; do
         printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x03\x20\x00\x00\x01\xe0\x08\x06\x00\x00\x00' > "$path"
         echo "{\"id\":$id,\"ok\":{\"type\":\"screenshot\",\"value\":{\"path\":\"$path\",\"width\":800,\"height\":480}}}"
       fi;;
+    video_stream)
+      case "$line" in
+        *'"enabled":true'*)
+          log stream-on
+          stop_stream
+          # A burst first (parameter sets and keyframe), then a chunk every 50 ms until told to stop.
+          printf '{"event":"video_data","len":9}\nSPSPPSIDR'
+          ( n=0; while sleep 0.05; do n=$((n+1)); printf '{"event":"video_data","len":8}\nFRAME%03d' "$n"; done ) &
+          streamer=$!; disown;;
+        *) log stream-off; stop_stream;;
+      esac
+      echo "{\"id\":$id,\"ok\":{\"type\":\"done\"}}";;
     tap|swipe)
       if [ "$observed" = off ]; then
         echo "{\"id\":$id,\"err\":{\"kind\":\"other\",\"message\":\"The phone is not projecting - nothing to touch.\"}}"
