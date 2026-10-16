@@ -140,14 +140,32 @@ fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<
             Ok("Session stopped".into())
         }
         Cmd::Focus(on) => {
+            use autolab_core::OpStatus;
+            use autolab_daemon::api::BackendKind;
             let client = Client::connect().map_err(|e| e.to_string())?;
             let r = client.focus_video(*on).map_err(|e| e.to_string())?;
             let word = if *on { "on" } else { "off" };
-            // Accepted means the DHU took the command, not that the phone confirmed it.
-            Ok(format!(
-                "Video focus {word}: {:?} by the DHU ({})",
-                r.result.status, r.operation_id
-            ))
+            match (r.backend, r.result.status) {
+                (_, OpStatus::Failed | OpStatus::Unsupported) => {
+                    Err(format!("Video focus {word} failed ({})", r.operation_id))
+                }
+                (_, OpStatus::TimedOut) => Err(format!(
+                    "Video focus {word}: the phone did not confirm in time ({})",
+                    r.operation_id
+                )),
+                (_, OpStatus::Observed) => Ok(format!(
+                    "Video focus {word}: confirmed by the phone ({})",
+                    r.operation_id
+                )),
+                // Accepted means the head unit took it. The DHU cannot hear from the phone.
+                (BackendKind::Dhu, _) => Ok(format!(
+                    "Video focus {word}: accepted by the DHU, not confirmed by the phone ({})",
+                    r.operation_id
+                )),
+                (BackendKind::Native, _) => {
+                    Ok(format!("Video focus {word}: sent ({})", r.operation_id))
+                }
+            }
         }
         Cmd::Tap(x, y) => {
             let client = Client::connect().map_err(|e| e.to_string())?;
@@ -297,14 +315,17 @@ mod tests {
         let (tx, rx) = mpsc::channel();
 
         let off = execute(&Cmd::Focus(false), &ctx, &tx).unwrap();
-        assert!(off.contains("Accepted") && off.contains("off"), "{off}");
+        assert!(
+            off.contains("off: accepted by the DHU, not confirmed by the phone"),
+            "{off}"
+        );
 
         let shot = dir
             .parent()
             .unwrap()
             .join(format!("al-gui-t-{}.png", std::process::id()));
         let on = execute(&Cmd::Focus(true), &ctx, &tx).unwrap();
-        assert!(on.contains("on"), "{on}");
+        assert!(on.contains("on: accepted by the DHU"), "{on}");
         let saved = execute(&Cmd::Screenshot(shot.clone()), &ctx, &tx).unwrap();
         assert!(saved.contains("1280x720"), "{saved}");
         match rx.try_recv().unwrap() {

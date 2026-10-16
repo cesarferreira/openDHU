@@ -225,7 +225,7 @@ fn live_card(
             );
             return;
         }
-        ui.checkbox(&mut form.live, "Show the phone's screen");
+        ui.checkbox(&mut form.live, "Show the head unit display");
         if !form.live {
             return;
         }
@@ -241,7 +241,7 @@ fn live_card(
         let response =
             ui.add(egui::Image::new((texture.id(), size)).sense(egui::Sense::click_and_drag()));
         ui.label(
-            RichText::new("Click to tap, drag to swipe. These are real touches on the phone.")
+            RichText::new("This is the head unit display, as a car would show it. Click to tap, drag to swipe: touches go to the phone.")
                 .color(DIM),
         );
         let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size());

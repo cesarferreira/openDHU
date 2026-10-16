@@ -41,7 +41,7 @@ start message within milliseconds and frames resume.
 ## Live view
 
 The head unit has no window of its own. To watch the phone, run `autolab-gui` (or `make gui`): its **Live view** card
-shows the screen live, decoded with `ffmpeg`, and a click or drag on it touches the phone. Any other client can read
+shows the head unit's display live (the projected Android Auto screen, like the DHU's window), decoded with `ffmpeg`, and a click or drag on it touches the phone. Any other client can read
 the same stream from `GET /v1/video` ([api.md](api.md)). Screenshots remain the way to save a picture.
 
 ## Touch
