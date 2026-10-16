@@ -263,8 +263,9 @@ fn live_card(
             ui.label(RichText::new(&state.live_summary).color(DIM).monospace());
             return;
         };
-        let width = ui.available_width().min(800.0);
-        let size = egui::vec2(width, width * 480.0 / 800.0);
+        let (screen_w, screen_h) = state.screen();
+        let width = ui.available_width().min(f32::from(screen_w));
+        let size = egui::vec2(width, width * f32::from(screen_h) / f32::from(screen_w));
         // When the phone has stopped projecting the last picture is old. Dim it and say so, and do not
         // send touches: the head unit refuses them anyway.
         let stopped = state.phone_stopped_projecting();
@@ -304,7 +305,8 @@ fn live_card(
                 RichText::new("buttons are experimental: the phone may ignore them").color(DIM),
             );
         });
-        let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size());
+        let screen = state.screen();
+        let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size(), screen);
         if response.drag_started()
             && let Some(p) = response.interact_pointer_pos()
         {
@@ -541,13 +543,11 @@ fn focus_card(
     });
 }
 
-/// The screenshot pixel under a click. `offset` is from the picture's top left and `shown` is the
-/// size it is drawn at, so scaling is undone and the result is clamped to the 800x480 touch screen.
-pub fn to_pixel(offset: egui::Vec2, shown: egui::Vec2) -> (u32, u32) {
-    let (w, h) = (
-        f32::from(autolab_native::protocol::SCREEN_WIDTH),
-        f32::from(autolab_native::protocol::SCREEN_HEIGHT),
-    );
+/// The screenshot pixel under a click. `offset` is from the picture's top left, `shown` is the size
+/// it is drawn at, and `screen` is the session's touch screen, so scaling is undone and the result is
+/// clamped to it.
+pub fn to_pixel(offset: egui::Vec2, shown: egui::Vec2, screen: (u16, u16)) -> (u32, u32) {
+    let (w, h) = (f32::from(screen.0), f32::from(screen.1));
     let x = (offset.x / shown.x.max(1.0) * w).clamp(0.0, w - 1.0);
     let y = (offset.y / shown.y.max(1.0) * h).clamp(0.0, h - 1.0);
     (x as u32, y as u32)
@@ -615,7 +615,8 @@ fn screenshot_card(
                 && response.clicked()
                 && let Some(pos) = response.interact_pointer_pos()
             {
-                let (x, y) = to_pixel(pos - response.rect.min, response.rect.size());
+                let screen = (shot.width as u16, shot.height as u16);
+                let (x, y) = to_pixel(pos - response.rect.min, response.rect.size(), screen);
                 dispatch(Cmd::Tap(x, y), "Sending a tap", tx, ctx, state);
             }
         }
@@ -710,6 +711,8 @@ mod tests {
                         backend_version: None,
                         backend_build: None,
                         certificate_source: None,
+                        screen_width: Some(800),
+                        screen_height: Some(480),
                         video_focus: VideoFocusStatus {
                             requested: FocusState::On,
                             backend_reported: FocusState::On,
@@ -963,14 +966,26 @@ mod tests {
     fn a_click_on_the_picture_maps_back_to_screen_pixels_and_stays_on_the_screen() {
         // Drawn at 400x240, half size: the middle is (400, 240) on the real screen.
         let shown = egui::vec2(400.0, 240.0);
-        assert_eq!(to_pixel(egui::vec2(200.0, 120.0), shown), (400, 240));
-        assert_eq!(to_pixel(egui::vec2(0.0, 0.0), shown), (0, 0));
-        assert_eq!(to_pixel(egui::vec2(400.0, 240.0), shown), (799, 479));
-        assert_eq!(to_pixel(egui::vec2(-5.0, 9999.0), shown), (0, 479));
+        let screen = (800, 480);
+        assert_eq!(
+            to_pixel(egui::vec2(200.0, 120.0), shown, screen),
+            (400, 240)
+        );
+        assert_eq!(to_pixel(egui::vec2(0.0, 0.0), shown, screen), (0, 0));
+        assert_eq!(
+            to_pixel(egui::vec2(400.0, 240.0), shown, screen),
+            (799, 479)
+        );
+        assert_eq!(to_pixel(egui::vec2(-5.0, 9999.0), shown, screen), (0, 479));
         // Full size: one to one.
         assert_eq!(
-            to_pixel(egui::vec2(764.0, 348.0), egui::vec2(800.0, 480.0)),
+            to_pixel(egui::vec2(764.0, 348.0), egui::vec2(800.0, 480.0), screen),
             (764, 348)
+        );
+        // A different screen (720p): scaling and clamping both follow it.
+        assert_eq!(
+            to_pixel(egui::vec2(400.0, 240.0), shown, (1280, 720)),
+            (1279, 719)
         );
     }
 

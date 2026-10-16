@@ -73,11 +73,15 @@ pub struct Shared {
     video: VideoConfiguration,
     sensors: SensorInformation,
     input: InputConfiguration,
+    /// The screen this session declared: `SCREEN_WIDTH`/`SCREEN_HEIGHT` unless
+    /// `AUTOLAB_NATIVE_RESOLUTION` picked a different one.
+    screen: (u16, u16),
 }
 
 impl Shared {
     pub fn new() -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let (resolution, screen) = resolution_from_env();
         Self {
             inner: Mutex::new(Inner {
                 certificate_source: None,
@@ -99,7 +103,7 @@ impl Shared {
             tx,
             rx: tokio::sync::Mutex::new(Some(rx)),
             video: VideoConfiguration {
-                resolution: Wifi::video_resolution::Enum::_480p,
+                resolution,
                 fps: Wifi::video_fps::Enum::_30,
                 dpi: 111,
             },
@@ -113,8 +117,9 @@ impl Shared {
                 // The buttons we can press. The phone asks to bind the ones it wants and is refused any
                 // that are not listed here.
                 keycodes: Key::ALL.map(Key::android_code).to_vec(),
-                touchscreen: Some((SCREEN_WIDTH, SCREEN_HEIGHT)),
+                touchscreen: Some(screen),
             },
+            screen,
         }
     }
 
@@ -139,6 +144,8 @@ impl Shared {
                         system: i.audio_bytes[1],
                         speech: i.audio_bytes[2],
                     },
+                    screen_width: self.screen.0,
+                    screen_height: self.screen.1,
                 }))
             }
             Command::Focus { enabled } => self.focus(enabled).await,
@@ -265,14 +272,15 @@ impl Shared {
     /// A tap is a swipe of zero length and duration. Touch gets no acknowledgement from the phone,
     /// so the best status is `Accepted`: it was sent. The frames that follow are context, not proof.
     async fn touch(&self, from: (u32, u32), to: (u32, u32), duration_ms: u64) -> Outcome {
+        let (width, height) = self.screen;
         for (x, y) in [from, to] {
-            if x >= u32::from(SCREEN_WIDTH) || y >= u32::from(SCREEN_HEIGHT) {
+            if x >= u32::from(width) || y >= u32::from(height) {
                 return fail(
                     ErrorKind::InvalidArgs,
                     format!(
-                        "({x}, {y}) is outside the {SCREEN_WIDTH}x{SCREEN_HEIGHT} screen (x 0-{}, y 0-{})",
-                        SCREEN_WIDTH - 1,
-                        SCREEN_HEIGHT - 1
+                        "({x}, {y}) is outside the {width}x{height} screen (x 0-{}, y 0-{})",
+                        width - 1,
+                        height - 1
                     ),
                 );
             }
@@ -575,6 +583,39 @@ impl std::ops::Deref for Hu {
 
 const CERT_ENV: &str = "AUTOLAB_NATIVE_CERT";
 const KEY_ENV: &str = "AUTOLAB_NATIVE_KEY";
+const RESOLUTION_ENV: &str = "AUTOLAB_NATIVE_RESOLUTION";
+
+/// The video resolution class and the screen size (pixels) that goes with it, matching the sizes
+/// Google's own DHU offers at each class.
+fn resolution_for_name(name: &str) -> Option<(Wifi::video_resolution::Enum, u16, u16)> {
+    match name {
+        "480p" => Some((Wifi::video_resolution::Enum::_480p, 800, 480)),
+        "720p" => Some((Wifi::video_resolution::Enum::_720p, 1280, 720)),
+        "1080p" => Some((Wifi::video_resolution::Enum::_1080p, 1920, 1080)),
+        _ => None,
+    }
+}
+
+/// `AUTOLAB_NATIVE_RESOLUTION` (`480p`, `720p` or `1080p`); unset or unrecognised falls back to the
+/// default 480p screen (`SCREEN_WIDTH` x `SCREEN_HEIGHT`) with a warning for the latter.
+fn resolution_from_env() -> (Wifi::video_resolution::Enum, (u16, u16)) {
+    let default = (
+        Wifi::video_resolution::Enum::_480p,
+        (SCREEN_WIDTH, SCREEN_HEIGHT),
+    );
+    match env_value(RESOLUTION_ENV) {
+        None => default,
+        Some(name) => match resolution_for_name(&name) {
+            Some((resolution, width, height)) => (resolution, (width, height)),
+            None => {
+                log::warn!(
+                    "{RESOLUTION_ENV}={name:?} is not one of 480p, 720p, 1080p; using the default 480p screen"
+                );
+                default
+            }
+        },
+    }
+}
 
 fn env_value(name: &str) -> Option<String> {
     std::env::var(name)

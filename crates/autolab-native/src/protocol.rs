@@ -11,8 +11,10 @@ use autolab_core::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The projected screen, in pixels. The head unit declares this as its touch screen and asks the
-/// phone for the matching video size, so touches and screenshots share one coordinate system.
+/// The default projected screen, in pixels (480p): used when `AUTOLAB_NATIVE_RESOLUTION` is unset,
+/// and as the GUI's size before a session reports its own. The head unit declares its chosen size
+/// as its touch screen and asks the phone for the matching video resolution, so touches and
+/// screenshots share one coordinate system; see `resolution_for_name` in `autolab-native-hu`.
 pub const SCREEN_WIDTH: u16 = 800;
 pub const SCREEN_HEIGHT: u16 = 480;
 /// A swipe is dragged in steps of about this many milliseconds.
@@ -93,6 +95,20 @@ pub struct StatusReport {
     /// Bytes of audio received from the phone so far, per channel.
     #[serde(default)]
     pub audio_bytes: AudioBytes,
+    /// The screen this session declared to the phone. `SCREEN_WIDTH`/`SCREEN_HEIGHT` unless
+    /// `AUTOLAB_NATIVE_RESOLUTION` picked a different one.
+    #[serde(default = "default_screen_width")]
+    pub screen_width: u16,
+    #[serde(default = "default_screen_height")]
+    pub screen_height: u16,
+}
+
+fn default_screen_width() -> u16 {
+    SCREEN_WIDTH
+}
+
+fn default_screen_height() -> u16 {
+    SCREEN_HEIGHT
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -276,6 +276,8 @@ mod tests {
             backend_version: None,
             backend_build: None,
             certificate_source: None,
+            screen_width: None,
+            screen_height: None,
             video_focus: VideoFocusStatus {
                 requested: FocusState::Off,
                 backend_reported: FocusState::Off,

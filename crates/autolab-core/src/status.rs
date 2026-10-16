@@ -31,6 +31,12 @@ pub struct HeadUnitStatus {
     #[serde(default)]
     pub certificate_source: Option<String>,
     pub video_focus: VideoFocusStatus,
+    /// The projected screen, in pixels, if the backend negotiates and reports one (native only; the
+    /// DHU shows its own window and this stays `None`).
+    #[serde(default)]
+    pub screen_width: Option<u16>,
+    #[serde(default)]
+    pub screen_height: Option<u16>,
 }
 
 #[cfg(test)]
@@ -51,6 +57,8 @@ mod tests {
                 backend_reported: FocusState::Off,
                 observed: FocusState::Unknown,
             },
+            screen_width: Some(800),
+            screen_height: Some(480),
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["state"], "running");

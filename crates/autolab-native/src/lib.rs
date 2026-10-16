@@ -469,6 +469,8 @@ impl HeadUnitBackend for NativeBackend {
                 backend_version: Some(self.version.clone()).filter(|v| !v.is_empty()),
                 backend_build: Some(self.build.clone()).filter(|v| !v.is_empty()),
                 certificate_source: report.certificate_source,
+                screen_width: Some(report.screen_width),
+                screen_height: Some(report.screen_height),
                 video_focus: VideoFocusStatus {
                     requested: report.video_focus.requested,
                     backend_reported: report.video_focus.backend_reported,

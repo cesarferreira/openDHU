@@ -85,6 +85,8 @@ impl MockBackend {
                 backend_version: Some("0.0-mock".into()),
                 backend_build: Some("mock-build".into()),
                 certificate_source: None,
+                screen_width: None,
+                screen_height: None,
                 video_focus: VideoFocusStatus {
                     requested: FocusState::Unknown,
                     backend_reported: FocusState::On,

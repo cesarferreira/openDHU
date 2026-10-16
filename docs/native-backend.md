@@ -105,13 +105,16 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 - **Audio, navigation, night mode, driving restrictions and multi-touch are not implemented.** The head unit
   answers the phone's sensor requests with fixed values (daytime, unrestricted). Those capabilities stay `unverified`.
 - **Touch is fire-and-forget.** `aa tap X Y` and `aa swipe X1 Y1 X2 Y2` send single-finger touches in
-  screenshot pixels (800×480). The phone never acknowledges them, so the result is `accepted` at best.
+  screenshot pixels, at whatever resolution the session is running (800×480 by default). The phone
+  never acknowledges them, so the result is `accepted` at best.
 - **One phone.** The head unit takes the Android phone it finds on USB. With several attached, `start` refuses
   rather than guess.
 - **Screenshots and the live view need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
   screenshot fails and says so.
 - **USB only.** Wireless Android Auto is not wired up.
-- **Resolution** is fixed at 800×480 (480p).
+- **Resolution** defaults to 800×480 (480p). `AUTOLAB_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
+  daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;
+  an unrecognised value falls back to 480p with a warning in the head unit's log.
 - **Fragile by nature.** This is an unofficial implementation of an undocumented protocol. A phone-side Android
   Auto update can break it. Run the hardware test after updating the phone.
 - **Not certified.** It is a test tool, not a car head unit.

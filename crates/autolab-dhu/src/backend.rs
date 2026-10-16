@@ -123,6 +123,8 @@ impl HeadUnitBackend for DhuBackend {
             backend_version: self.info.version.clone(),
             backend_build: self.info.build.clone(),
             certificate_source: None,
+            screen_width: None,
+            screen_height: None,
             video_focus: VideoFocusStatus {
                 requested: self.requested_video,
                 backend_reported,

@@ -11,10 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use autolab_daemon::Client;
-use autolab_native::protocol::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use eframe::egui;
 
-const FRAME_BYTES: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 /// After a failed or ended stream, wait this long before trying again.
 const RETRY: Duration = Duration::from_secs(1);
 
@@ -27,6 +25,9 @@ pub struct Live {
     pub problem: Arc<Mutex<Option<String>>>,
     stats: Arc<Stats>,
     started: Instant,
+    /// The screen size of the stream currently running (or last started), for `take_frame` to shape
+    /// the raw bytes `stream` decoded at that same size.
+    screen: (usize, usize),
 }
 
 /// Counters the window shows under the picture, so a frozen or restarting stream can be told apart
@@ -49,11 +50,16 @@ impl Live {
             problem: Arc::default(),
             stats: Arc::default(),
             started: Instant::now(),
+            screen: (
+                autolab_native::protocol::SCREEN_WIDTH as usize,
+                autolab_native::protocol::SCREEN_HEIGHT as usize,
+            ),
         }
     }
 
     /// Start the stream when it is wanted and not running, and stop it when it is not wanted.
-    pub fn tick(&mut self, ctx: &egui::Context, want: bool) {
+    /// `screen` is the session's reported pixel size: what a new stream is decoded at.
+    pub fn tick(&mut self, ctx: &egui::Context, want: bool, screen: (u16, u16)) {
         let running = self.running.load(Ordering::SeqCst);
         if !want {
             if running {
@@ -70,7 +76,8 @@ impl Live {
         *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.stop = Arc::new(AtomicBool::new(false));
         self.running.store(true, Ordering::SeqCst);
-        let (frame, stop, running, problem, stats, started, ctx) = (
+        self.screen = (screen.0 as usize, screen.1 as usize);
+        let (frame, stop, running, problem, stats, started, ctx, screen) = (
             Arc::clone(&self.frame),
             Arc::clone(&self.stop),
             Arc::clone(&self.running),
@@ -78,9 +85,10 @@ impl Live {
             Arc::clone(&self.stats),
             self.started,
             ctx.clone(),
+            self.screen,
         );
         thread::spawn(move || {
-            let result = stream(&frame, &stop, &ctx, &stats, started);
+            let result = stream(&frame, &stop, &ctx, &stats, started, screen);
             *problem.lock().unwrap_or_else(|e| e.into_inner()) = result.err();
             running.store(false, Ordering::SeqCst);
             ctx.request_repaint();
@@ -115,7 +123,7 @@ impl Live {
             .unwrap_or_else(|e| e.into_inner())
             .take()?;
         Some(egui::ColorImage::from_rgba_unmultiplied(
-            [SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize],
+            [self.screen.0, self.screen.1],
             &bytes,
         ))
     }
@@ -127,7 +135,9 @@ fn stream(
     ctx: &egui::Context,
     stats: &Arc<Stats>,
     started: Instant,
+    (width, height): (usize, usize),
 ) -> Result<(), String> {
+    let frame_bytes = width * height * 4;
     let client = Client::connect().map_err(|e| e.to_string())?;
     let mut video = client.video().map_err(|e| e.to_string())?;
     let ffmpeg = autolab_native::find_ffmpeg()
@@ -157,12 +167,12 @@ fn stream(
     let sink = {
         let (slot, ctx, stats) = (Arc::clone(frame), ctx.clone(), Arc::clone(stats));
         thread::spawn(move || {
-            let mut buf = vec![0u8; FRAME_BYTES];
+            let mut buf = vec![0u8; frame_bytes];
             while stdout.read_exact(&mut buf).is_ok() {
                 // Swap, don't copy: the slot's old buffer (if the window has not taken it) becomes the
                 // next one to fill, so catching up on a long burst allocates nothing.
                 let old = slot.lock().unwrap_or_else(|e| e.into_inner()).replace(buf);
-                buf = old.unwrap_or_else(|| vec![0u8; FRAME_BYTES]);
+                buf = old.unwrap_or_else(|| vec![0u8; frame_bytes]);
                 stats.frames.fetch_add(1, Ordering::SeqCst);
                 let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                 stats.last_frame_ms.store(ms.max(1), Ordering::SeqCst);

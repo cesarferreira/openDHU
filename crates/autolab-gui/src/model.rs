@@ -123,6 +123,23 @@ impl State {
         }
     }
 
+    /// The projected screen, in pixels: what the running native session reported, or the default
+    /// 800x480 before one has (or for the DHU, which never reports one).
+    pub fn screen(&self) -> (u16, u16) {
+        let reported = match &self.conn {
+            Conn::Connected(s) => s
+                .session
+                .as_ref()
+                .and_then(|s| s.details.as_ref())
+                .and_then(|d| Some((d.head_unit.screen_width?, d.head_unit.screen_height?))),
+            Conn::Disconnected => None,
+        };
+        reported.unwrap_or((
+            autolab_native::protocol::SCREEN_WIDTH,
+            autolab_native::protocol::SCREEN_HEIGHT,
+        ))
+    }
+
     pub fn controls(&self) -> Controls {
         let idle = self.busy == 0;
         let phase = self.phase();

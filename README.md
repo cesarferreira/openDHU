@@ -99,6 +99,13 @@ environment. `aa status` shows `Certificate: custom` or `Certificate: built-in` 
 `--json` includes `certificateSource`. Older head units report `unknown` (`null` in JSON).
 See [Native backend](docs/native-backend.md) for details.
 
+### Higher resolution
+
+The native backend projects at 800×480 (480p) by default. Set `AUTOLAB_NATIVE_RESOLUTION=720p` or `=1080p`
+before starting the daemon to ask the phone for a bigger screen instead; restart the session after changing
+it. `aa status` shows the active size (`Screen: 1280x720`); `--json` includes `screenWidth`/`screenHeight`.
+Touches, screenshots and the live view all follow whatever the running session reports.
+
 ## Commands
 
 | Command | What it does |
@@ -164,8 +171,8 @@ A token in a 0700 directory guards it, and anyone who can read that token can ru
 ## Not implemented
 
 Night mode, driving restrictions, audio and navigation focus control (their endpoints answer `501`), multi-touch,
-wireless Android Auto, resolutions above 800×480, and the DHU's `--adb` transport. The native backend's car buttons are
-sent and bound by the phone, but had no visible effect on a Pixel 6, so they are marked experimental.
+wireless Android Auto, and the DHU's `--adb` transport. The native backend's car buttons are sent and bound by the
+phone, but had no visible effect on a Pixel 6, so they are marked experimental.
 
 ## Known limitations
 
@@ -215,6 +222,7 @@ The hardware targets refuse to run if a DHU or daemon is already running, so the
 | [docs/configuration.md](docs/configuration.md) | The config file |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together |
 | [docs/feasibility.md](docs/feasibility.md) | What was verified on a real phone, with evidence |
+| [docs/vision.md](docs/vision.md) | Why AutoLab exists, and what it's for |
 
 ## Licence
 

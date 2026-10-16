@@ -91,7 +91,8 @@ impl eframe::App for App {
         }
         // The live picture runs only while a native session does and the box is ticked.
         let want = self.state.native_running();
-        self.live.tick(ctx, want && self.form.live);
+        self.live
+            .tick(ctx, want && self.form.live, self.state.screen());
         if let Some(img) = self.live.take_frame() {
             match &mut self.state.live_texture {
                 Some(t) => t.set(img, egui::TextureOptions::LINEAR),

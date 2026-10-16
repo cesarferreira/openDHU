@@ -529,6 +529,9 @@ fn print_session(s: &SessionStatus, json: bool) {
             "Certificate:  {}",
             h.certificate_source.as_deref().unwrap_or("unknown")
         );
+        if let (Some(w), Some(ht)) = (h.screen_width, h.screen_height) {
+            println!("Screen:       {w}x{ht}");
+        }
     }
     let state = match h.state {
         SessionState::Running => "running",

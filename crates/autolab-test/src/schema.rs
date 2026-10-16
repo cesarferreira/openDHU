@@ -546,6 +546,8 @@ steps:
             backend_version: None,
             backend_build: None,
             certificate_source: None,
+            screen_width: None,
+            screen_height: None,
             video_focus: autolab_core::VideoFocusStatus {
                 requested,
                 backend_reported: reported,
