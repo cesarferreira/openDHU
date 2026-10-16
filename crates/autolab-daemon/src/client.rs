@@ -296,6 +296,35 @@ impl Client {
         Ok(Box::new(response.into_body().into_reader()))
     }
 
+    /// Open `GET /v1/audio/{channel}`: raw 16-bit PCM from the phone (`AudioChannel::format`). Native
+    /// backend only. Reads block until the phone plays something, and end when the session ends.
+    pub fn audio(&self, channel: autolab_core::AudioChannel) -> Result<Box<dyn Read + Send>> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(Duration::from_secs(5)))
+            .build()
+            .into();
+        let mut response = agent
+            .get(format!("{}/v1/audio/{}", self.base, channel.name()))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .call()
+            .map_err(|_| {
+                Error::BackendUnavailable(format!(
+                    "cannot reach the AutoLab daemon at {}",
+                    self.base
+                ))
+            })?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            let text = response.body_mut().read_to_string().unwrap_or_default();
+            return Err(match serde_json::from_str::<ErrorEnvelope>(&text) {
+                Ok(env) => Error::from_code(env.error.exit_code, env.error.message),
+                Err(_) => Error::Other(format!("the audio stream answered HTTP {status}")),
+            });
+        }
+        Ok(Box::new(response.into_body().into_reader()))
+    }
+
     /// Open `GET /v1/events`. The first message is `stream.opened`; from then on the subscription
     /// is live. The call returns once the daemon has answered, and reads then block until an event
     /// or a keepalive (every 15 s) arrives.

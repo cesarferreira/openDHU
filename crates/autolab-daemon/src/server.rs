@@ -143,6 +143,40 @@ async fn video(State(d): State<Daemon>) -> std::result::Result<axum::response::R
         .expect("static headers are valid"))
 }
 
+/// The phone's audio on one channel: raw 16-bit little-endian PCM, in the format named by the
+/// `x-audio-format` header. Chunks arrive only while the phone plays something on that channel.
+async fn audio(
+    State(d): State<Daemon>,
+    axum::extract::Path(channel): axum::extract::Path<String>,
+) -> std::result::Result<axum::response::Response, ApiError> {
+    let channel: autolab_core::AudioChannel = channel
+        .parse()
+        .map_err(|m: String| ApiError(Error::InvalidArgs(m)))?;
+    let rx = d.audio(channel).await?;
+    let (tx, out) = tokio::sync::mpsc::channel::<std::result::Result<Vec<u8>, Infallible>>(64);
+    tokio::task::spawn_blocking(move || {
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(chunk) => {
+                    if tx.blocking_send(Ok((*chunk).clone())).is_err() {
+                        break;
+                    }
+                }
+                // Silence on the channel: just check the listener is still there.
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if !tx.is_closed() => {}
+                Err(_) => break,
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(out));
+    Ok(axum::response::Response::builder()
+        .header("content-type", "audio/pcm")
+        .header("x-audio-format", channel.format())
+        .header("cache-control", "no-store")
+        .body(body)
+        .expect("static headers are valid"))
+}
+
 async fn daemon_shutdown(State(d): State<Daemon>) -> Json<serde_json::Value> {
     d.shutdown().await;
     Json(json!({ "shuttingDown": true }))
@@ -232,6 +266,7 @@ pub fn router(daemon: Daemon) -> Router {
         .route("/v1/session/stop", post(session_stop))
         .route("/v1/focus/video", post(focus_video))
         .route("/v1/video", get(video))
+        .route("/v1/audio/{channel}", get(audio))
         .route("/v1/focus/audio", post(focus_audio))
         .route("/v1/focus/navigation", post(focus_navigation))
         .route("/v1/display/configure", post(display_configure))

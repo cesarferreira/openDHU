@@ -19,6 +19,8 @@ pub struct Form {
     pub live: bool,
     /// Hold the next button press for about a second.
     pub long_press: bool,
+    /// Play the phone's audio through this computer.
+    pub audio: bool,
     /// A drag in progress on the live picture: where it began, and when.
     pub drag: Option<((u32, u32), std::time::Instant)>,
     pub shot_path: String,
@@ -37,6 +39,7 @@ impl Form {
             headless: false,
             live: true,
             long_press: false,
+            audio: false,
             drag: None,
             shot_path: format!("{}/autolab-screenshot.png", dir.trim_end_matches('/')),
         }
@@ -242,7 +245,13 @@ fn live_card(
             );
             return;
         }
-        ui.checkbox(&mut form.live, "Show the head unit display");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut form.live, "Show the head unit display");
+            ui.checkbox(&mut form.audio, "Play the phone's audio");
+        });
+        if let Some(a) = &state.audio_summary {
+            ui.label(RichText::new(a).color(DIM).monospace());
+        }
         if !form.live {
             return;
         }

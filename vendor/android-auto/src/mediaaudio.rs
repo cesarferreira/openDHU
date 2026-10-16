@@ -8,7 +8,20 @@ use crate::{
 };
 
 /// The handler for the media audio channel for the android auto protocol
-pub struct MediaAudioChannelHandler {}
+pub struct MediaAudioChannelHandler {
+    /// The phone's audio session, from its start message. Each buffer is acknowledged with it, or the
+    /// phone stops after ten unacknowledged buffers. (AutoLab addition.)
+    session: std::sync::Mutex<Option<i32>>,
+}
+
+impl MediaAudioChannelHandler {
+    /// Construct a handler with no session yet.
+    pub fn new() -> Self {
+        Self {
+            session: std::sync::Mutex::new(None),
+        }
+    }
+}
 
 impl ChannelHandlerTrait for MediaAudioChannelHandler {
     fn build_channel<T: AndroidAutoMainTrait + ?Sized>(
@@ -74,7 +87,16 @@ impl ChannelHandlerTrait for MediaAudioChannelHandler {
                 AvChannelMessage::MediaIndicationAck(_, _) => unimplemented!(),
                 AvChannelMessage::MediaIndication(_chan, _timestamp, data) => {
                     main.receive_output_audio(crate::AudioChannelType::Media, data)
-                        .await
+                        .await;
+                    let session = *self.session.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(session) = session {
+                        let mut ack = Wifi::AVMediaAckIndication::new();
+                        ack.set_session(session);
+                        ack.set_value(1);
+                        stream
+                            .write_frame(AvChannelMessage::MediaIndicationAck(channel, ack).into())
+                            .await?;
+                    }
                 }
                 AvChannelMessage::SetupRequest(_chan, _m) => {
                     let mut m2 = Wifi::AVChannelSetupResponse::new();
@@ -95,7 +117,8 @@ impl ChannelHandlerTrait for MediaAudioChannelHandler {
                         .await?;
                 }
                 AvChannelMessage::VideoIndicationResponse(_, _) => unimplemented!(),
-                AvChannelMessage::StartIndication(_, _) => {
+                AvChannelMessage::StartIndication(_, m) => {
+                    *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(m.session());
                     main.start_output_audio(crate::AudioChannelType::Media)
                         .await;
                 }

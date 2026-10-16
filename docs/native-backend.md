@@ -44,6 +44,22 @@ The head unit has no window of its own. To watch the phone, run `autolab-gui` (o
 shows the head unit's display live (the projected Android Auto screen, like the DHU's window), decoded with `ffmpeg`, and a click or drag on it touches the phone. Any other client can read
 the same stream from `GET /v1/video` ([api.md](api.md)). Screenshots remain the way to save a picture.
 
+## Audio
+
+The phone plays its sound through the head unit, and the head unit streams it to anyone who asks:
+
+```bash
+autolab audio out.wav --seconds 10 [--channel media|system|speech] [--json]
+```
+
+records a channel to a WAV file and prints how much sound arrived and how loud (peak and RMS, 0 to 1). The phone sends
+nothing while a channel is silent, so the file holds only the sound that played. In the window, tick **Play the
+phone's audio** to hear it through this computer (`ffplay`, which comes with `ffmpeg`); it is off by default.
+`GET /v1/audio/{channel}` serves the same PCM ([api.md](api.md)).
+
+The crate we link never acknowledged the audio buffers it received, so the phone stalled after about ten of them. The
+vendored copy now acknowledges each one (`vendor/android-auto/AUTOLAB-PATCHES.md`).
+
 ## Touch
 
 ```bash
@@ -67,6 +83,12 @@ Pixel 6, Android 17, Android Auto 18.0.164204, macOS arm64, USB: start, six focu
 phone, status, screenshots (800×480), refusal to screenshot while the phone is not projecting, `--reverse` tunnels
 (checked with `adb reverse --list`), the YAML runner with `observed` assertions, clean stop. The test is
 `real_native_backend_reports_what_the_phone_did` in `crates/autolab-cli/tests/hardware.rs`.
+
+## Debugging knobs
+
+- `AUTOLAB_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
+- `AUTOLAB_NATIVE_IDENTITY=dhu` makes it introduce itself to the phone as Google's "Desktop Head Unit" instead of
+  "AutoLab". It made no difference to which apps the launcher lists, but it is a quick way to rule identity out.
 
 ## Limits
 

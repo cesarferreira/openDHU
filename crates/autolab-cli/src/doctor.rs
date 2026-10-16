@@ -206,6 +206,16 @@ fn native_checks(out: &mut Vec<Check>) {
             "autolab-native-hu not found (only needed for `start --backend native`)",
         ),
     });
+    out.push(
+        match autolab_native::find_ffmpeg().map(|p| p.with_file_name("ffplay")) {
+            Some(p) if p.is_file() => check(Level::Ok, "ffplay", p.display().to_string()),
+            _ => check(
+                Level::Info,
+                "ffplay",
+                "not found; the window plays the phone's audio with it (ships with ffmpeg)",
+            ),
+        },
+    );
     out.push(match autolab_native::find_ffmpeg() {
         Some(p) => check(Level::Ok, "ffmpeg", p.display().to_string()),
         None => check(

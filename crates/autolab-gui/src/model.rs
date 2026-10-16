@@ -64,6 +64,8 @@ pub struct State {
     pub live_problem: Option<String>,
     /// Frame counters, shown under the picture.
     pub live_summary: String,
+    /// Audio counters, shown while audio is on.
+    pub audio_summary: Option<String>,
 }
 
 /// Which buttons are usable right now.
@@ -85,6 +87,7 @@ impl State {
             live_texture: None,
             live_problem: None,
             live_summary: String::new(),
+            audio_summary: None,
         }
     }
 

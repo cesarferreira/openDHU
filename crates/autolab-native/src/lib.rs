@@ -29,8 +29,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult, Key,
-    OperationResult, Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
+    AudioChannel, Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult,
+    Key, OperationResult, Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
 };
 use protocol::{Command as Cmd, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, Request};
 
@@ -68,12 +68,13 @@ struct Viewer {
 const VIEWER_BACKLOG: usize = 256;
 
 impl VideoHub {
-    fn add(&self) -> Receiver<VideoChunk> {
+    /// `started`: audio has no start-up burst to wait for, video does.
+    fn add(&self, started: bool) -> Receiver<VideoChunk> {
         let (tx, rx) = mpsc::sync_channel(VIEWER_BACKLOG);
         self.viewers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(Viewer { tx, started: false });
+            .push(Viewer { tx, started });
         rx
     }
 
@@ -119,6 +120,7 @@ pub struct NativeBackend {
     child: Child,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     video: Arc<VideoHub>,
+    audio: Arc<[VideoHub; 3]>,
     rx: Receiver<Incoming>,
     next_id: u64,
     serial: Option<String>,
@@ -156,15 +158,18 @@ impl NativeBackend {
         let stdin = Arc::new(Mutex::new(child.stdin.take()));
         let stdout = child.stdout.take().expect("stdout is piped");
         let video = Arc::new(VideoHub::default());
+        let audio: Arc<[VideoHub; 3]> = Arc::default();
         let (tx, rx) = mpsc::channel();
         {
-            let (video, stdin) = (Arc::clone(&video), Arc::clone(&stdin));
-            thread::spawn(move || read_child(stdout, &tx, &video, &stdin));
+            let (video, audio, stdin) =
+                (Arc::clone(&video), Arc::clone(&audio), Arc::clone(&stdin));
+            thread::spawn(move || read_child(stdout, &tx, &video, &audio, &stdin));
         }
         let mut backend = Self {
             child,
             stdin,
             video,
+            audio,
             rx,
             next_id: 1,
             serial: launch.serial.clone(),
@@ -185,12 +190,28 @@ impl NativeBackend {
     /// so a viewer can start decoding at once. Dropping the receiver ends the subscription, and
     /// the head unit stops streaming when the last viewer has gone.
     pub fn subscribe_video(&mut self) -> Result<Receiver<VideoChunk>> {
-        let rx = self.video.add();
+        let rx = self.video.add(false);
         // Asking again also makes the head unit resend the keyframe for a viewer that joins late.
         match self.send(Cmd::VideoStream { enabled: true }, STATUS_TIMEOUT) {
             Ok(Reply::Done) => Ok(rx),
             Ok(_) => Err(unexpected("video stream")),
             Err(e) => Err(e),
+        }
+    }
+
+    /// Listen to one channel of the phone's audio: raw 16-bit PCM (`AudioChannel::format`). Chunks
+    /// arrive only while the phone plays something on that channel. Dropping the receiver ends it.
+    pub fn subscribe_audio(&mut self, channel: AudioChannel) -> Result<Receiver<VideoChunk>> {
+        let rx = self.audio[audio_slot(channel)].add(true);
+        match self.send(
+            Cmd::AudioStream {
+                channel,
+                enabled: true,
+            },
+            STATUS_TIMEOUT,
+        )? {
+            Reply::Done => Ok(rx),
+            _ => Err(unexpected("audio stream")),
         }
     }
 
@@ -347,6 +368,7 @@ fn read_child(
     stdout: impl Read,
     tx: &mpsc::Sender<Incoming>,
     video: &VideoHub,
+    audio: &[VideoHub; 3],
     stdin: &Mutex<Option<ChildStdin>>,
 ) {
     let mut out = BufReader::new(stdout);
@@ -375,6 +397,24 @@ fn read_child(
                     );
                 }
             }
+            Ok(Line::Event(Event::AudioData { channel, len })) => {
+                let mut data = vec![0u8; len];
+                if out.read_exact(&mut data).is_err() {
+                    break;
+                }
+                if audio[audio_slot(channel)].publish(&Arc::new(data), false) == 0 {
+                    let _ = write_line(
+                        stdin,
+                        &protocol::encode(&Request {
+                            id: 0,
+                            command: Cmd::AudioStream {
+                                channel,
+                                enabled: false,
+                            },
+                        }),
+                    );
+                }
+            }
             Ok(l) => {
                 if tx.send(Incoming::Line(l)).is_err() {
                     return;
@@ -388,6 +428,14 @@ fn read_child(
         }
     }
     let _ = tx.send(Incoming::Eof);
+}
+
+fn audio_slot(channel: AudioChannel) -> usize {
+    match channel {
+        AudioChannel::Media => 0,
+        AudioChannel::System => 1,
+        AudioChannel::Speech => 2,
+    }
 }
 
 fn unexpected(what: &str) -> Error {
@@ -532,7 +580,7 @@ mod hub_tests {
     #[test]
     fn a_new_viewer_gets_nothing_until_a_burst_then_live_chunks_and_no_second_burst() {
         let hub = VideoHub::default();
-        let rx = hub.add();
+        let rx = hub.add(false);
         assert_eq!(hub.publish(&chunk("live-1"), false), 1);
         assert!(
             rx.try_recv().is_err(),
@@ -548,11 +596,19 @@ mod hub_tests {
     }
 
     #[test]
+    fn an_audio_listener_hears_live_chunks_at_once_because_audio_has_no_burst() {
+        let hub = VideoHub::default();
+        let rx = hub.add(true);
+        hub.publish(&chunk("pcm-1"), false);
+        assert_eq!(rx.try_recv().unwrap().as_slice(), b"pcm-1");
+    }
+
+    #[test]
     fn a_late_viewer_is_started_by_a_burst_without_disturbing_the_running_one() {
         let hub = VideoHub::default();
-        let first = hub.add();
+        let first = hub.add(false);
         hub.publish(&chunk("burst-1"), true);
-        let second = hub.add();
+        let second = hub.add(false);
         hub.publish(&chunk("live"), false);
         hub.publish(&chunk("burst-2"), true);
         hub.publish(&chunk("live-after"), false);
@@ -568,11 +624,11 @@ mod hub_tests {
     #[test]
     fn a_viewer_that_is_gone_or_too_slow_is_dropped_and_the_count_reaches_zero() {
         let hub = VideoHub::default();
-        let rx = hub.add();
+        let rx = hub.add(false);
         hub.publish(&chunk("burst"), true);
         drop(rx);
         assert_eq!(hub.publish(&chunk("live"), false), 0);
-        let slow = hub.add();
+        let slow = hub.add(false);
         hub.publish(&chunk("burst"), true);
         let mut remaining = 1;
         for _ in 0..(VIEWER_BACKLOG + 5) {

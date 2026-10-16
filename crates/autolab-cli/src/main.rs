@@ -1,3 +1,4 @@
+mod audio_cmd;
 mod config;
 mod daemon_ctl;
 mod doctor;
@@ -70,6 +71,20 @@ enum Command {
         /// Output file, must end in .png (same as the positional argument)
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
+    },
+    /// Record what the phone plays through the car to a WAV file (native backend)
+    ///
+    /// The phone sends nothing while a channel is silent, so the file holds only the sound. The summary
+    /// says how much arrived and how loud it was, which is also how to check audio without listening.
+    Audio {
+        /// The WAV file to write
+        out: PathBuf,
+        /// media (music, 48 kHz stereo), system (prompts, 16 kHz mono) or speech (assistant, 16 kHz mono)
+        #[arg(long, default_value = "media", value_parser = parse_channel)]
+        channel: autolab_core::AudioChannel,
+        /// How long to listen, in seconds
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        seconds: u64,
     },
     /// Touch a pixel of the projected screen (0,0 is the top left of a screenshot)
     Tap { x: u32, y: u32 },
@@ -240,6 +255,28 @@ fn run(cli: Cli) -> Result<u8> {
             print_screenshot(&daemon_ctl::connect()?.screenshot(&abs)?, json);
             Ok(0)
         }
+        Command::Audio {
+            out,
+            channel,
+            seconds,
+        } => {
+            let out = output_path::absolute(&out, &current_dir()?);
+            let s = audio_cmd::record(channel, seconds, &out)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&s).expect("serializes"));
+            } else if s.bytes == 0 {
+                println!(
+                    "No {} audio arrived in {:.0} s: the phone was silent on that channel. Wrote {}",
+                    channel, s.wall_seconds, s.path
+                );
+            } else {
+                println!(
+                    "Recorded {:.1} s of {} audio in {:.0} s ({} bytes, peak {:.2}, rms {:.3}): {}",
+                    s.audio_seconds, channel, s.wall_seconds, s.bytes, s.peak, s.rms, s.path
+                );
+            }
+            Ok(0)
+        }
         Command::Tap { x, y } => {
             let r = daemon_ctl::connect()?.tap(x, y)?;
             print_input(&r, json);
@@ -328,6 +365,10 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
     }
+}
+
+fn parse_channel(s: &str) -> std::result::Result<autolab_core::AudioChannel, String> {
+    s.parse()
 }
 
 fn parse_key(s: &str) -> std::result::Result<autolab_core::Key, String> {

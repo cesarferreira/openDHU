@@ -221,3 +221,43 @@ fn buttons_are_pressed_through_the_head_unit_and_refused_while_the_phone_is_not_
         "{refused}"
     );
 }
+
+#[test]
+fn audio_reaches_a_listener_per_channel_and_the_head_unit_stops_when_the_last_one_leaves() {
+    use autolab_core::AudioChannel;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let log = std::env::temp_dir().join(format!("al-native-audio-{}.log", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    // SAFETY: tests take turns on LOCK, and nothing else reads this variable.
+    unsafe { std::env::set_var("FAKE_NATIVE_LOG", &log) };
+    let mut b = start("");
+    let rx = b.subscribe_audio(AudioChannel::Media).unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        first.starts_with(b"AUDIO"),
+        "{:?}",
+        String::from_utf8_lossy(&first)
+    );
+    // Another channel is a separate stream: the fake sends on the channel it was asked for.
+    let speech = b.subscribe_audio(AudioChannel::Speech).unwrap();
+    assert!(
+        speech
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .starts_with(b"AUDIO")
+    );
+    drop(rx);
+    drop(speech);
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::read_to_string(&log).is_ok_and(|t| t.contains("audio-off"))
+    });
+    assert!(
+        stopped,
+        "the head unit must be told to stop when nobody listens"
+    );
+    assert_eq!(b.status().unwrap().backend, "native", "still in step");
+    unsafe { std::env::remove_var("FAKE_NATIVE_LOG") };
+    b.stop().unwrap();
+    let _ = std::fs::remove_file(&log);
+}

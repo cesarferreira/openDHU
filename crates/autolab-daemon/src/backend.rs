@@ -35,6 +35,19 @@ impl AnyBackend {
         }
     }
 
+    /// Listen to one channel of the phone's audio. Native backend only.
+    pub fn subscribe_audio(
+        &mut self,
+        channel: autolab_core::AudioChannel,
+    ) -> Result<Receiver<VideoChunk>> {
+        match self {
+            Self::Native(b) => b.subscribe_audio(channel),
+            Self::Dhu(_) => Err(Error::Unsupported(
+                "audio streaming needs the native backend; the DHU plays the sound itself".into(),
+            )),
+        }
+    }
+
     /// `Some(description)` once the head unit has exited or its link is gone.
     pub fn exit_status(&mut self) -> Option<String> {
         match self {

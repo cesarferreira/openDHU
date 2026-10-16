@@ -16,8 +16,10 @@ case "$mode" in
 esac
 
 streamer=
+astreamer=
+stop_astream() { [ -n "$astreamer" ] && kill "$astreamer" 2>/dev/null; astreamer=; }
 stop_stream() { [ -n "$streamer" ] && kill "$streamer" 2>/dev/null; streamer=; }
-trap 'stop_stream' EXIT
+trap 'stop_stream; stop_astream' EXIT
 log() { [ -n "$FAKE_NATIVE_LOG" ] && echo "$1" >> "$FAKE_NATIVE_LOG"; }
 
 echo '{"event":"ready","backend_version":"fake 0.0","backend_build":"fake-build"}'
@@ -48,6 +50,18 @@ while IFS= read -r line; do
         printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x03\x20\x00\x00\x01\xe0\x08\x06\x00\x00\x00' > "$path"
         echo "{\"id\":$id,\"ok\":{\"type\":\"screenshot\",\"value\":{\"path\":\"$path\",\"width\":800,\"height\":480}}}"
       fi;;
+    audio_stream)
+      case "$line" in
+        *'"enabled":true'*)
+          log audio-on
+          stop_astream
+          case "$line" in *'"channel":"system"'*) ch=system;; *'"channel":"speech"'*) ch=speech;; *) ch=media;; esac
+          # An 8-byte chunk of "sound" every 50 ms until told to stop.
+          ( n=0; while sleep 0.05; do n=$((n+1)); printf '{"event":"audio_data","channel":"%s","len":8}\nAUDIO%03d' "$ch" "$n"; done ) &
+          astreamer=$!; disown;;
+        *) log audio-off; stop_astream;;
+      esac
+      echo "{\"id\":$id,\"ok\":{\"type\":\"done\"}}";;
     video_stream)
       case "$line" in
         *'"enabled":true'*)

@@ -91,6 +91,7 @@ Request bodies are JSON and reject unknown fields. Keys are camelCase.
 | `POST /v1/focus/video` | `{"enabled": true\|false}` |
 | `POST /v1/screenshot` | `{"path": "/abs/file.png"}` |
 | `GET /v1/events` | server-sent events |
+| `GET /v1/audio/{channel}` | the phone's audio on `media`, `system` or `speech` as raw PCM (native backend only) |
 | `GET /v1/video` | the phone's live video as raw H.264 (native backend only) |
 | `POST /v1/daemon/shutdown` | stop the session and exit the daemon |
 | `POST /v1/input/tap` | `{"x": 400, "y": 240}`: touch a pixel of the screenshot (800×480, origin top left) |
@@ -205,6 +206,19 @@ Several viewers may watch at once. The head unit streams only while at least one
 frames, so the daemon sends a filler NAL unit (type 12, which decoders skip) about once a second, which lets a
 client tell "quiet" from "dead". A viewer that falls too far behind is disconnected rather than sent a corrupt
 picture, and can reconnect. The stream ends when the session ends.
+
+### Audio: `GET /v1/audio/{channel}`
+
+Raw 16-bit little-endian PCM from the phone, one channel per request: `media` (music, 48 kHz stereo), `system`
+(navigation prompts and notification sounds, 16 kHz mono) or `speech` (the assistant, 16 kHz mono). The format is also
+in the `x-audio-format` header (`s16le;rate=48000;channels=2`). The phone sends nothing while a channel is silent, so
+the response may sit quiet for a long time. Native backend only: `501` with the DHU (which plays the sound itself),
+`503` with no session, `400` for an unknown channel. The head unit streams a channel only while someone listens.
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/v1/audio/media | ffplay -f s16le -ar 48000 -ac 2 -nodisp -i -
+autolab audio out.wav --seconds 10        # record a channel to a WAV and print how loud it was
+```
 
 ### Touch: `POST /v1/input/tap` and `/v1/input/swipe`
 

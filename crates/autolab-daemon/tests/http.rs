@@ -1062,3 +1062,50 @@ fn live_video_streams_from_a_keyframe_and_ends_with_the_session() {
         "the stream must end: {end:?}"
     );
 }
+
+#[test]
+fn audio_validates_the_channel_needs_a_session_and_the_native_backend_and_streams_pcm() {
+    let fake = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../autolab-native/tests/fixtures/fake-native-hu.sh"
+    );
+    // SAFETY: no other test in this file reads this variable, and each sets the same value.
+    unsafe { std::env::set_var("AUTOLAB_NATIVE_HU", fake) };
+    let d = TestDaemon::start(false);
+    let h = authed(&d);
+    let (st, b) = raw(d.port(), "GET", "/v1/audio/media", &h, None);
+    assert_eq!((st, error_of(&b).0), (503, "backend_unavailable"), "{b}");
+    let (st, b) = raw(d.port(), "GET", "/v1/audio/music", &h, None);
+    assert_eq!((st, error_of(&b).0), (400, "invalid_args"), "{b}");
+    let host = ("Host", format!("127.0.0.1:{}", d.port()));
+    let (st, _) = raw(
+        d.port(),
+        "GET",
+        "/v1/audio/media",
+        std::slice::from_ref(&host),
+        None,
+    );
+    assert_eq!(st, 401, "audio needs the token like everything else");
+
+    d.client.start(&d.dhu()).unwrap();
+    let (st, b) = raw(d.port(), "GET", "/v1/audio/media", &h, None);
+    assert_eq!((st, error_of(&b)), (501, ("unsupported", 5)), "{b}");
+    d.client.stop().unwrap();
+
+    d.client
+        .start(&StartRequest {
+            backend: autolab_daemon::api::BackendKind::Native,
+            serial: Some("FAKE0001".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut audio = d.client.audio(autolab_core::AudioChannel::Media).unwrap();
+    let mut got = [0u8; 8];
+    audio.read_exact(&mut got).unwrap();
+    assert_eq!(
+        &got[..5],
+        b"AUDIO",
+        "raw PCM chunks, nothing wrapped around them"
+    );
+    d.client.stop().unwrap();
+}

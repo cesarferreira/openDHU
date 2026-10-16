@@ -1848,9 +1848,9 @@ async fn handle_client_generic<
         channel_handlers.push(InputChannelHandler {}.into());
         channel_handlers.push(SensorChannelHandler {}.into());
         channel_handlers.push(VideoChannelHandler::new().into());
-        channel_handlers.push(MediaAudioChannelHandler {}.into());
-        channel_handlers.push(SpeechAudioChannelHandler {}.into());
-        channel_handlers.push(SystemAudioChannelHandler {}.into());
+        channel_handlers.push(MediaAudioChannelHandler::new().into());
+        channel_handlers.push(SpeechAudioChannelHandler::new().into());
+        channel_handlers.push(SystemAudioChannelHandler::new().into());
         channel_handlers.push(AvInputChannelHandler {}.into());
         if main.supports_bluetooth().is_some() {
             channel_handlers.push(BluetoothChannelHandler {}.into());

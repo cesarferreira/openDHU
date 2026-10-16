@@ -14,7 +14,11 @@ Changes against upstream:
    `AndroidAutoVideoChannelTrait`, `phone_video_started` and `phone_video_stopped`, are called when the phone
    sends a video `StartIndication` or `StopIndication`. Log lines (`PHONE video ...`) show the same messages,
    plus the phone's `FocusRequest`. This is what lets AutoLab report what the phone did, not only what it sent.
-3. **`Cargo.toml`.** Removed the example app's dev-dependencies and the `bindgen` feature of `aws-lc-rs`,
+3. **Audio acknowledgements** (`src/mediaaudio.rs`, `src/sysaudio.rs`, `src/speechaudio.rs`). Upstream never
+   acknowledges the audio buffers it receives, although the video channel does. The phone sends at most ten
+   unacknowledged buffers (`max_unacked`), so audio would stall after about ten. Each handler now remembers the
+   phone's session from its start message and acknowledges every buffer with it.
+4. **`Cargo.toml`.** Removed the example app's dev-dependencies and the `bindgen` feature of `aws-lc-rs`,
    dropped the git `[patch]` (the workspace root carries it, pointing at `vendor/rustls-webpki`), and pinned
    `rustls` to `=0.23.37`. The `examples/` directory is not copied.
 

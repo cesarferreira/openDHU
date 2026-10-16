@@ -13,10 +13,12 @@ use android_auto::{
     HeadUnitInfo, InputConfiguration, SendableAndroidAutoMessage, SensorInformation,
     VideoConfiguration, Wifi,
 };
-use autolab_core::{FocusState, InputResult, Key, OpStatus, OperationResult, VideoFocusStatus};
+use autolab_core::{
+    AudioChannel, FocusState, InputResult, Key, OpStatus, OperationResult, VideoFocusStatus,
+};
 use autolab_native::protocol::{
-    Command, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, SCREEN_HEIGHT, SCREEN_WIDTH,
-    SWIPE_MAX_MS, SWIPE_MIN_MS, SWIPE_STEP_MS, StatusReport,
+    AudioBytes, Command, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, SCREEN_HEIGHT,
+    SCREEN_WIDTH, SWIPE_MAX_MS, SWIPE_MIN_MS, SWIPE_STEP_MS, StatusReport,
 };
 use std::sync::Arc;
 
@@ -55,6 +57,9 @@ struct Inner {
     have_keyframe: bool,
     /// A viewer is watching: every frame is also sent to the daemon.
     streaming: bool,
+    /// Bytes of audio received, and whether a listener wants each channel, in `AudioChannel::ALL` order.
+    audio_bytes: [u64; 3],
+    audio_streaming: [bool; 3],
     /// The viewer asked before a keyframe had arrived: send the burst as soon as one does.
     burst_pending: bool,
 }
@@ -85,6 +90,8 @@ impl Shared {
                 have_keyframe: false,
                 streaming: false,
                 burst_pending: false,
+                audio_bytes: [0; 3],
+                audio_streaming: [false; 3],
             }),
             ready: AtomicBool::new(false),
             tx,
@@ -124,6 +131,11 @@ impl Shared {
                         observed: i.observed,
                     },
                     frames: i.frames,
+                    audio_bytes: AudioBytes {
+                        media: i.audio_bytes[0],
+                        system: i.audio_bytes[1],
+                        speech: i.audio_bytes[2],
+                    },
                 }))
             }
             Command::Focus { enabled } => self.focus(enabled).await,
@@ -143,6 +155,10 @@ impl Shared {
                     );
                 }
                 self.touch((x1, y1), (x2, y2), duration_ms).await
+            }
+            Command::AudioStream { channel, enabled } => {
+                self.lock().audio_streaming[audio_slot(channel)] = enabled;
+                Outcome::Ok(Reply::Done)
             }
             Command::Key { key, long_press } => self.press(key, long_press).await,
             Command::VideoStream { enabled } => {
@@ -482,6 +498,10 @@ impl Shared {
     }
 }
 
+fn audio_slot(c: AudioChannel) -> usize {
+    AudioChannel::ALL.iter().position(|a| *a == c).unwrap_or(0)
+}
+
 /// One NAL unit of an Annex-B stream, with its start code.
 struct Nal<'a> {
     kind: u8,
@@ -551,15 +571,28 @@ impl std::ops::Deref for Hu {
 }
 
 pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String> {
+    // How this head unit introduces itself to the phone. Android Auto may treat head units differently
+    // (for example which apps it lists), so AUTOLAB_NATIVE_IDENTITY=dhu presents it as Google's DHU.
+    let as_dhu = std::env::var("AUTOLAB_NATIVE_IDENTITY").is_ok_and(|v| v == "dhu");
+    let (maker, model) = if as_dhu {
+        ("Google", "Desktop Head Unit")
+    } else {
+        ("AutoLab", "autolab-native-hu")
+    };
     let config = AndroidAutoConfiguration {
         unit: HeadUnitInfo {
-            name: "AutoLab".into(),
-            car_model: "AutoLab".into(),
+            name: if as_dhu {
+                "Desktop Head Unit"
+            } else {
+                "AutoLab"
+            }
+            .into(),
+            car_model: model.into(),
             car_year: "2026".into(),
             car_serial: "1".into(),
             left_hand: false,
-            head_manufacturer: "AutoLab".into(),
-            head_model: "autolab-native-hu".into(),
+            head_manufacturer: maker.into(),
+            head_model: model.into(),
             sw_build: "1".into(),
             sw_version: env!("CARGO_PKG_VERSION").into(),
             native_media: true,
@@ -645,7 +678,19 @@ impl AndroidAutoAudioOutputTrait for Hu {
     async fn close_output_channel(&self, _t: AudioChannelType) -> Result<(), ()> {
         Ok(())
     }
-    async fn receive_output_audio(&self, _t: AudioChannelType, _data: Vec<u8>) {}
+    async fn receive_output_audio(&self, t: AudioChannelType, data: Vec<u8>) {
+        let channel = match t {
+            AudioChannelType::Media => AudioChannel::Media,
+            AudioChannelType::System => AudioChannel::System,
+            AudioChannelType::Speech => AudioChannel::Speech,
+        };
+        let slot = audio_slot(channel);
+        let mut i = self.lock();
+        i.audio_bytes[slot] += data.len() as u64;
+        if i.audio_streaming[slot] {
+            crate::emit_audio(channel, &data);
+        }
+    }
     async fn start_output_audio(&self, _t: AudioChannelType) {}
     async fn stop_output_audio(&self, _t: AudioChannelType) {}
 }

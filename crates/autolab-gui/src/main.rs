@@ -2,6 +2,7 @@
 
 mod live;
 mod model;
+mod sound;
 mod ui;
 mod worker;
 
@@ -24,6 +25,7 @@ struct App {
     tx: mpsc::Sender<model::Update>,
     rx: mpsc::Receiver<model::Update>,
     live: live::Live,
+    sound: sound::Sound,
     started: Instant,
     snapshot_to: Option<std::path::PathBuf>,
     snapshot_requested: bool,
@@ -39,6 +41,7 @@ impl App {
             tx,
             rx,
             live: live::Live::new(),
+            sound: sound::Sound::new(),
             started: Instant::now(),
             snapshot_to: std::env::var_os(SNAPSHOT_ENV).map(Into::into),
             snapshot_requested: false,
@@ -101,6 +104,9 @@ impl eframe::App for App {
         if !want {
             self.state.live_texture = None;
         }
+        // Audio is opt-in: it plays sound, and the phone may be playing something private.
+        self.sound.tick(want && self.form.audio);
+        self.state.audio_summary = self.form.audio.then(|| self.sound.summary());
         self.state.live_summary = self.live.summary();
         self.state.live_problem = self
             .live

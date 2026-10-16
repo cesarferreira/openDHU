@@ -242,3 +242,48 @@ fn the_dhu_backend_answers_a_key_press_with_unsupported() {
     assert_eq!(code(&s.start_fake()), 0);
     assert_eq!(code(&s.autolab(&["key", "home"])), 5);
 }
+
+#[test]
+fn audio_is_recorded_to_a_wav_with_a_summary_and_refused_without_a_native_session() {
+    let s = Sandbox::new();
+    let wav = s.scratch("rec.wav");
+    let wav_arg = wav.display().to_string();
+    assert_eq!(
+        code(&s.autolab(&["audio", &wav_arg, "--seconds", "1"])),
+        3,
+        "no session"
+    );
+    assert_eq!(
+        code(&s.autolab(&["audio", &wav_arg, "--channel", "music"])),
+        2,
+        "unknown channel"
+    );
+
+    assert_eq!(code(&s.start_fake()), 0);
+    assert_eq!(
+        code(&s.autolab(&["audio", &wav_arg, "--seconds", "1"])),
+        5,
+        "the DHU plays its own sound"
+    );
+    assert_eq!(code(&s.autolab(&["stop"])), 0);
+
+    assert_eq!(code(&start_native(&s, &[], &[])), 0);
+    let o = s.autolab(&["audio", &wav_arg, "--seconds", "2", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["channel"], "media");
+    assert_eq!(v["format"], "s16le;rate=48000;channels=2");
+    let bytes = v["bytes"].as_u64().unwrap();
+    assert!(
+        bytes >= 8 * 10,
+        "the fake sends 8 bytes about 20 times a second: {v}"
+    );
+    let file = std::fs::read(&wav).unwrap();
+    assert_eq!(&file[..4], b"RIFF");
+    assert_eq!(
+        file.len() as u64,
+        44 + bytes,
+        "header plus exactly the PCM that arrived"
+    );
+    let _ = std::fs::remove_file(&wav);
+}

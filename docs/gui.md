@@ -21,6 +21,8 @@ the terminal. `autolab` must sit next to `autolab-gui` or be on `PATH`.
   `ffmpeg`, so `ffmpeg` must be installed. **Click** the picture to tap, **drag** to swipe; the drag takes as long as
   you took (50 ms to 2 s). Touches go to the phone as a car's touch screen would send them. Untick "Show the head unit display" to stop the
   stream. The DHU draws its own window, so there is no live view for it.
+- **Audio**: tick **Play the phone's audio** (off by default) to hear what the phone plays, through `ffplay`. A line under
+  the picture shows how many seconds of sound have arrived on each channel.
 - **Video focus**: what AutoLab requested, what the head unit reports, and the phone-side value. With the DHU that
   is always `unknown`. With the native backend it is the phone's own word. **Focus on** and **Focus off** send the command.
 - **Screenshot**: saves a PNG to the path you type (absolute, ends in `.png`, no spaces) and previews it. On the

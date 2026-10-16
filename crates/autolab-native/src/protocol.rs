@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use autolab_core::{
-    FocusState, InputResult, Key, OperationResult, ScreenshotResult, VideoFocusStatus,
+    AudioChannel, FocusState, InputResult, Key, OperationResult, ScreenshotResult, VideoFocusStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,11 @@ pub enum Command {
         key: Key,
         long_press: bool,
     },
+    /// Start or stop streaming one channel of the phone's audio as `Event::AudioData`.
+    AudioStream {
+        channel: AudioChannel,
+        enabled: bool,
+    },
     /// Start or stop streaming the phone's raw H.264 video as `Event::VideoData`. Starting resends the
     /// parameter sets and the last keyframe first, so a late viewer can decode from the first byte.
     VideoStream {
@@ -83,6 +88,16 @@ pub struct StatusReport {
     pub video_focus: VideoFocusStatus,
     /// Video frames received from the phone so far.
     pub frames: u64,
+    /// Bytes of audio received from the phone so far, per channel.
+    #[serde(default)]
+    pub audio_bytes: AudioBytes,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioBytes {
+    pub media: u64,
+    pub system: u64,
+    pub speech: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -129,6 +144,8 @@ pub enum Event {
         #[serde(default)]
         burst: bool,
     },
+    /// `len` raw bytes of 16-bit PCM follow this line (see `AudioChannel` for the format).
+    AudioData { channel: AudioChannel, len: usize },
     /// The USB link ended. The child exits right after.
     Disconnected { reason: String },
 }
@@ -176,6 +193,10 @@ mod tests {
                 long_press: true,
             },
             Command::VideoStream { enabled: true },
+            Command::AudioStream {
+                channel: AudioChannel::Speech,
+                enabled: true,
+            },
             Command::Quit,
         ] {
             let req = Request {
@@ -209,6 +230,10 @@ mod tests {
             Line::Response(ok),
             Line::Response(err),
             Line::Event(ev),
+            Line::Event(Event::AudioData {
+                channel: AudioChannel::Media,
+                len: 9,
+            }),
             Line::Event(Event::VideoData {
                 len: 1234,
                 burst: true,

@@ -305,6 +305,15 @@ impl Daemon {
         with_backend(r.backend, |b| b.subscribe_video()).await?
     }
 
+    /// A live feed of one channel of the phone's audio, for `GET /v1/audio/{channel}`.
+    pub async fn audio(
+        &self,
+        channel: autolab_core::AudioChannel,
+    ) -> Result<std::sync::mpsc::Receiver<autolab_native::VideoChunk>> {
+        let r = self.running()?;
+        with_backend(r.backend, move |b| b.subscribe_audio(channel)).await?
+    }
+
     pub async fn screenshot(&self, path: PathBuf) -> Result<ScreenshotResponse> {
         validate_screenshot_path(&path)?;
         let r = self.running()?;

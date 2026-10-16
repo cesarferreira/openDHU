@@ -36,6 +36,18 @@ pub fn emit(line: &Line) {
 
 /// A `VideoData` line followed by that many raw bytes, written under one lock so nothing can come
 /// between them.
+/// An `AudioData` line followed by that many raw PCM bytes.
+pub fn emit_audio(channel: autolab_core::AudioChannel, data: &[u8]) {
+    let head = protocol::encode(&Line::Event(Event::AudioData {
+        channel,
+        len: data.len(),
+    }));
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(head.as_bytes());
+    let _ = out.write_all(data);
+    let _ = out.flush();
+}
+
 pub fn emit_video(data: &[u8], burst: bool) {
     let head = protocol::encode(&Line::Event(Event::VideoData {
         len: data.len(),
