@@ -87,8 +87,11 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 ## Debugging knobs
 
 - `AUTOLAB_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
-- `AUTOLAB_NATIVE_IDENTITY=dhu` makes it introduce itself to the phone as Google's "Desktop Head Unit" instead of
-  "AutoLab". It made no difference to which apps the launcher lists, but it is a quick way to rule identity out.
+- With custom credentials, the native backend advertises Google's developer DHU make/model identity so
+  Android Auto can include debug Car App Library apps. `AUTOLAB_NATIVE_IDENTITY=autolab` opts out;
+  `AUTOLAB_NATIVE_IDENTITY=dhu` forces the DHU identity even with bundled credentials. The daemon must inherit
+  this setting. The legacy protocol's `head_unit_name` field is actually the vehicle make: it must be
+  `Google`, not `Desktop Head Unit`. Both vehicle and head-unit models must be `Desktop Head Unit`.
 - The native backend automatically reads `~/.config/autolab/credentials/head-unit-cert.pem` and
   `~/.config/autolab/credentials/head-unit-key.pem`. Both absent means the bundled certificate; an incomplete,
   unreadable, or invalid pair fails startup. Keep the key outside this repository (`chmod 600`).

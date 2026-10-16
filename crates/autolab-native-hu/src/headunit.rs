@@ -642,14 +642,16 @@ fn read_pem(name: &str, path: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String> {
-    // How this head unit introduces itself to the phone. Android Auto may treat head units differently
-    // (for example which apps it lists), so AUTOLAB_NATIVE_IDENTITY=dhu presents it as Google's DHU.
-    let as_dhu = std::env::var("AUTOLAB_NATIVE_IDENTITY").is_ok_and(|v| v == "dhu");
-    let unit = if as_dhu {
-        // Field for field what Google's DHU 2.0 sends, as Android Auto logs it.
+/// Custom development credentials need the DHU make/model identity for debug-app eligibility.
+/// Keep the explicit identity override for comparisons with an ordinary head unit.
+fn head_unit_info(identity: Option<&str>, custom_certificate: bool) -> HeadUnitInfo {
+    let as_dhu = identity
+        .map(|value| value == "dhu")
+        .unwrap_or(custom_certificate);
+    if as_dhu {
+        // The upstream `name` field is wire field 2: the vehicle make, not a display name.
         HeadUnitInfo {
-            name: "Desktop Head Unit".into(),
+            name: "Google".into(),
             car_model: "Desktop Head Unit".into(),
             car_year: "2015".into(),
             car_serial: "0".into(),
@@ -675,17 +677,24 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
             native_media: true,
             hide_clock: Some(true),
         }
-    };
+    }
+}
+
+pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String> {
     let credentials_dir = std::env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .map(|home| std::path::PathBuf::from(home).join(".config/autolab/credentials"));
+    let custom_certificate = load_certificate(
+        env_value(CERT_ENV).as_deref(),
+        env_value(KEY_ENV).as_deref(),
+        credentials_dir.as_deref(),
+    )?;
     let config = AndroidAutoConfiguration {
-        unit,
-        custom_certificate: load_certificate(
-            env_value(CERT_ENV).as_deref(),
-            env_value(KEY_ENV).as_deref(),
-            credentials_dir.as_deref(),
-        )?,
+        unit: head_unit_info(
+            env_value("AUTOLAB_NATIVE_IDENTITY").as_deref(),
+            custom_certificate.is_some(),
+        ),
+        custom_certificate,
     };
     hu.lock().certificate_source = Some(
         if config.custom_certificate.is_some() {
@@ -832,6 +841,19 @@ impl AndroidAutoMainTrait for Hu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_credentials_use_the_developer_head_unit_identity() {
+        let unit = head_unit_info(None, true);
+        // These are the four make/model fields checked by Android Auto for DHU app eligibility.
+        assert_eq!(unit.name, "Google");
+        assert_eq!(unit.car_model, "Desktop Head Unit");
+        assert_eq!(unit.head_manufacturer, "Google");
+        assert_eq!(unit.head_model, "Desktop Head Unit");
+        assert_eq!(head_unit_info(None, false).name, "AutoLab");
+        assert_eq!(head_unit_info(Some("autolab"), true).name, "AutoLab");
+        assert_eq!(head_unit_info(Some("dhu"), false).name, "Google");
+    }
 
     #[test]
     fn standard_credentials_are_discovered_and_explicit_paths_take_priority() {

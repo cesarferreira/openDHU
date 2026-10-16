@@ -89,6 +89,9 @@ chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
 aa start --backend native
 ```
 
+With custom credentials, AutoLab also advertises the developer DHU identity so debug Android Auto apps can
+appear. Set `AUTOLAB_NATIVE_IDENTITY=autolab` to opt out.
+
 If neither file exists, AutoLab uses its bundled certificate. If only one exists or either is unreadable or
 invalid, startup fails. To override the standard paths, set both `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY`
 before starting the daemon. Restart the session after changing files; restart the daemon after changing its
