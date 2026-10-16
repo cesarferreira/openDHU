@@ -861,3 +861,29 @@ fn the_idle_timeout_never_ends_a_running_session_or_a_persistent_daemon() {
         "a daemon started with `autolab daemon` stays up while idle"
     );
 }
+
+#[test]
+fn the_typed_client_stream_delivers_the_same_events_in_order() {
+    let d = TestDaemon::start(false);
+    let mut stream = d.client.events().unwrap();
+    let first = stream.next().unwrap().unwrap();
+    assert_eq!(first.event, "stream.opened");
+    assert_eq!(first.id, None);
+    d.client.start(&d.dhu()).unwrap();
+    d.client.focus_video(false).unwrap();
+    d.client.stop().unwrap();
+    let mut kinds = Vec::new();
+    let mut ids = Vec::new();
+    for m in stream.by_ref() {
+        let m = m.unwrap();
+        kinds.push(m.event.clone());
+        ids.extend(m.id);
+        if m.event == "session.stopped" {
+            break;
+        }
+    }
+    let pos = |k: &str| kinds.iter().position(|x| x == k).unwrap();
+    assert!(pos("session.started") < pos("focus.video.accepted"));
+    assert!(pos("focus.video.accepted") < pos("session.stopped"));
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
+}

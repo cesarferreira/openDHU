@@ -1,6 +1,7 @@
 //! Blocking client for the daemon API. This is how the CLI (and the test runner) reach the
 //! session, so the CLI and any other client share exactly one interface.
 
+use std::io::BufRead;
 use std::path::Path;
 use std::time::Duration;
 
@@ -169,5 +170,137 @@ impl Client {
     /// Base URL and token, for callers that stream `/v1/events` themselves.
     pub fn endpoint(&self) -> (&str, &str) {
         (&self.base, &self.token)
+    }
+}
+
+/// One message from `GET /v1/events`. `stream.opened` has no `id` and an empty object as data.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamMessage {
+    pub id: Option<u64>,
+    pub event: String,
+    pub data: serde_json::Value,
+}
+
+/// Iterator over the server-sent events of an open stream. It ends when the daemon closes the
+/// stream, and yields an error if the connection breaks.
+pub struct EventStream {
+    reader: Box<dyn BufRead + Send>,
+}
+
+impl EventStream {
+    pub fn from_reader(reader: impl BufRead + Send + 'static) -> Self {
+        Self {
+            reader: Box::new(reader),
+        }
+    }
+}
+
+impl Iterator for EventStream {
+    type Item = Result<StreamMessage>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (mut id, mut event, mut data) = (None, None::<String>, Vec::<String>::new());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => return None,
+                Ok(_) => {}
+                Err(e) => {
+                    return Some(Err(Error::BackendUnavailable(format!(
+                        "the event stream broke: {e}"
+                    ))));
+                }
+            }
+            let l = line.trim_end_matches(['\r', '\n']);
+            if l.is_empty() {
+                // A blank line ends a message. Comments (keepalives) leave nothing to deliver.
+                if event.is_none() && data.is_empty() {
+                    continue;
+                }
+                let text = data.join("\n");
+                let value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+                return Some(Ok(StreamMessage {
+                    id,
+                    event: event.unwrap_or_else(|| "message".into()),
+                    data: value,
+                }));
+            }
+            if l.starts_with(':') {
+                continue;
+            }
+            let (field, value) = l.split_once(':').unwrap_or((l, ""));
+            let value = value.strip_prefix(' ').unwrap_or(value);
+            match field {
+                "id" => id = value.parse().ok(),
+                "event" => event = Some(value.to_string()),
+                "data" => data.push(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Client {
+    /// Open `GET /v1/events`. The first message is `stream.opened`; from then on the subscription
+    /// is live. The call returns once the daemon has answered, and reads then block until an event
+    /// or a keepalive (every 15 s) arrives.
+    pub fn events(&self) -> Result<EventStream> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(Duration::from_secs(5)))
+            .build()
+            .into();
+        let response = agent
+            .get(format!("{}/v1/events", self.base))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .call()
+            .map_err(|_| {
+                Error::BackendUnavailable(format!(
+                    "cannot reach the AutoLab daemon at {}",
+                    self.base
+                ))
+            })?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            return Err(Error::Other(format!(
+                "the event stream answered HTTP {status}"
+            )));
+        }
+        Ok(EventStream::from_reader(std::io::BufReader::new(
+            response.into_body().into_reader(),
+        )))
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    fn parse(text: &str) -> Vec<StreamMessage> {
+        EventStream::from_reader(std::io::Cursor::new(text.to_string()))
+            .map(|m| m.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn parses_messages_skips_keepalives_and_tolerates_missing_id() {
+        let got = parse(
+            "event: stream.opened\ndata: {}\n\n: keepalive\n\nid: 7\nevent: focus.video.accepted\ndata: {\"a\":1}\n\n",
+        );
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].id, got[0].event.as_str()), (None, "stream.opened"));
+        assert_eq!(
+            (got[1].id, got[1].event.as_str()),
+            (Some(7), "focus.video.accepted")
+        );
+        assert_eq!(got[1].data["a"], 1);
+    }
+
+    #[test]
+    fn joins_multiline_data_and_ignores_unfinished_trailing_message() {
+        let got = parse("event: x\ndata: [1,\ndata: 2]\n\nevent: cut\ndata: {");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].data, serde_json::json!([1, 2]));
     }
 }

@@ -6,6 +6,7 @@ members = [
     "crates/autolab-dhu",
     "crates/autolab-test",
     "crates/autolab-cli",
+    "crates/autolab-gui",
 ]
 
 [workspace.package]
@@ -21,12 +22,15 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_norway = "0.9"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 ureq = { version = "3", default-features = false }
 thiserror = "2"
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 lto = "thin"

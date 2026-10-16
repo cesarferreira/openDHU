@@ -17,7 +17,8 @@ use clap::ValueEnum;
 use crate::daemon_ctl;
 use crate::session_backend::DaemonBackend;
 
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(ValueEnum, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum ReportFormat {
     Json,
     Junit,

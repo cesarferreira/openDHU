@@ -52,6 +52,7 @@ while IFS= read -r line; do
       fi
       case "$FAKE_DHU_MODE" in
         screenshot-nofile) ;;
+        screenshot-valid) cp "$(dirname "$0")/shot.png" "$path";;
         screenshot-notpng) echo "this is not a png, just some text padding" > "$path";;
         *) printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x05\x00\x00\x00\x02\xd0\x08\x06\x00\x00\x00' > "$path";;
       esac;;

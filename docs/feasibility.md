@@ -180,7 +180,7 @@ accessory link. `autolab doctor` reports a `desktop-head-unit` that AutoLab did 
 the likeliest cause of a failed `autolab start`.
 
 Because a closed stdin ends the DHU, the daemon that owns the pipe cannot leave an orphan behind, even if
-the daemon is killed. **Not tested:** physically unplugging the phone while a session is active. The
+the daemon is killed. **Tested on the phone:** unplugging the cable ends the session (see 7b). The
 exit status 0 on every path means the exit code cannot tell a crash from a clean exit.
 
 ## 7. The "existing session" constraint
@@ -223,7 +223,24 @@ Options for teams that already launch the DHU from their own script (not impleme
   alone and never hammered. `status` shows how many times each tunnel was re-applied.
 - **Verified on the phone:** with `--reverse 47123`, removing that tunnel with `adb reverse --remove` was repaired
   within 2 s (`status`: `active`, `reapplied: 1`; an independent `adb reverse --list` agreed). That drop was
-  *simulated*; a genuine USB re-enumeration was not forced, because doing so risks the DHU link.
+  *simulated*. A real unplug is covered in 7b.
+
+## 7b. Physical unplug and replug (observed on the phone)
+
+One run, Pixel 6, session started with `--reverse 47123`, cable pulled, then plugged back in about 10 s later
+(the user did it by hand, so the times are approximate):
+
+- adb lost the device at 10:28:37 (1 s polling). The DHU exited with status 0 at 10:28:49 and the daemon
+  emitted `session.ended` (`the DHU exited (exit status: 0)`). Whether the DHU noticed the unplug or the replug
+  was not separated.
+- The ephemeral daemon then exited and removed `daemon.json`. `autolab status` returned exit code 3. No
+  processes were left.
+- After the replug, a fresh `autolab start --reverse 47123` worked, and an independent `adb reverse --list` showed the
+  tunnel.
+
+**So a real unplug does not give the tunnel keeper a chance to act: the session is gone, not paused.** The keeper
+only repairs tunnels dropped while the DHU is still alive. Nothing resumes a session automatically; start a new one.
+One run only; a different cable, phone or timing could behave differently.
 
 ## 8. Capabilities (DHU 2.0 + Android Auto 18.0.164204, USB)
 
@@ -289,8 +306,8 @@ written, exit 130); this was verified with real signals against the fake DHU and
 The daemon serves a versioned loopback HTTP API with an event stream ([api.md](api.md)), checked with real
 HTTP clients (including plain `curl` against the real phone). The CLI is a client of it.
 
-Not implemented: night mode, driving restrictions, audio and nav focus (their endpoints answer `501`), TOML
-config file, `--adb` transport, device selection beyond `--serial`.
+Not implemented: night mode, driving restrictions, audio and nav focus (their endpoints answer `501`),
+`--adb` transport, device selection beyond `--serial`.
 
 ## 11. Tests and how to run them
 
@@ -308,7 +325,7 @@ hardware test and the observations above do.
 
 - **Native receiver research** (PRD 6.4 and 15.4). Out of scope for this pass by instruction. Nothing in
   this document says anything about OpenAuto, aasdk, or protocol compatibility.
-- Phone unplug and re-plug behaviour, multiple attached devices, wireless Android Auto.
+- Multiple attached devices, wireless Android Auto.
 - Behaviour across other DHU or Android Auto versions.
 
 ## 13. Acceptance check

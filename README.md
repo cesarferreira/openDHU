@@ -26,6 +26,10 @@ autolab status --json
 autolab stop
 ```
 
+A desktop window with the same controls is in [docs/gui.md](docs/gui.md) (`cargo run -p autolab-gui`).
+Optional settings go in a TOML file: [docs/configuration.md](docs/configuration.md). How the parts fit together:
+[docs/architecture.md](docs/architecture.md).
+
 The CLI talks to a local daemon over an HTTP API on `127.0.0.1`, and so can any other client; see
 [docs/api.md](docs/api.md) (`autolab daemon` runs one in the foreground). A bearer token in a 0700 directory guards
 it, and anyone who can read that token can run code as you through the API.
@@ -44,6 +48,7 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
 - Starting a session re-enumerates the phone over USB, which drops `adb reverse`/`forward` tunnels. Pass
   `--reverse PORT` to `autolab start` to restore the ones you need; AutoLab also re-applies them if the phone drops
   them later in the session. Only `adb reverse` is supported.
+- Unplugging the phone ends the session (observed once); plug it back in and run `autolab start` again.
 - USB transport only. Only one DHU can hold a phone at a time, so stop other DHUs first.
 - Video focus, screenshots, the YAML test runner and the HTTP API are implemented. Night mode, driving restrictions,
   audio and nav focus are not; their API endpoints answer `501`.

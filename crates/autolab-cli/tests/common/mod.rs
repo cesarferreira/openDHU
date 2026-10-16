@@ -42,6 +42,9 @@ impl Sandbox {
         let mut c = Command::new(env!("CARGO_BIN_EXE_autolab"));
         c.args(args)
             .env("AUTOLAB_RUNTIME_DIR", &self.dir)
+            // Never read the developer's real config file.
+            .env("XDG_CONFIG_HOME", self.dir.join("no-xdg"))
+            .env_remove("AUTOLAB_CONFIG")
             .env_remove("AUTOLAB_DHU_PATH");
         for (k, v) in env {
             c.env(k, v);

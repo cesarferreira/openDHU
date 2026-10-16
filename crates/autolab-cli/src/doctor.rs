@@ -51,8 +51,20 @@ fn foreign_dhu_pids(running: &[u32], own: Option<u32>) -> Vec<u32> {
         .collect()
 }
 
-pub fn run(explicit_dhu: Option<PathBuf>) -> Vec<Check> {
+pub fn config_error(e: &autolab_core::Error) -> Check {
+    check(Level::Fail, "config file", e.to_string())
+}
+
+pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Check> {
     let mut out = Vec::new();
+    out.push(match config_file {
+        Some(p) => check(Level::Ok, "config file", p.display().to_string()),
+        None => check(
+            Level::Info,
+            "config file",
+            "none loaded (optional; see docs/configuration.md)",
+        ),
+    });
 
     let env = discovery::Env::from_process(explicit_dhu);
     match discovery::find_dhu(&env) {

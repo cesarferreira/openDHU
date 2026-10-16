@@ -1,3 +1,4 @@
+mod config;
 mod daemon_ctl;
 mod doctor;
 mod output_path;
@@ -123,6 +124,9 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<u8> {
     let json = cli.json;
+    // Only commands that use settings read the file, so a typo in it never blocks `stop` or `status`.
+    let load = || config::load(&config::Locator::from_process(), &current_dir()?);
+    let dhu_env_set = std::env::var_os("AUTOLAB_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
         Command::Start {
             dhu_path,
@@ -131,14 +135,26 @@ fn run(cli: Cli) -> Result<u8> {
             headless,
             reverse,
         } => {
+            let cfg = load()?;
             let cwd = current_dir()?;
             // The daemon's working directory is not ours, so paths are resolved here.
             let req = StartRequest {
-                serial,
-                dhu_path: dhu_path.map(|p| output_path::absolute(&p, &cwd)),
-                config: config.map(|p| output_path::absolute(&p, &cwd)),
-                headless,
-                reverse,
+                serial: config::first(serial, cfg.serial.clone()),
+                dhu_path: config::dhu_path(
+                    dhu_path.map(|p| output_path::absolute(&p, &cwd)),
+                    cfg.dhu_path.clone(),
+                    dhu_env_set,
+                ),
+                config: config::first(
+                    config.map(|p| output_path::absolute(&p, &cwd)),
+                    cfg.dhu_ini.clone(),
+                ),
+                headless: headless || cfg.headless,
+                reverse: if reverse.is_empty() {
+                    cfg.reverse.clone()
+                } else {
+                    reverse
+                },
             };
             let status = daemon_ctl::ensure()?.start(&req)?;
             print_session(&expect_session(status.session)?, json);
@@ -181,15 +197,32 @@ fn run(cli: Cli) -> Result<u8> {
             report,
             artifacts_dir,
             skip_unsupported,
-        } => test_cmd::run(test_cmd::Options {
-            paths,
-            report,
-            artifacts_dir,
-            skip_unsupported,
-            json,
-        }),
+        } => {
+            let cfg = load()?;
+            test_cmd::run(test_cmd::Options {
+                paths,
+                report: if report.is_empty() {
+                    cfg.report.clone()
+                } else {
+                    report
+                },
+                artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
+                skip_unsupported: skip_unsupported || cfg.skip_unsupported,
+                json,
+            })
+        }
         Command::Doctor { dhu_path } => {
-            let checks = doctor::run(dhu_path);
+            let checks = match load() {
+                Ok(cfg) => {
+                    let dhu = config::dhu_path(dhu_path, cfg.dhu_path.clone(), dhu_env_set);
+                    doctor::run(dhu, cfg.source.as_deref())
+                }
+                Err(e) => {
+                    let mut checks = vec![doctor::config_error(&e)];
+                    checks.extend(doctor::run(dhu_path, None).into_iter().skip(1));
+                    checks
+                }
+            };
             if json {
                 println!(
                     "{}",
@@ -212,9 +245,10 @@ fn run(cli: Cli) -> Result<u8> {
             port,
             exit_when_idle,
         } => {
+            let cfg = load()?;
             autolab_daemon::run(ServeOptions {
                 runtime_dir: runtime::runtime_dir()?,
-                port,
+                port: config::first(port, cfg.port),
                 exit_when_idle,
                 idle_grace: None,
             })?;
