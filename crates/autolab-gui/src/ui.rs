@@ -74,7 +74,7 @@ fn card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
 
 fn row(ui: &mut egui::Ui, key: &str, value: impl Into<String>) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{key:<14}")).color(DIM).monospace());
+        ui.label(RichText::new(format!("{key:<15}")).color(DIM).monospace());
         ui.label(value.into());
     });
 }
@@ -223,7 +223,7 @@ fn session_card(
             };
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(format!("{:<14}", "tunnel"))
+                    RichText::new(format!("{:<15}", "tunnel"))
                         .color(DIM)
                         .monospace(),
                 );
@@ -311,9 +311,25 @@ fn focus_card(
             .map(|d| &d.head_unit.video_focus);
         match v {
             Some(v) => {
+                let native = session
+                    .and_then(|s| s.details.as_ref())
+                    .is_some_and(|d| d.head_unit.backend == "native");
                 row(ui, "requested", focus_word(v.requested));
-                row(ui, "DHU reports", focus_word(v.backend_reported));
-                row(ui, "phone says", "unknown (no phone-side check exists)");
+                row(
+                    ui,
+                    if native {
+                        "head unit sent"
+                    } else {
+                        "DHU reports"
+                    },
+                    focus_word(v.backend_reported),
+                );
+                // Only the native backend hears from the phone; the DHU cannot.
+                let phone = match (native, v.observed) {
+                    (false, _) => "unknown (the DHU gives no phone-side signal)".to_string(),
+                    (true, o) => focus_word(o).to_string(),
+                };
+                row(ui, "phone says", phone);
             }
             None => {
                 ui.label(RichText::new("Needs a running session.").color(DIM));

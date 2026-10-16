@@ -1,0 +1,12 @@
+[package]
+name = "autolab-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "AutoLab backend that drives its own Android Auto head unit (autolab-native-hu)"
+
+[dependencies]
+autolab-core = { path = "../autolab-core" }
+serde.workspace = true
+serde_json.workspace = true

@@ -66,6 +66,7 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
         ),
     });
 
+    native_checks(&mut out);
     let env = discovery::Env::from_process(explicit_dhu);
     match discovery::find_dhu(&env) {
         Ok(found) => {
@@ -186,6 +187,33 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
 
 pub fn has_failures(checks: &[Check]) -> bool {
     checks.iter().any(|c| c.level == Level::Fail)
+}
+
+/// The native backend is optional, so a missing piece is information, not a failure.
+fn native_checks(out: &mut Vec<Check>) {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from));
+    let env = std::env::var_os("AUTOLAB_NATIVE_HU")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let hu = autolab_daemon::find_native_hu(env, exe_dir, std::env::var("PATH").ok().as_deref());
+    out.push(match hu {
+        Ok(p) => check(Level::Ok, "native head unit", p.display().to_string()),
+        Err(_) => check(
+            Level::Info,
+            "native head unit",
+            "autolab-native-hu not found (only needed for `start --backend native`)",
+        ),
+    });
+    out.push(match autolab_native::find_ffmpeg() {
+        Some(p) => check(Level::Ok, "ffmpeg", p.display().to_string()),
+        None => check(
+            Level::Info,
+            "ffmpeg",
+            "not found; the native backend needs it for screenshots (macOS: brew install ffmpeg)",
+        ),
+    });
 }
 
 #[cfg(test)]

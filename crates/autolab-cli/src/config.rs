@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use autolab_core::{Error, Result};
 use serde::Deserialize;
 
+use crate::BackendArg;
 use crate::test_cmd::ReportFormat;
 
 /// Names the config file, overriding the default location. A missing file here is an error.
@@ -39,6 +40,7 @@ struct RawDhu {
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct RawSession {
+    backend: Option<BackendArg>,
     serial: Option<String>,
     reverse: Option<Vec<u16>>,
 }
@@ -65,6 +67,7 @@ pub struct Config {
     pub dhu_path: Option<PathBuf>,
     pub dhu_ini: Option<PathBuf>,
     pub headless: bool,
+    pub backend: Option<BackendArg>,
     pub serial: Option<String>,
     pub reverse: Vec<u16>,
     pub artifacts_dir: Option<PathBuf>,
@@ -149,6 +152,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Config> {
         dhu_path: raw.dhu.path.map(abs),
         dhu_ini: raw.dhu.ini.map(abs),
         headless: raw.dhu.headless.unwrap_or(false),
+        backend: raw.session.backend,
         serial: raw.session.serial,
         reverse: raw.session.reverse.unwrap_or_default(),
         artifacts_dir: raw.test.artifacts_dir.map(abs),

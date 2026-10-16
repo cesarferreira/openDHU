@@ -100,3 +100,71 @@ fn real_dhu_video_focus_round_trip() {
         dhu
     )));
 }
+
+#[test]
+#[ignore = "requires a real phone with Android Auto and ffmpeg, and no DHU running; run with --ignored"]
+fn real_native_backend_reports_what_the_phone_did() {
+    if std::env::var("AUTOLAB_HW").as_deref() != Ok("1") {
+        eprintln!("skipped: set AUTOLAB_HW=1");
+        return;
+    }
+    let s = Sandbox::new();
+    let start = s.autolab(&["start", "--backend", "native", "--reverse", "47123"]);
+    assert_eq!(code(&start), 0, "{}", text(&start));
+    let list = std::process::Command::new("adb")
+        .args(["reverse", "--list"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&list.stdout).contains("tcp:47123 tcp:47123"),
+        "adb does not list the tunnel"
+    );
+
+    for arg in ["off", "on", "on", "off", "off", "on"] {
+        let o = s.autolab(&["focus", "video", arg, "--json"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let r: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        // `observed` here comes from the phone's own start and stop messages.
+        assert_eq!(r["status"], "observed", "{r}");
+        assert_eq!(r["observed"], arg, "{r}");
+        assert_eq!(s.status_json()["videoFocus"]["observed"], arg);
+    }
+
+    let shot = format!("{}-native-shot.png", s.dir.display());
+    let o = s.autolab(&["screenshot", &shot, "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        std::fs::metadata(&shot).unwrap().len() > 1000,
+        "screenshot looks empty"
+    );
+    let _ = std::fs::remove_file(&shot);
+
+    let off = s.autolab(&["focus", "video", "off"]);
+    assert_eq!(code(&off), 0);
+    let refused = s.autolab(&["screenshot", &shot]);
+    assert_eq!(
+        code(&refused),
+        1,
+        "no screenshot while the phone has stopped projecting"
+    );
+    assert!(!std::path::Path::new(&shot).exists());
+    assert_eq!(code(&s.autolab(&["focus", "video", "on"])), 0);
+
+    for example in [
+        "native-phone-confirms.yaml",
+        "focus-status.yaml",
+        "screenshots.yaml",
+    ] {
+        let art = s.scratch(&format!("art-native-{example}"));
+        let path = format!("{}/../../examples/{example}", env!("CARGO_MANIFEST_DIR"));
+        let o = s.autolab(&["test", &path, "--artifacts-dir", art.to_str().unwrap()]);
+        assert_eq!(code(&o), 0, "{example}: {}", text(&o));
+    }
+
+    let st = s.status_json();
+    let hu = st["dhuPid"].as_u64().unwrap();
+    assert_eq!(code(&s.autolab(&["stop"])), 0);
+    assert!(wait_until(std::time::Duration::from_secs(10), || !alive(
+        hu
+    )));
+}

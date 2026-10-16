@@ -14,13 +14,14 @@ daemon is the only process that talks to the DHU.
 |---|---|
 | `autolab-core` | The `HeadUnitBackend` trait, shared types (`HeadUnitStatus`, `OperationResult`, `Capabilities`), error type and exit codes. No I/O. |
 | `autolab-dhu` | The DHU backend: finds the executable, starts it, writes console commands, parses its output, wraps `adb`. |
+| `autolab-native` | The native backend: drives `autolab-native-hu` over JSON lines. No Android Auto code. |
+| `autolab-native-hu` | AutoLab's own head unit (a child process). Links the vendored `android-auto` crate. |
 | `autolab-test` | YAML test schema, runner, JSON and JUnit reports, artifacts layout. The runner uses only the backend trait, so tests use a mock backend. |
 | `autolab-daemon` | The HTTP server, auth, session state machine, event stream, tunnel keeper, and a small client. |
 | `autolab-gui` | The `autolab-gui` window (egui). A client of the daemon API only; see [gui.md](gui.md). |
 | `autolab-cli` | The `autolab` binary: argument parsing, config file, daemon start-up, output. |
 
-The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. A second backend (for example a
-native receiver) would implement `HeadUnitBackend` in a new crate. Nothing above it changes.
+The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `autolab-native`, which starts `autolab-native-hu` as a child; the child links `autolab-native` only for the shared protocol types. Nothing above the trait changed.
 
 ## A request, step by step
 

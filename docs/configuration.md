@@ -32,6 +32,7 @@ ini = "dhu.ini"          # the DHU's own .ini file (same as `autolab start --con
 headless = false
 
 [session]
+backend = "dhu"          # or "native"; see native-backend.md. The `dhu.*` keys are ignored for native.
 serial = "1A141FDF600AF2"
 reverse = [10101]        # same as `autolab start --reverse 10101`
 

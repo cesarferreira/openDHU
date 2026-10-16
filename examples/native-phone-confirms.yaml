@@ -1,0 +1,32 @@
+# Needs the native backend (`autolab start --backend native`). There `observed` is the phone's own word,
+# taken from the start and stop messages it sends, so asserting it is meaningful. With the DHU
+# backend `observed` is always unknown and this test would fail.
+name: The phone confirms video focus changes
+
+backend: native
+
+requirements:
+  - videoFocus
+  - screenshots
+
+steps:
+  - action: focus.video
+    value: off
+
+  - action: assert.status
+    expect:
+      videoFocus:
+        requested: off
+        observed: off
+
+  - action: focus.video
+    value: on
+
+  - action: assert.status
+    expect:
+      videoFocus:
+        requested: on
+        observed: on
+
+  - action: screenshot
+    path: screenshots/after-focus-back.png

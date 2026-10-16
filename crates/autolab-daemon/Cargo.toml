@@ -9,6 +9,7 @@ description = "AutoLab daemon: owns the head unit session and serves the loopbac
 [dependencies]
 autolab-core = { path = "../autolab-core" }
 autolab-dhu = { path = "../autolab-dhu" }
+autolab-native = { path = "../autolab-native" }
 axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true

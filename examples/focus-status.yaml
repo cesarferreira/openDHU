@@ -1,5 +1,6 @@
-# Status assertions. `backendReported` is the DHU's own readback. `observed` (phone-confirmed) is
-# always unknown today, so asserting it would fail by design.
+# Status assertions that work with either backend. `backendReported` is the head unit's own readback.
+# With the DHU, `observed` (phone-confirmed) is always unknown, so asserting it would fail by design;
+# see native-phone-confirms.yaml for the native backend, where it is real.
 name: Focus changes are tracked
 
 requirements:

@@ -122,8 +122,9 @@ during a slow start. `phase` is the daemon's lifecycle (`starting`, `running`, `
 backend link: `running` means the DHU finished its handshake with the phone, not that projection is visible.
 
 `videoFocus.requested` is what AutoLab last asked for. `backendReported` is the DHU's own readback.
-`observed` is a phone-side confirmation and is **always `unknown`**: no such signal is wired up. Unknown values
-are explicit and are never guessed.
+`observed` is a phone-side confirmation. With the DHU it is **always `unknown`**: the DHU gives no such signal. With the
+native backend it is what the phone itself last reported (`on` after its video start message, `off` after its stop
+message). Unknown values are explicit and are never guessed.
 
 Each entry in `tunnels` is checked live against `adb reverse --list` (`active`, `missing`, or `unknown` if adb
 did not answer), and `reapplied` counts how often AutoLab had to put it back.
@@ -131,11 +132,13 @@ did not answer), and `reapplied` counts how often AutoLab had to put it back.
 ### `POST /v1/session/start`
 
 ```json
-{ "serial": "1A141FDF600AF2", "dhuPath": "/path/to/desktop-head-unit",
+{ "backend": "dhu", "serial": "1A141FDF600AF2", "dhuPath": "/path/to/desktop-head-unit",
   "config": "/path/to/dhu.ini", "headless": true, "reverse": [10101] }
 ```
 
-Every field is optional. Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
+Every field is optional. `backend` is `dhu` (Google's DHU, the default) or `native` (AutoLab's own head unit, see
+[native-backend.md](native-backend.md)). `dhuPath`, `config` and `headless` belong to the DHU; sending them with
+`native` is a `400 invalid_args`. Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
 appear), and several devices is an error rather than a guess. Without `dhuPath`, the DHU is found through
 `AUTOLAB_DHU_PATH` and the Android SDK; an explicit path that does not exist is an error, never a silent fallback.
 `reverse` lists ports to keep reachable on the phone with `adb reverse tcp:PORT tcp:PORT`. A tunnel counts only
@@ -149,12 +152,14 @@ A second `start` while a session is `starting`, `running` or `stopping` gets `40
 ### `POST /v1/focus/video`
 
 ```json
-{ "operationId": "op-1", "status": "accepted", "requested": "off",
+{ "operationId": "op-1", "backend": "dhu", "status": "accepted", "requested": "off",
   "backendReported": "off", "observed": "unknown", "evidence": [] }
 ```
 
-`status: "accepted"` means the DHU took the command. It does **not** mean the phone acknowledged it, and
-`observed` stays `unknown`. A rejected command comes back with `status: "failed"` and the DHU's own words in
+With the DHU, `status: "accepted"` means the DHU took the command. It does **not** mean the phone acknowledged it,
+and `observed` stays `unknown`. With `backend: "native"` the phone itself reports: `status: "observed"` means the
+phone sent the matching video start or stop message (`observed` is then `on` or `off`), and `status: "timed_out"`
+(HTTP 200, CLI exit code 6) means it did not within 4 s. A rejected command comes back with `status: "failed"` and the DHU's own words in
 `evidence`. Operation ids (`op-1`, `op-2`, …) are unique within a daemon and are shared by focus and screenshot.
 
 (The PRD sketches `requestedState` and `observedState`. This API uses `requested`, `backendReported` and
@@ -203,12 +208,13 @@ keepalive comment is sent every 15 s. A subscriber that falls too far behind get
 | `session.stopping` / `session.stopped` | a requested stop |
 | `session.ended` | the DHU died on its own; `reason` says how |
 | `focus.video.requested` | **AutoLab issued the command** (`operationId`, `enabled`) |
-| `focus.video.accepted` / `focus.video.failed` | **what the backend answered** (`requested`, `backendReported`, `evidence`) |
+| `focus.video.accepted` / `focus.video.failed` | **what the backend answered** (`requested`, `backendReported`, `observed`, `evidence`). `accepted` includes a native-backend change the phone confirmed; a `timed_out` one is `failed` |
 | `screenshot.requested` / `screenshot.saved` / `screenshot.failed` | same split for screenshots |
 | `tunnel.reapplied` | a dropped `adb reverse` tunnel was put back (`port`) |
 
 `requested` events are commands AutoLab issued; `accepted` and `failed` events report the backend's answer. No
-event is named `confirmed` or `observed`, because AutoLab cannot confirm anything on the phone.
+event is named `confirmed` or `observed`: the `observed` field inside an event carries what the phone said, and is
+`unknown` with the DHU.
 
 When the daemon shuts down, every event already emitted is delivered and then the stream ends, so a subscriber
 sees the final `session.stopped`.

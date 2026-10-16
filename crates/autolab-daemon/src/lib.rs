@@ -6,6 +6,7 @@
 
 pub mod api;
 mod auth;
+mod backend;
 pub mod client;
 mod error;
 mod events;
@@ -17,4 +18,5 @@ mod state;
 mod tunnels;
 
 pub use client::Client;
+pub use launch::find_native_hu;
 pub use server::{DEFAULT_PORT, ServeOptions, router, run};

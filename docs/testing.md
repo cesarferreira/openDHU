@@ -50,16 +50,17 @@ backend: dhu
 videoFocus:
   requested: off             # what AutoLab last asked for
   backendReported: off       # the DHU's own readback
-  observed: on               # confirmed by the phone (never available yet, see below)
+  observed: on               # the phone's own word: native backend only (see below)
 ```
 
 ## What a pass does and does not mean
 
-- `focus.video` passing means the command was **accepted** and the DHU's readback agrees. It does not mean the
-  phone confirmed anything. The step's detail says so every time ("not confirmed by the phone").
+- With the DHU, `focus.video` passing means the command was **accepted** and the DHU's readback agrees. It does not
+  mean the phone confirmed anything. The step's detail says so every time ("not confirmed by the phone"). With the
+  native backend (`backend: native`) a pass means the phone itself sent the matching video start or stop message.
 - `unknown` never satisfies an expectation, and `unknown` cannot be written in a test. Phone-side confirmation is
-  not implemented yet, so `observed` is always unknown today. An assertion on `observed` fails, by design, rather
-  than passing on nothing.
+  available with the DHU, so there `observed` is always unknown and an assertion on it fails, by design, rather
+  than passing on nothing. The native backend does report it ([native-backend.md](native-backend.md)).
 - The PRD's recovery example checks commands and a screenshot. It does not check that an app recovered.
   That needs an app-level assertion, which does not exist yet.
 - The DHU refuses screenshots while video focus is off, so take screenshots with focus on.

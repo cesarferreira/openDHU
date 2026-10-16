@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use autolab_core::{Error, FocusState, OpStatus, Result, SessionState};
-use autolab_daemon::api::{OperationResponse, ScreenshotResponse, SessionStatus, StartRequest};
+use autolab_daemon::api::{
+    BackendKind, OperationResponse, ScreenshotResponse, SessionStatus, StartRequest,
+};
 use autolab_daemon::{ServeOptions, runtime};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -31,7 +33,10 @@ struct Cli {
 enum Command {
     /// Start a DHU session (launches Google's DHU over USB; the AutoLab daemon keeps it running)
     Start {
-        /// Path to the desktop-head-unit executable [env: AUTOLAB_DHU_PATH]
+        /// Head unit to run: Google's DHU, or AutoLab's own native one [default: dhu]
+        #[arg(long, value_enum)]
+        backend: Option<BackendArg>,
+        /// Path to the desktop-head-unit executable (dhu backend) [env: AUTOLAB_DHU_PATH]
         #[arg(long)]
         dhu_path: Option<PathBuf>,
         /// Android device serial (default: the only authorized adb device)
@@ -100,6 +105,22 @@ enum Command {
     },
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendArg {
+    Dhu,
+    Native,
+}
+
+impl From<BackendArg> for BackendKind {
+    fn from(b: BackendArg) -> Self {
+        match b {
+            BackendArg::Dhu => Self::Dhu,
+            BackendArg::Native => Self::Native,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum FocusKind {
     /// Take or release video focus
@@ -129,6 +150,7 @@ fn run(cli: Cli) -> Result<u8> {
     let dhu_env_set = std::env::var_os("AUTOLAB_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
         Command::Start {
+            backend,
             dhu_path,
             serial,
             config,
@@ -138,18 +160,23 @@ fn run(cli: Cli) -> Result<u8> {
             let cfg = load()?;
             let cwd = current_dir()?;
             // The daemon's working directory is not ours, so paths are resolved here.
+            let backend = config::first(backend, cfg.backend).unwrap_or(BackendArg::Dhu);
+            // `dhu.*` settings in the config file are for the DHU only: they never reach another backend.
+            // A flag given on the command line still does, and the daemon then refuses it.
+            let from_file = backend == BackendArg::Dhu;
             let req = StartRequest {
+                backend: backend.into(),
                 serial: config::first(serial, cfg.serial.clone()),
                 dhu_path: config::dhu_path(
                     dhu_path.map(|p| output_path::absolute(&p, &cwd)),
-                    cfg.dhu_path.clone(),
-                    dhu_env_set,
+                    cfg.dhu_path.clone().filter(|_| from_file),
+                    dhu_env_set || !from_file,
                 ),
                 config: config::first(
                     config.map(|p| output_path::absolute(&p, &cwd)),
-                    cfg.dhu_ini.clone(),
+                    cfg.dhu_ini.clone().filter(|_| from_file),
                 ),
-                headless: headless || cfg.headless,
+                headless: headless || (from_file && cfg.headless),
                 reverse: if reverse.is_empty() {
                     cfg.reverse.clone()
                 } else {
@@ -298,19 +325,38 @@ fn print_focus(resp: &OperationResponse, json: bool) {
     }
     let r = &resp.result;
     match r.status {
-        OpStatus::Accepted => {
-            println!("Video focus {} command accepted", focus_word(r.requested));
-            println!(
-                "  DHU reports:     {} (DHU console readback, not a phone acknowledgement)",
-                focus_word(r.backend_reported)
-            );
+        OpStatus::Accepted | OpStatus::Acknowledged | OpStatus::Observed => {
+            let verdict = if r.status == OpStatus::Observed {
+                "confirmed by the phone"
+            } else {
+                "command accepted"
+            };
+            println!("Video focus {} {verdict}", focus_word(r.requested));
+            match resp.backend {
+                BackendKind::Dhu => println!(
+                    "  DHU reports:     {} (DHU console readback, not a phone acknowledgement)",
+                    focus_word(r.backend_reported)
+                ),
+                BackendKind::Native => println!(
+                    "  Head unit sent:  {} (our own message, not a phone acknowledgement)",
+                    focus_word(r.backend_reported)
+                ),
+            }
             println!("  Phone confirmed: {}", focus_word(r.observed));
+            if r.status == OpStatus::Observed {
+                for l in &r.evidence {
+                    println!("  {l}");
+                }
+            }
         }
         other => {
             eprintln!(
-                "Video focus {} command {:?}",
+                "Video focus {} command {}",
                 focus_word(r.requested),
-                other
+                match other {
+                    OpStatus::TimedOut => "not confirmed by the phone in time".to_string(),
+                    o => format!("{o:?}"),
+                }
             );
             for l in &r.evidence {
                 eprintln!("  {l}");
@@ -362,8 +408,13 @@ fn print_session(s: &SessionStatus, json: bool) {
     println!("State:        {state}");
     println!("Transport:    {} (serial {serial})", d.transport);
     println!(
-        "Video focus:  requested {}; DHU reports {}; phone confirmed {}",
+        "Video focus:  requested {}; {} {}; phone confirmed {}",
         focus_word(v.requested),
+        if h.backend == "native" {
+            "head unit sent"
+        } else {
+            "DHU reports"
+        },
         focus_word(v.backend_reported),
         focus_word(v.observed)
     );

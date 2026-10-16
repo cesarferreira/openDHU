@@ -4,13 +4,106 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use autolab_core::{Error, Result};
-use autolab_dhu::{DhuLaunch, adb, discovery};
+use autolab_dhu::{DhuBackend, DhuLaunch, adb, discovery};
+use autolab_native::{NativeBackend, NativeLaunch};
 
-use crate::api::StartRequest;
+use crate::api::{BackendKind, StartRequest};
+use crate::backend::AnyBackend;
 
 /// How long to wait for a phone that has just dropped off adb. After a DHU session ends the
 /// phone leaves USB accessory mode and is briefly invisible to adb.
 const DEVICE_WAIT: Duration = Duration::from_secs(10);
+
+/// Start the head unit the request asks for. Returns it with the phone's adb serial, which the
+/// session needs for tunnels and status.
+pub fn launch_backend(req: &StartRequest) -> Result<(AnyBackend, String)> {
+    match req.backend {
+        BackendKind::Dhu => {
+            let launch = resolve(req)?;
+            let backend = DhuBackend::launch(&launch)?;
+            Ok((AnyBackend::Dhu(backend), launch.serial))
+        }
+        BackendKind::Native => {
+            let (launch, serial) = resolve_native(req)?;
+            let backend = NativeBackend::launch(&launch)?;
+            Ok((AnyBackend::Native(backend), serial))
+        }
+    }
+}
+
+/// Where the native head unit program is: `AUTOLAB_NATIVE_HU`, next to this executable, or on `PATH`.
+pub fn find_native_hu(
+    env: Option<PathBuf>,
+    exe_dir: Option<PathBuf>,
+    path: Option<&str>,
+) -> std::result::Result<PathBuf, Vec<PathBuf>> {
+    const NAME: &str = "autolab-native-hu";
+    let mut tried = Vec::new();
+    // A path the user named is a statement of intent: do not quietly use another one.
+    if let Some(p) = env {
+        return if p.is_file() { Ok(p) } else { Err(vec![p]) };
+    }
+    let mut candidates: Vec<PathBuf> = exe_dir.into_iter().map(|d| d.join(NAME)).collect();
+    if let Some(path) = path {
+        candidates.extend(std::env::split_paths(path).map(|d| d.join(NAME)));
+    }
+    for c in candidates {
+        if c.is_file() {
+            return Ok(c);
+        }
+        tried.push(c);
+    }
+    Err(tried)
+}
+
+fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
+    if req.dhu_path.is_some() || req.config.is_some() || req.headless {
+        return Err(Error::InvalidArgs(
+            "`dhuPath`, `config` and `headless` belong to the dhu backend; the native backend has no use for them"
+                .into(),
+        ));
+    }
+    let env = std::env::var_os("AUTOLAB_NATIVE_HU")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from));
+    let program = find_native_hu(env, exe_dir, std::env::var("PATH").ok().as_deref()).map_err(
+        |tried| {
+            let list: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
+            Error::BackendUnavailable(format!(
+                "autolab-native-hu not found (build it with `cargo build -p autolab-native-hu`, or set AUTOLAB_NATIVE_HU). Tried: {}",
+                list.join(", ")
+            ))
+        },
+    )?;
+    // The native head unit takes whichever Android phone is on USB, so a second phone would make
+    // the choice ambiguous. Refuse instead of guessing.
+    if let Ok(adb) = adb_path()
+        && let Ok(devices) = adb::list_devices(&adb)
+        && devices.iter().filter(|d| d.state == "device").count() > 1
+    {
+        return Err(Error::InvalidArgs(
+            "several phones are attached; the native backend cannot choose between them, so unplug the others"
+                .into(),
+        ));
+    }
+    let serial = match &req.serial {
+        Some(s) if s.trim().is_empty() => {
+            return Err(Error::InvalidArgs("`serial` is empty".into()));
+        }
+        Some(s) => s.clone(),
+        None => pick_device()?,
+    };
+    Ok((
+        NativeLaunch {
+            program,
+            serial: Some(serial.clone()),
+        },
+        serial,
+    ))
+}
 
 pub fn resolve(req: &StartRequest) -> Result<DhuLaunch> {
     let env = discovery::Env::from_process(req.dhu_path.clone());
@@ -86,6 +179,29 @@ fn pick_device() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_hu_lookup_prefers_env_then_exe_dir_then_path_and_never_falls_back_from_env() {
+        let dir = std::env::temp_dir().join(format!("al-nhu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hu = dir.join("autolab-native-hu");
+        std::fs::write(&hu, "").unwrap();
+        assert_eq!(
+            find_native_hu(None, Some(dir.clone()), None).unwrap(),
+            hu,
+            "next to the executable"
+        );
+        let on_path = dir.to_str().unwrap().to_string();
+        assert_eq!(find_native_hu(None, None, Some(&on_path)).unwrap(), hu);
+        let missing = dir.join("nope");
+        assert_eq!(
+            find_native_hu(Some(missing.clone()), Some(dir.clone()), Some(&on_path)).unwrap_err(),
+            vec![missing],
+            "an explicit path that is missing is an error, not a fallback"
+        );
+        assert!(find_native_hu(None, None, None).unwrap_err().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn dev(serial: &str, state: &str) -> adb::AdbDevice {
         adb::AdbDevice {

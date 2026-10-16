@@ -35,6 +35,15 @@ pub fn code_name(e: &Error) -> &'static str {
     }
 }
 
+impl BackendKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dhu => "dhu",
+            Self::Native => "native",
+        }
+    }
+}
+
 impl ErrorBody {
     pub fn from_error(e: &Error) -> Self {
         Self {
@@ -47,9 +56,21 @@ impl ErrorBody {
 
 // ---- requests --------------------------------------------------------------------------------
 
+/// Which head unit to run. `dhu` is Google's Desktop Head Unit; `native` is AutoLab's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendKind {
+    #[default]
+    Dhu,
+    Native,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartRequest {
+    /// Default: `dhu`.
+    #[serde(default)]
+    pub backend: BackendKind,
     /// Android device serial. Default: the only authorized adb device.
     #[serde(default)]
     pub serial: Option<String>,
@@ -151,6 +172,9 @@ pub struct StatusResponse {
 #[serde(rename_all = "camelCase")]
 pub struct OperationResponse {
     pub operation_id: String,
+    /// The backend that handled it: `dhu` or `native`. It decides how to read `backendReported`.
+    #[serde(default)]
+    pub backend: BackendKind,
     #[serde(flatten)]
     pub result: OperationResult,
 }

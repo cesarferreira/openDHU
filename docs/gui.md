@@ -17,8 +17,8 @@ the terminal. `autolab` must sit next to `autolab-gui` or be on `PATH`.
 
 - **Session**: backend and version, phone serial, transport, process ids, and each `--reverse` tunnel with its live
   state. **Stop session** ends it.
-- **Video focus**: what AutoLab requested, what the DHU reports, and the phone-side value, which is always
-  `unknown` because no phone-side check exists. **Focus on** and **Focus off** send the command.
+- **Video focus**: what AutoLab requested, what the head unit reports, and the phone-side value. With the DHU that
+  is always `unknown`. With the native backend it is the phone's own word. **Focus on** and **Focus off** send the command.
 - **Screenshot**: saves a PNG to the path you type (absolute, ends in `.png`, no spaces) and previews it.
 - **Events**: the daemon's event stream, live. Events from before the window connected are not shown, because the
   API has no replay.

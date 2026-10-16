@@ -7,7 +7,11 @@ members = [
     "crates/autolab-test",
     "crates/autolab-cli",
     "crates/autolab-gui",
+    "crates/autolab-native",
+    "crates/autolab-native-hu",
 ]
+# Vendored third-party code is built as a dependency only, never linted or formatted as ours.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,8 +33,14 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 tokio-stream = { version = "0.1", features = ["sync"] }
 ureq = { version = "3", default-features = false }
 thiserror = "2"
+android-auto = { path = "vendor/android-auto" }
 eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Stock rustls-webpki rejects the X.509 v1 root that Android Auto phones present. See
+# vendor/rustls-webpki/AUTOLAB-PATCHES.md, and check this is used with `cargo tree -i rustls-webpki`.
+[patch.crates-io]
+rustls-webpki = { path = "vendor/rustls-webpki" }
 
 [profile.release]
 lto = "thin"

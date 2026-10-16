@@ -26,7 +26,7 @@ autolab status --json
 autolab stop
 ```
 
-A desktop window with the same controls is in [docs/gui.md](docs/gui.md) (`cargo run -p autolab-gui`).
+The native head unit, which needs no DHU: [docs/native-backend.md](docs/native-backend.md). A desktop window with the same controls is in [docs/gui.md](docs/gui.md) (`cargo run -p autolab-gui`).
 Optional settings go in a TOML file: [docs/configuration.md](docs/configuration.md). How the parts fit together:
 [docs/architecture.md](docs/architecture.md).
 
@@ -49,6 +49,8 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
   `--reverse PORT` to `autolab start` to restore the ones you need; AutoLab also re-applies them if the phone drops
   them later in the session. Only `adb reverse` is supported.
 - Unplugging the phone ends the session (observed once); plug it back in and run `autolab start` again.
+- `autolab start --backend native` runs AutoLab's own head unit instead of the DHU and reports what the phone itself
+  says about video focus. It is newer and less tested; see [docs/native-backend.md](docs/native-backend.md).
 - USB transport only. Only one DHU can hold a phone at a time, so stop other DHUs first.
 - Video focus, screenshots, the YAML test runner and the HTTP API are implemented. Night mode, driving restrictions,
   audio and nav focus are not; their API endpoints answer `501`.

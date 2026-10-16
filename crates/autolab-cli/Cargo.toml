@@ -14,6 +14,7 @@ path = "src/main.rs"
 autolab-core = { path = "../autolab-core" }
 autolab-daemon = { path = "../autolab-daemon" }
 autolab-dhu = { path = "../autolab-dhu" }
+autolab-native = { path = "../autolab-native" }
 autolab-test = { path = "../autolab-test" }
 clap.workspace = true
 ctrlc.workspace = true

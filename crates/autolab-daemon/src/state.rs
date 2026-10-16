@@ -13,14 +13,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use autolab_core::{Capabilities, Error, HeadUnitBackend, HeadUnitStatus, Result};
-use autolab_dhu::{DhuBackend, adb};
+use autolab_dhu::adb;
 use serde_json::json;
 use tokio::sync::watch;
 
 use crate::api::{
-    DaemonInfo, DeviceInfo, DevicesResponse, OperationResponse, Phase, RunningDetails,
+    BackendKind, DaemonInfo, DeviceInfo, DevicesResponse, OperationResponse, Phase, RunningDetails,
     ScreenshotResponse, SessionStatus, StartRequest, StatusResponse,
 };
+use crate::backend::AnyBackend;
 use crate::events::EventBus;
 use crate::tunnels::{self, Tunnels};
 use crate::{launch, log, runtime};
@@ -28,7 +29,8 @@ use crate::{launch, log, runtime};
 #[derive(Clone)]
 struct RunningSession {
     id: String,
-    backend: Arc<Mutex<DhuBackend>>,
+    backend: Arc<Mutex<AnyBackend>>,
+    kind: BackendKind,
     serial: String,
     tunnels: Arc<Tunnels>,
     stop_keeper: Arc<AtomicBool>,
@@ -74,8 +76,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 async fn with_backend<T: Send + 'static>(
-    backend: Arc<Mutex<DhuBackend>>,
-    f: impl FnOnce(&mut DhuBackend) -> T + Send + 'static,
+    backend: Arc<Mutex<AnyBackend>>,
+    f: impl FnOnce(&mut AnyBackend) -> T + Send + 'static,
 ) -> Result<T> {
     blocking(move || f(&mut lock(&backend))).await
 }
@@ -209,11 +211,13 @@ impl Daemon {
                         "operationId": op,
                         "requested": result.requested,
                         "backendReported": result.backend_reported,
+                        "observed": result.observed,
                         "evidence": result.evidence,
                     }),
                 );
                 Ok(OperationResponse {
                     operation_id: op,
+                    backend: r.kind,
                     result,
                 })
             }
@@ -444,13 +448,12 @@ impl Daemon {
 /// Runs on a blocking thread. If anything after the DHU launch fails, dropping the backend stops
 /// the DHU, so a failed start leaves nothing running.
 fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Result<RunningSession> {
-    let launch = launch::resolve(req)?;
-    let backend = DhuBackend::launch(&launch)?;
-    let tunnels = Arc::new(tunnels::setup(&launch.serial, &req.reverse)?);
+    let (backend, serial) = launch::launch_backend(req)?;
+    let tunnels = Arc::new(tunnels::setup(&serial, &req.reverse)?);
     let stop_keeper = Arc::new(AtomicBool::new(false));
     if !tunnels.ports.is_empty() {
         let (serial, shared, stop) = (
-            launch.serial.clone(),
+            serial.clone(),
             Arc::clone(&tunnels),
             Arc::clone(&stop_keeper),
         );
@@ -460,7 +463,8 @@ fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Resu
     Ok(RunningSession {
         id,
         backend: Arc::new(Mutex::new(backend)),
-        serial: launch.serial,
+        kind: req.backend,
+        serial,
         tunnels,
         stop_keeper,
     })

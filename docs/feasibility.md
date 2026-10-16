@@ -306,6 +306,7 @@ written, exit 130); this was verified with real signals against the fake DHU and
 The daemon serves a versioned loopback HTTP API with an event stream ([api.md](api.md)), checked with real
 HTTP clients (including plain `curl` against the real phone). The CLI is a client of it.
 
+The native backend (own head unit, no DHU) is described in [native-backend.md](native-backend.md).
 Not implemented: night mode, driving restrictions, audio and nav focus (their endpoints answer `501`),
 `--adb` transport, device selection beyond `--serial`.
 
