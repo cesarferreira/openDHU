@@ -574,30 +574,38 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
     // How this head unit introduces itself to the phone. Android Auto may treat head units differently
     // (for example which apps it lists), so AUTOLAB_NATIVE_IDENTITY=dhu presents it as Google's DHU.
     let as_dhu = std::env::var("AUTOLAB_NATIVE_IDENTITY").is_ok_and(|v| v == "dhu");
-    let (maker, model) = if as_dhu {
-        ("Google", "Desktop Head Unit")
+    let unit = if as_dhu {
+        // Field for field what Google's DHU 2.0 sends, as Android Auto logs it.
+        HeadUnitInfo {
+            name: "Desktop Head Unit".into(),
+            car_model: "Desktop Head Unit".into(),
+            car_year: "2015".into(),
+            car_serial: "0".into(),
+            left_hand: true,
+            head_manufacturer: "Google".into(),
+            head_model: "Desktop Head Unit".into(),
+            sw_build: "2022-03-30-438482292".into(),
+            sw_version: "2.0-mac-arm64".into(),
+            native_media: true,
+            hide_clock: Some(true),
+        }
     } else {
-        ("AutoLab", "autolab-native-hu")
-    };
-    let config = AndroidAutoConfiguration {
-        unit: HeadUnitInfo {
-            name: if as_dhu {
-                "Desktop Head Unit"
-            } else {
-                "AutoLab"
-            }
-            .into(),
-            car_model: model.into(),
+        HeadUnitInfo {
+            name: "AutoLab".into(),
+            car_model: "autolab-native-hu".into(),
             car_year: "2026".into(),
             car_serial: "1".into(),
             left_hand: false,
-            head_manufacturer: maker.into(),
-            head_model: model.into(),
+            head_manufacturer: "AutoLab".into(),
+            head_model: "autolab-native-hu".into(),
             sw_build: "1".into(),
             sw_version: env!("CARGO_PKG_VERSION").into(),
             native_media: true,
             hide_clock: Some(true),
-        },
+        }
+    };
+    let config = AndroidAutoConfiguration {
+        unit,
         custom_certificate: None,
     };
     let mut tasks = tokio::task::JoinSet::new();

@@ -129,7 +129,8 @@ fn listen(channel: AudioChannel, stop: &AtomicBool, bytes: &AtomicU64) -> Result
             && let Some(stdin) = p.stdin.as_mut()
             && stdin.write_all(&buf[..n]).is_err()
         {
-            break Err("ffplay stopped".to_string());
+            let child = player.take().expect("checked above");
+            break Err(why_it_stopped(child));
         }
     };
     if let Some(mut p) = player {
@@ -144,16 +145,67 @@ fn spawn_player(channel: AudioChannel) -> Result<std::process::Child, String> {
     let ffmpeg = autolab_native::find_ffmpeg()
         .ok_or("ffmpeg not found; ffplay plays the audio (macOS: brew install ffmpeg)")?;
     let ffplay = ffmpeg.with_file_name("ffplay");
-    Command::new(ffplay)
-        .args(["-nodisp", "-loglevel", "quiet", "-nostats", "-f", "s16le"])
-        .args(["-ar", &channel.sample_rate().to_string()])
-        .args(["-ac", &channel.channels().to_string()])
-        .args(["-i", "pipe:0"])
+    let mut cmd = Command::new(&ffplay);
+    // Errors are kept (not discarded) so the window can say why ffplay stopped.
+    cmd.args(["-nodisp", "-loglevel", "error", "-nostats", "-f", "s16le"])
+        .args(["-ar", &channel.sample_rate().to_string()]);
+    if supports_ch_layout(&ffplay) {
+        cmd.args([
+            "-ch_layout",
+            if channel.channels() == 1 {
+                "mono"
+            } else {
+                "stereo"
+            },
+        ]);
+    } else {
+        cmd.args(["-ac", &channel.channels().to_string()]);
+    }
+    cmd.args(["-i", "pipe:0"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot run ffplay: {e}"))
+}
+
+/// ffplay 7 and later dropped `-ac` for raw input and use `-ch_layout` (added in 5.1). Anything whose
+/// version cannot be read is assumed to be new.
+fn supports_ch_layout(ffplay: &std::path::Path) -> bool {
+    let out = Command::new(ffplay).arg("-version").output();
+    let text = out
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    ch_layout_for_version(text.lines().next().unwrap_or(""))
+}
+
+fn ch_layout_for_version(first_line: &str) -> bool {
+    let version = first_line
+        .split_whitespace()
+        .nth(2)
+        .map(|v| v.trim_start_matches(['n', 'N']))
+        .unwrap_or("");
+    match version
+        .split('.')
+        .next()
+        .and_then(|m| m.parse::<u32>().ok())
+    {
+        Some(major) => major >= 6,
+        None => true,
+    }
+}
+
+/// What ffplay printed before it stopped, for the window's problem line.
+fn why_it_stopped(mut child: std::process::Child) -> String {
+    let _ = child.wait();
+    let mut text = String::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_string(&mut text);
+    }
+    match text.lines().find(|l| !l.trim().is_empty()) {
+        Some(line) => format!("ffplay stopped: {}", line.trim()),
+        None => "ffplay stopped".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +217,22 @@ mod tests {
         assert!(!has_sound(&[0; 100]));
         assert!(has_sound(&[0, 0, 1, 0]));
         assert!(!has_sound(&[]));
+    }
+
+    #[test]
+    fn newer_ffplay_gets_ch_layout_and_older_gets_ac() {
+        assert!(ch_layout_for_version(
+            "ffplay version 9.0.2 Copyright (c) 2003-2026 the FFmpeg developers"
+        ));
+        assert!(ch_layout_for_version("ffplay version 7.1 Copyright"));
+        assert!(ch_layout_for_version("ffplay version n6.1.1 Copyright"));
+        assert!(!ch_layout_for_version("ffplay version 4.4.2 Copyright"));
+        assert!(!ch_layout_for_version("ffplay version n5.0 Copyright"));
+        assert!(
+            ch_layout_for_version("ffplay version N-123456-gabcdef Copyright"),
+            "git builds count as new"
+        );
+        assert!(ch_layout_for_version(""), "unreadable counts as new");
     }
 
     #[test]
