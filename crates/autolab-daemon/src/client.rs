@@ -269,8 +269,6 @@ impl Client {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_connect(Some(Duration::from_secs(5)))
-            // The daemon sends something at least every second, so silence means the link is dead.
-            .timeout_recv_body(Some(Duration::from_secs(10)))
             .build()
             .into();
         let mut response = agent

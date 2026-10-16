@@ -51,6 +51,8 @@ impl Live {
             return;
         }
         self.last_try = Some(Instant::now());
+        // A new attempt starts clean: the last attempt's error no longer applies.
+        *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.stop = Arc::new(AtomicBool::new(false));
         self.running.store(true, Ordering::SeqCst);
         let (frame, stop, running, problem, ctx) = (
