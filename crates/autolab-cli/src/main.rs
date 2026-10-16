@@ -54,6 +54,8 @@ enum Command {
         #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
         reverse: Vec<u16>,
     },
+    /// Open the desktop window
+    Gui,
     /// Stop the running session
     Stop,
     /// Show the running session
@@ -179,12 +181,29 @@ fn main() -> ExitCode {
     }
 }
 
+/// Replace the launcher so the GUI owns its exit status and receives terminal signals directly.
+fn launch_gui() -> Result<u8> {
+    use std::os::unix::process::CommandExt;
+
+    let program = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("autolab-gui")))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("autolab-gui"));
+    let error = std::process::Command::new(&program).exec();
+    Err(Error::BackendUnavailable(format!(
+        "cannot launch {}: {error}; install the GUI with `make install-gui`",
+        program.display()
+    )))
+}
+
 fn run(cli: Cli) -> Result<u8> {
     let json = cli.json;
     // Only commands that use settings read the file, so a typo in it never blocks `stop` or `status`.
     let load = || config::load(&config::Locator::from_process(), &current_dir()?);
     let dhu_env_set = std::env::var_os("AUTOLAB_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
+        Command::Gui => launch_gui(),
         Command::Start {
             backend,
             dhu_path,

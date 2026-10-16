@@ -591,6 +591,31 @@ fn present(path: Option<&str>) -> Option<&str> {
 
 type CertificateAndKey = (Vec<u8>, Vec<u8>);
 
+/// Explicit paths override the standard credential pair. An incomplete or unreadable pair is
+/// an error; only an absent pair permits the bundled certificate.
+fn load_certificate(
+    cert_path: Option<&str>,
+    key_path: Option<&str>,
+    credentials_dir: Option<&std::path::Path>,
+) -> Result<Option<CertificateAndKey>, String> {
+    if present(cert_path).is_some() || present(key_path).is_some() {
+        return load_custom_certificate(cert_path, key_path);
+    }
+    let Some(dir) = credentials_dir else {
+        return Ok(None);
+    };
+    let cert = dir.join("head-unit-cert.pem");
+    let key = dir.join("head-unit-key.pem");
+    let exists = |path: &std::path::Path| {
+        path.try_exists()
+            .map_err(|e| format!("cannot inspect {}: {e}", path.display()))
+    };
+    if !exists(&cert)? && !exists(&key)? {
+        return Ok(None);
+    }
+    load_custom_certificate(Some(&cert.to_string_lossy()), Some(&key.to_string_lossy()))
+}
+
 fn load_custom_certificate(
     cert_path: Option<&str>,
     key_path: Option<&str>,
@@ -651,11 +676,15 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
             hide_clock: Some(true),
         }
     };
+    let credentials_dir = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| std::path::PathBuf::from(home).join(".config/autolab/credentials"));
     let config = AndroidAutoConfiguration {
         unit,
-        custom_certificate: load_custom_certificate(
+        custom_certificate: load_certificate(
             env_value(CERT_ENV).as_deref(),
             env_value(KEY_ENV).as_deref(),
+            credentials_dir.as_deref(),
         )?,
     };
     hu.lock().certificate_source = Some(
@@ -803,6 +832,49 @@ impl AndroidAutoMainTrait for Hu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_credentials_are_discovered_and_explicit_paths_take_priority() {
+        let dir = std::env::temp_dir().join(format!("autolab-default-cert-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(load_certificate(None, None, Some(&dir)).unwrap(), None);
+        let cert = dir.join("head-unit-cert.pem");
+        let key = dir.join("head-unit-key.pem");
+        let cert_pem = b"-----BEGIN CERTIFICATE-----\ndefault-cert\n";
+        let key_pem = b"-----BEGIN PRIVATE KEY-----\ndefault-key\n";
+        std::fs::write(&cert, cert_pem).unwrap();
+        assert!(
+            load_certificate(None, None, Some(&dir))
+                .unwrap_err()
+                .contains("head-unit-key.pem")
+        );
+        std::fs::write(&key, key_pem).unwrap();
+        assert_eq!(
+            load_certificate(None, None, Some(&dir)).unwrap(),
+            Some((cert_pem.to_vec(), key_pem.to_vec()))
+        );
+        let other_cert = dir.join("other-cert.pem");
+        std::fs::write(&other_cert, b"-----BEGIN CERTIFICATE-----\noverride\n").unwrap();
+        let loaded = load_certificate(other_cert.to_str(), key.to_str(), Some(&dir))
+            .unwrap()
+            .unwrap();
+        assert!(loaded.0.ends_with(b"override\n"));
+        assert!(load_certificate(other_cert.to_str(), None, Some(&dir)).is_err());
+        std::fs::write(&cert, b"invalid").unwrap();
+        assert!(
+            load_certificate(None, None, Some(&dir))
+                .unwrap_err()
+                .contains("PEM")
+        );
+        std::fs::remove_file(&cert).unwrap();
+        assert!(
+            load_certificate(None, None, Some(&dir))
+                .unwrap_err()
+                .contains("head-unit-cert.pem")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn neither_certificate_path_keeps_the_built_in_certificate() {

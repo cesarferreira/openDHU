@@ -1,13 +1,16 @@
-# Desktop window (`autolab-gui`)
+# Desktop window (`aa gui`)
 
 `autolab-gui` is a native window for the AutoLab daemon. It is a client of the HTTP API in [api.md](api.md),
 like the CLI. It adds no new power and needs no security change: it reads `daemon.json` for the port and the
 token, and sends no `Origin` header.
 
 ```bash
+aa gui                          # after make install
 cargo run -p autolab-gui          # from a checkout
 cargo install --path crates/autolab-gui --locked
 ```
+
+`aa gui` finds `autolab-gui` next to the CLI or on `PATH`.
 
 The window works with or without a session. If no daemon runs, it says so and offers **Start session**, with a
 choice of head unit (Google DHU or AutoLab native). That button runs `aa start`, so the daemon start-up and your [config file](configuration.md) behave exactly as in

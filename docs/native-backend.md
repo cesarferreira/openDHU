@@ -40,7 +40,7 @@ start message within milliseconds and frames resume.
 
 ## Live view
 
-The head unit has no window of its own. To watch the phone, run `autolab-gui` (or `make gui`): its **Live view** card
+The head unit has no window of its own. To watch the phone, run `aa gui` (or `make gui`): its **Live view** card
 shows the head unit's display live (the projected Android Auto screen, like the DHU's window), decoded with `ffmpeg`, and a click or drag on it touches the phone. Any other client can read
 the same stream from `GET /v1/video` ([api.md](api.md)). Screenshots remain the way to save a picture.
 
@@ -89,18 +89,12 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 - `AUTOLAB_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
 - `AUTOLAB_NATIVE_IDENTITY=dhu` makes it introduce itself to the phone as Google's "Desktop Head Unit" instead of
   "AutoLab". It made no difference to which apps the launcher lists, but it is a quick way to rule identity out.
-- `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY` point at your own PEM client certificate and matching private key.
-  Set both, or neither. When neither is set, the head unit uses the certificate shipped by the vendored protocol
-  crate. Keep the key outside this repository (`chmod 600`). The variables must be present in the environment of
-  the daemon that starts the head unit. Recommended paths and setup:
-
-  ```bash
-  mkdir -p ~/.config/autolab/credentials
-  chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
-  export AUTOLAB_NATIVE_CERT="$HOME/.config/autolab/credentials/head-unit-cert.pem"
-  export AUTOLAB_NATIVE_KEY="$HOME/.config/autolab/credentials/head-unit-key.pem"
-  aa start --backend native
-  ```
+- The native backend automatically reads `~/.config/autolab/credentials/head-unit-cert.pem` and
+  `~/.config/autolab/credentials/head-unit-key.pem`. Both absent means the bundled certificate; an incomplete,
+  unreadable, or invalid pair fails startup. Keep the key outside this repository (`chmod 600`).
+- `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY` override those paths. Set both or neither, in the environment
+  of the daemon that starts the head unit. Restart the session after changing files, or the daemon after
+  changing these variables. `aa status` and the GUI show `custom` when your pair is loaded.
 
 ## Limits
 

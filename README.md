@@ -14,14 +14,14 @@ DHU is not needed.
 | **Session** | Starts a head unit session with the phone, shows its state, stops it | `aa start`, `status`, `stop` | yes | yes |
 | **Video focus** | Takes or releases the video focus, like a car switching to its own screen | `aa focus video on\|off` | accepted by the DHU | **confirmed by the phone** |
 | **Screenshots** | Saves a PNG of the projected display | `aa screenshot out.png` | yes | yes (needs `ffmpeg`) |
-| **Live view** | The head unit's display, live, in a window you can click and drag | `autolab-gui` | DHU has its own window | yes (needs `ffmpeg`) |
+| **Live view** | The head unit's display, live, in a window you can click and drag | `aa gui` | DHU has its own window | yes (needs `ffmpeg`) |
 | **Touch** | Taps and swipes at a pixel of a screenshot (800×480) | `aa tap X Y`, `aa swipe X1 Y1 X2 Y2` | no | yes |
 | **Audio** | Records what the phone plays (media, navigation prompts, assistant) to a WAV, or plays it | `aa audio out.wav`; window checkbox | DHU plays its own | yes |
 | **Car buttons** | Presses Home, Back, arrows, Enter, media keys | `aa key home` | no | experimental, no visible effect yet |
 | **Tunnels** | Puts back `adb reverse` tunnels that the phone drops when the session starts or mid-session | `aa start --reverse 10101` | yes | yes |
 | **YAML tests** | Runs scripted tests with assertions, JSON and JUnit reports, Ctrl+C-safe cleanup | `aa test file.yaml` | yes | yes |
 | **HTTP API** | Everything above over a local, authenticated API, with a live event stream | `aa daemon`, [docs/api.md](docs/api.md) | yes | yes |
-| **Desktop window** | Session, live view, focus, screenshots, events, audio | `autolab-gui` | partly | yes |
+| **Desktop window** | Session, live view, focus, screenshots, events, audio | `aa gui` | partly | yes |
 | **Config file** | Defaults for backend, serial, ports, paths and reports | `~/.config/autolab/config.toml` | yes | yes |
 | **Doctor** | Read-only check of your setup (DHU, adb, ffmpeg, device) | `aa doctor` | yes | yes |
 
@@ -59,7 +59,7 @@ aa doctor      # checks the DHU, adb, ffmpeg, the native head unit and your phon
 
 ```bash
 aa start --backend native      # or just `aa start` for the DHU; add --reverse 10101 for an adb tunnel
-autolab-gui                         # the window: live view, buttons, events
+aa gui                             # the window: live view, buttons, events
 aa focus video off             # the phone stops projecting
 aa focus video on
 aa screenshot out.png          # needs video focus on
@@ -75,7 +75,7 @@ Every command takes `--json` for machine-readable output.
 
 ### Custom native head-unit certificate
 
-The native backend can use your own PEM client certificate and matching private key. A recommended location is:
+The native backend automatically loads your PEM client certificate and matching private key from:
 
 ```text
 ~/.config/autolab/credentials/head-unit-cert.pem
@@ -86,14 +86,13 @@ Keep the private key outside the repository and restrict its permissions:
 
 ```bash
 chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
-export AUTOLAB_NATIVE_CERT="$HOME/.config/autolab/credentials/head-unit-cert.pem"
-export AUTOLAB_NATIVE_KEY="$HOME/.config/autolab/credentials/head-unit-key.pem"
 aa start --backend native
 ```
 
-Set both variables or neither. If neither is set, AutoLab uses the certificate shipped by the vendored protocol
-crate. The variables must be exported before AutoLab starts its daemon; stop and restart an existing daemon so it
-inherits them. `aa status` shows `Certificate: custom` or `Certificate: built-in` for the native backend;
+If neither file exists, AutoLab uses its bundled certificate. If only one exists or either is unreadable or
+invalid, startup fails. To override the standard paths, set both `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY`
+before starting the daemon. Restart the session after changing files; restart the daemon after changing its
+environment. `aa status` shows `Certificate: custom` or `Certificate: built-in` for the native backend;
 `--json` includes `certificateSource`. Older head units report `unknown` (`null` in JSON).
 See [Native backend](docs/native-backend.md) for details.
 
@@ -103,6 +102,7 @@ See [Native backend](docs/native-backend.md) for details.
 |---|---|
 | `aa start [--backend dhu\|native] [--serial S] [--reverse PORT]… [--dhu-path P] [--config F] [--headless]` | Start a session (starts the daemon if none runs) |
 | `aa stop` | Stop the session |
+| `aa gui` | Open the desktop window |
 | `aa status` | Show the session: backend, phone, focus (requested, head unit, phone), tunnels |
 | `aa focus video on\|off` | Take or release video focus |
 | `aa screenshot PATH` | Save the display as a PNG (absolute or relative; must end in `.png`) |
