@@ -27,6 +27,40 @@ The phone emulator can remain headless: `environment.headless` controls the phon
 this flag shows the head unit. `--validate` opens no window. Viewer diagnostics go to
 `head-unit-viewer.log` in the artifacts directory.
 
+## Terminal progress and named suites
+
+Terminal output colors current work cyan, passes green, failures/errors red and skips yellow.
+`NO_COLOR` disables colors; redirected output and `TERM=dumb` stay plain.
+
+```bash
+aa test e2e/production.yaml --interactive
+aa test e2e/production.yaml --interactive --show-head-unit
+```
+
+`--interactive` animates the current setup stage or step on one line, with elapsed time, and replaces
+it with the result when finished. It falls back to ordinary live logs when stdout is redirected.
+`--json` disables animation and styling, keeping the final JSON on stdout and plain progress on stderr.
+
+Register convenient names in a project `autolab.yaml` without duplicating suite setup:
+
+```yaml
+suites:
+  robotaxi: e2e/production.yaml
+  storybook: e2e/suite.yaml
+```
+
+```bash
+aa test robotaxi
+aa test robotaxi --filter persistence --interactive
+aa test storybook --filter route --validate
+```
+
+A name resolves in the nearest `autolab.yaml` in the current directory or its ancestors. Target paths
+are relative to that file. Existing file/directory arguments take precedence over names. Run one named
+suite at a time. YAML still defines each suite's environment, services and test files.
+`--filter` selects test names or filenames by case-insensitive substring. All YAML is validated first;
+a filter matching nothing exits with an argument error before starting services, devices or a viewer.
+
 ## Format
 
 ```yaml

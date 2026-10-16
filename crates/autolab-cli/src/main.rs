@@ -9,6 +9,8 @@ mod services;
 mod session_backend;
 mod suite;
 mod test_cmd;
+mod test_output;
+mod test_selection;
 mod viewer;
 
 use std::path::PathBuf;
@@ -117,9 +119,9 @@ enum Command {
         #[arg(long, default_value_t = 300)]
         duration_ms: u64,
     },
-    /// Run YAML tests against the running session
+    /// Run YAML suites or tests, including named project suites
     Test {
-        /// Test files or directories (searched recursively for .yaml/.yml)
+        /// Test files, directories, or suite names registered in the project autolab.yaml
         #[arg(required = true)]
         paths: Vec<PathBuf>,
         /// Report to write into the artifacts directory (repeatable; default: json)
@@ -137,6 +139,12 @@ enum Command {
         /// Show the test session in an AutoLab head-unit window (requires autolab-gui)
         #[arg(long)]
         show_head_unit: bool,
+        /// Animate the current setup stage or step in a terminal
+        #[arg(long)]
+        interactive: bool,
+        /// Run tests whose name or filename contains this text (case-insensitive)
+        #[arg(long)]
+        filter: Option<String>,
     },
     /// Check the environment without touching a running session
     Doctor {
@@ -340,6 +348,8 @@ fn run(cli: Cli) -> Result<u8> {
             skip_unsupported,
             validate,
             show_head_unit,
+            interactive,
+            filter,
         } => {
             let cfg = load()?;
             test_cmd::run(test_cmd::Options {
@@ -352,6 +362,8 @@ fn run(cli: Cli) -> Result<u8> {
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
                 show_head_unit,
+                output: std::sync::Arc::new(test_output::Output::new(json, interactive)),
+                filter,
                 validate,
                 cancel: None,
                 app: None,
