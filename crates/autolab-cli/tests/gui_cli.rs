@@ -68,3 +68,61 @@ fn missing_gui_explains_how_to_install_it() {
         text(&output)
     );
 }
+
+#[test]
+fn test_viewer_uses_the_session_runtime_and_is_closed_after_the_run() {
+    let s = Sandbox::new();
+    let native = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../autolab-native/tests/fixtures/fake-native-hu.sh"
+    );
+    let start = s.autolab_env(
+        &["start", "--backend", "native", "--serial", "FAKE0001"],
+        &[("AUTOLAB_NATIVE_HU", native)],
+    );
+    assert_eq!(code(&start), 0, "{}", text(&start));
+    let cli = isolated_cli(&s);
+    let record = s.scratch("viewer-runtime");
+    let pid = s.scratch("viewer-pid");
+    fake_gui(
+        cli.parent().unwrap(),
+        "printf '%s' \"$AUTOLAB_RUNTIME_DIR\" > \"$VIEWER_RECORD\"\necho $$ > \"$VIEWER_PID\"\nexec /bin/sleep 30",
+    );
+    let file = s.scratch("viewer.yaml");
+    std::fs::write(
+        &file,
+        "name: Visible test\nsteps: [{action: wait, duration: 500ms}]\n",
+    )
+    .unwrap();
+    let output = Command::new(&cli)
+        .args([
+            "test",
+            file.to_str().unwrap(),
+            "--show-head-unit",
+            "--artifacts-dir",
+            s.scratch("art").to_str().unwrap(),
+        ])
+        .env("AUTOLAB_RUNTIME_DIR", &s.dir)
+        .env_remove("AUTOLAB_CONFIG")
+        .env("XDG_CONFIG_HOME", s.dir.join("no-xdg"))
+        .env("VIEWER_RECORD", &record)
+        .env("VIEWER_PID", &pid)
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        s.dir.to_string_lossy()
+    );
+    let pid: u64 = std::fs::read_to_string(pid)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(!alive(pid), "the test-owned viewer must be stopped");
+    assert_eq!(
+        s.status_json()["backend"],
+        "native",
+        "standalone tests must leave the user's session running"
+    );
+}

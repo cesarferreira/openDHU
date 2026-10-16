@@ -9,6 +9,7 @@ mod services;
 mod session_backend;
 mod suite;
 mod test_cmd;
+mod viewer;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -133,6 +134,9 @@ enum Command {
         /// Validate suite and test files without starting a device or session
         #[arg(long)]
         validate: bool,
+        /// Show the test session in an AutoLab head-unit window (requires autolab-gui)
+        #[arg(long)]
+        show_head_unit: bool,
     },
     /// Check the environment without touching a running session
     Doctor {
@@ -195,11 +199,7 @@ fn main() -> ExitCode {
 fn launch_gui() -> Result<u8> {
     use std::os::unix::process::CommandExt;
 
-    let program = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("autolab-gui")))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("autolab-gui"));
+    let program = viewer::program();
     let error = std::process::Command::new(&program).exec();
     Err(Error::BackendUnavailable(format!(
         "cannot launch {}: {error}; install the GUI with `make install-gui`",
@@ -339,6 +339,7 @@ fn run(cli: Cli) -> Result<u8> {
             artifacts_dir,
             skip_unsupported,
             validate,
+            show_head_unit,
         } => {
             let cfg = load()?;
             test_cmd::run(test_cmd::Options {
@@ -350,6 +351,7 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
+                show_head_unit,
                 validate,
                 cancel: None,
                 app: None,

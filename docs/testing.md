@@ -10,6 +10,23 @@ aa test tests/ --report junit --report json --artifacts-dir ./test-results
 Every file is parsed and validated **before** the session is touched, so a typo exits with code 2 and writes
 nothing.
 
+Progress is printed immediately by default, including suite setup, test names, each step starting,
+and its result and duration. Output is flushed when redirected to a terminal or CI log. With `--json`,
+progress goes to stderr and stdout contains only the final JSON report.
+
+To watch the projected head unit while tests run:
+
+```bash
+aa test e2e/production.yaml --show-head-unit
+```
+
+`--show-head-unit` opens AutoLab's GUI connected to that test session, including a suite's private
+session. Install it with `make install-gui`. The native backend is required. The window and its decoder
+close when the run ends or is interrupted; closing the window yourself does not stop the tests.
+The phone emulator can remain headless: `environment.headless` controls the phone's window, while
+this flag shows the head unit. `--validate` opens no window. Viewer diagnostics go to
+`head-unit-viewer.log` in the artifacts directory.
+
 ## Format
 
 ```yaml

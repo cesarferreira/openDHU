@@ -159,11 +159,27 @@ fn ms(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Synchronous notifications emitted before work starts and as soon as its result is available.
+pub enum Progress<'a> {
+    Started { index: usize, action: &'a str },
+    Finished(&'a StepResult),
+}
+
 pub fn run_test(
     test: &TestFile,
     file: &str,
     backend: &mut dyn HeadUnitBackend,
     cfg: &RunConfig,
+) -> TestResult {
+    run_test_with_progress(test, file, backend, cfg, &mut |_| {})
+}
+
+pub fn run_test_with_progress(
+    test: &TestFile,
+    file: &str,
+    backend: &mut dyn HeadUnitBackend,
+    cfg: &RunConfig,
+    progress: &mut dyn FnMut(Progress<'_>),
 ) -> TestResult {
     let started = cfg.clock.now();
     let mut steps: Vec<StepResult> = Vec::new();
@@ -171,6 +187,10 @@ pub fn run_test(
 
     // Preflight: backend identity and required capabilities. Always recorded, so reports have a
     // uniform first entry.
+    progress(Progress::Started {
+        index: 0,
+        action: "preflight",
+    });
     let pre_started = cfg.clock.now();
     let pre = preflight(test, backend, cfg.skip_unsupported);
     let (pre_outcome, pre_detail, pre_code) = match &pre {
@@ -185,6 +205,7 @@ pub fn run_test(
         duration_ms: ms(cfg.clock.now() - pre_started),
         exit_code: (pre_code != 0).then_some(pre_code),
     });
+    progress(Progress::Finished(steps.last().unwrap()));
     match pre {
         Ok(_) => {}
         Err(end) if end.outcome == Outcome::Skipped => {
@@ -215,8 +236,13 @@ pub fn run_test(
                     duration_ms: 0,
                     exit_code: None,
                 });
+                progress(Progress::Finished(steps.last().unwrap()));
                 continue;
             }
+            progress(Progress::Started {
+                index,
+                action: step.action(),
+            });
             let t0 = cfg.clock.now();
             let end = if cfg.clock.cancelled() {
                 End::interrupted("interrupted before this step ran")
@@ -241,6 +267,7 @@ pub fn run_test(
                 duration_ms: ms(cfg.clock.now() - t0),
                 exit_code: (end.code != 0).then_some(end.code),
             });
+            progress(Progress::Finished(steps.last().unwrap()));
             if end.outcome != Outcome::Passed {
                 first_bad = Some((index, step.action(), end));
             }
@@ -250,6 +277,10 @@ pub fn run_test(
     // Isolation: never leave the next test (or the user) with video focus off.
     let mut cleanup_failure: Option<String> = None;
     if maybe_off {
+        progress(Progress::Started {
+            index: test.steps.len() + 1,
+            action: "cleanup.focus.video",
+        });
         let t0 = cfg.clock.now();
         let end = restore_focus(backend);
         steps.push(StepResult {
@@ -260,6 +291,7 @@ pub fn run_test(
             duration_ms: ms(cfg.clock.now() - t0),
             exit_code: (end.code != 0).then_some(end.code),
         });
+        progress(Progress::Finished(steps.last().unwrap()));
         if end.outcome != Outcome::Passed {
             cleanup_failure = Some(end.detail.clone());
             if first_bad.is_none() {

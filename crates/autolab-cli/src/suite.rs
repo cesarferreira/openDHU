@@ -343,6 +343,10 @@ pub fn run(opts: test_cmd::Options) -> Result<u8> {
         }
         return Ok(0);
     }
+    test_cmd::progress(
+        opts.json,
+        format!("Suite: {} ({} tests)", opts.paths[0].display(), tests.len()),
+    );
     let cancel = Arc::new(AtomicBool::new(false));
     test_cmd::install_interrupt_handler(&cancel)?;
     let result = run_prepared(opts, suite, tests, Arc::clone(&cancel));
@@ -374,6 +378,7 @@ fn run_prepared(
             suite.environment.apk.display()
         )));
     }
+    test_cmd::progress(opts.json, "Checking test tools...");
     // Fail before starting hardware when OCR isn't installed.
     device::command(
         Path::new("tesseract"),
@@ -395,6 +400,7 @@ fn run_prepared(
         cwd.join(artifacts)
     };
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
+    test_cmd::progress(opts.json, format!("Artifacts: {}", artifacts.display()));
     let lock_dir = std::env::temp_dir().join("autolab-emulator-locks");
     std::fs::create_dir_all(&lock_dir).map_err(|e| Error::Other(e.to_string()))?;
     let lock = std::fs::OpenOptions::new()
@@ -427,6 +433,13 @@ fn run_prepared(
     let base = opts.paths[0].parent().unwrap_or(Path::new("."));
     for spec in &suite.services {
         check_cancel(&cancel)?;
+        test_cmd::progress(
+            opts.json,
+            format!(
+                "Starting service {} (waiting for port {})...",
+                spec.name, spec.ready_port
+            ),
+        );
         lease.services.push(crate::services::OwnedService::spawn(
             spec, base, &artifacts,
         )?);
@@ -435,10 +448,30 @@ fn run_prepared(
             .last_mut()
             .unwrap()
             .wait_ready(spec, &cancel)?;
+        test_cmd::progress(opts.json, format!("Service {} ready", spec.name));
     }
+    test_cmd::progress(
+        opts.json,
+        format!("Finding emulator {}...", suite.environment.emulator),
+    );
     let serial = match find_emulator(&lease.adb, &suite.environment.emulator)? {
-        Some(serial) => serial,
+        Some(serial) => {
+            test_cmd::progress(opts.json, format!("Reusing emulator {serial}"));
+            serial
+        }
         None => {
+            test_cmd::progress(
+                opts.json,
+                format!(
+                    "Booting emulator {}{} (up to 180s)...",
+                    suite.environment.emulator,
+                    if suite.environment.headless {
+                        " headlessly"
+                    } else {
+                        ""
+                    }
+                ),
+            );
             let emulator = std::env::var_os("ANDROID_HOME")
                 .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
                 .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
@@ -505,10 +538,18 @@ fn run_prepared(
         .to_str()
         .ok_or_else(|| Error::InvalidArgs("APK path is not UTF-8".into()))?;
     check_cancel(&cancel)?;
+    test_cmd::progress(
+        opts.json,
+        format!(
+            "Installing {} on {serial}...",
+            suite.environment.apk.display()
+        ),
+    );
     device::adb(&lease.adb, &serial, &["install", "-r", "-t", apk])?;
     check_cancel(&cancel)?;
     for permission in &suite.environment.permissions {
         check_cancel(&cancel)?;
+        test_cmd::progress(opts.json, format!("Granting {permission}..."));
         device::adb(
             &lease.adb,
             &serial,
@@ -523,6 +564,13 @@ fn run_prepared(
     }
     for port in &suite.environment.reverse_ports {
         check_cancel(&cancel)?;
+        test_cmd::progress(
+            opts.json,
+            format!(
+                "Forwarding device port {} to host {}...",
+                port.device, port.host
+            ),
+        );
         lease.reverses.push(crate::reverse::ReverseLease::acquire(
             &lease.adb,
             &serial,
@@ -532,12 +580,14 @@ fn run_prepared(
     }
     if let Some(activity) = &suite.environment.launch_activity {
         let component = format!("{}/{activity}", suite.environment.package);
+        test_cmd::progress(opts.json, format!("Launching {component}..."));
         device::adb(
             &lease.adb,
             &serial,
             &["shell", "am", "start", "-W", "-n", &component],
         )?;
     }
+    test_cmd::progress(opts.json, "Restarting the Android Auto head-unit server...");
     device::restart_head_unit_server(&lease.adb, &serial)?;
     check_cancel(&cancel)?;
     let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;
@@ -558,6 +608,10 @@ fn run_prepared(
             .map_err(|e| Error::Other(e.to_string()))?,
     );
     let endpoint = format!("127.0.0.1:{port}");
+    test_cmd::progress(
+        opts.json,
+        "Starting the native head unit and waiting for projection...",
+    );
     suite_cli(
         &lease.exe,
         &lease.runtime,
@@ -572,6 +626,7 @@ fn run_prepared(
         ],
         Some(&cancel),
     )?;
+    test_cmd::progress(opts.json, "Requesting video focus...");
     suite_cli(
         &lease.exe,
         &lease.runtime,
@@ -598,13 +653,16 @@ fn run_prepared(
     if opts.report.is_empty() {
         opts.report = vec![test_cmd::ReportFormat::Json, test_cmd::ReportFormat::Junit];
     }
+    let json = opts.json;
     let result = test_cmd::run(opts);
+    test_cmd::progress(json, "Cleaning up the suite session and owned resources...");
     // Capture daemon protocol logs before removing its private runtime (never archive daemon.json).
     let _ = std::fs::copy(
         lease.runtime.join("daemon.log"),
         lease.artifacts.join("head-unit.log"),
     );
     lease.cleanup()?;
+    test_cmd::progress(json, "Suite cleanup complete");
     result
 }
 

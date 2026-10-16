@@ -1,5 +1,6 @@
 //! `aa test`: parse every file first, then run them through the session backend.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,8 +11,10 @@ use autolab_test::report::{
     BackendMeta, Format, Metadata, RunReport, Summary, exit_code_for, iso8601_utc, step_log,
     write_artifacts,
 };
-use autolab_test::runner::{Clock, INTERRUPTED, RunConfig, SystemClock, run_test};
-use autolab_test::{Outcome, TestFile, TestResult};
+use autolab_test::runner::{
+    Clock, INTERRUPTED, Progress, RunConfig, SystemClock, run_test_with_progress,
+};
+use autolab_test::{Outcome, TestFile};
 use clap::ValueEnum;
 
 use crate::daemon_ctl;
@@ -27,6 +30,7 @@ pub enum ReportFormat {
 pub struct Options {
     pub paths: Vec<PathBuf>,
     pub validate: bool,
+    pub show_head_unit: bool,
     pub cancel: Option<Arc<AtomicBool>>,
     pub app: Option<crate::suite::Application>,
     pub runtime_dir: Option<PathBuf>,
@@ -128,24 +132,57 @@ fn word(o: Outcome) -> &'static str {
     }
 }
 
-fn print_test(t: &TestResult) {
-    println!("Test: {}", t.name);
-    for s in &t.steps {
-        let tag = match s.outcome {
-            Outcome::Passed => "PASS ",
-            Outcome::Failed => "FAIL ",
-            Outcome::Error => "ERROR",
-            Outcome::Skipped => "SKIP ",
-        };
-        let name = if s.index == 0 {
-            s.action.clone()
-        } else {
-            format!("{}. {}", s.index, s.action)
-        };
-        println!("  {tag} {name}: {}", s.detail);
+/// Flush every progress line even when stdout is redirected to a CI log. JSON stays on stdout.
+pub(crate) fn progress(json: bool, message: impl std::fmt::Display) {
+    if json {
+        let mut out = std::io::stderr().lock();
+        let _ = writeln!(out, "{message}");
+        let _ = out.flush();
+    } else {
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, "{message}");
+        let _ = out.flush();
     }
-    println!("Result: {}", word(t.outcome));
-    println!("Duration: {:.1}s\n", t.duration_ms as f64 / 1000.0);
+}
+
+fn step_description(step: &autolab_test::schema::Step) -> String {
+    use autolab_test::schema::Step;
+    match step {
+        Step::UiTap { text, until, .. } => format!(
+            " {text:?}{}",
+            until
+                .as_ref()
+                .map(|text| format!(" until {text:?}"))
+                .unwrap_or_default()
+        ),
+        Step::UiWaitFor { text, .. } | Step::UiExpect { text, .. } => format!(" {text:?}"),
+        Step::HttpRequest { method, url, .. } => format!(" {method:?} {url}"),
+        Step::Wait { duration } => format!(" ({})", autolab_test::runner::fmt_dur(duration.0)),
+        Step::Screenshot { path } => format!(" {path}"),
+        _ => String::new(),
+    }
+}
+
+fn print_step(json: bool, s: &autolab_test::StepResult) {
+    let tag = match s.outcome {
+        Outcome::Passed => "PASS",
+        Outcome::Failed => "FAIL",
+        Outcome::Error => "ERROR",
+        Outcome::Skipped => "SKIP",
+    };
+    let name = if s.index == 0 {
+        s.action.clone()
+    } else {
+        format!("{}. {}", s.index, s.action)
+    };
+    progress(
+        json,
+        format!(
+            "  {tag} {name}: {} ({:.1}s)",
+            s.detail,
+            s.duration_ms as f64 / 1000.0
+        ),
+    );
 }
 
 /// First Ctrl+C or SIGTERM asks the run to stop cleanly. A second one exits at once, in case a
@@ -184,6 +221,7 @@ pub fn run(opts: Options) -> Result<u8> {
     });
     let dir = artifacts_dir(opts.artifacts_dir, needs_shots)?;
 
+    progress(opts.json, "Connecting to the head-unit session...");
     let client = match &opts.runtime_dir {
         Some(dir) => autolab_daemon::Client::connect_in(dir)?,
         None => daemon_ctl::connect()?,
@@ -197,6 +235,20 @@ pub fn run(opts: Options) -> Result<u8> {
             install_interrupt_handler(&cancel)?;
             cancel
         }
+    };
+    let _viewer = if opts.show_head_unit {
+        if head.backend != "native" {
+            return Err(Error::Unsupported(
+                "--show-head-unit requires the native backend".into(),
+            ));
+        }
+        progress(opts.json, "Opening the head-unit viewer...");
+        Some(crate::viewer::Viewer::start(
+            opts.runtime_dir.as_deref(),
+            &dir,
+        )?)
+    } else {
+        None
     };
     let clock = SystemClock::with_cancel(Arc::clone(&cancel));
     let started_unix = SystemTime::now()
@@ -221,13 +273,38 @@ pub fn run(opts: Options) -> Result<u8> {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
+        progress(opts.json, format!("Test: {}", test.name));
         if let Some(app) = &opts.app {
+            progress(
+                opts.json,
+                format!("  Resetting application {}...", app.label),
+            );
             app.reset()?;
         }
-        let r = run_test(test, file, &mut backend, &cfg);
-        if !opts.json {
-            print_test(&r);
-        }
+        let r = run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
+            Progress::Started { index, action } => {
+                let description = index
+                    .checked_sub(1)
+                    .and_then(|n| test.steps.get(n))
+                    .map(step_description)
+                    .unwrap_or_default();
+                let name = if index == 0 {
+                    action.to_string()
+                } else {
+                    format!("{index}. {action}")
+                };
+                progress(opts.json, format!("  RUN {name}{description}"));
+            }
+            Progress::Finished(step) => print_step(opts.json, step),
+        });
+        progress(
+            opts.json,
+            format!(
+                "Result: {}\nDuration: {:.1}s\n",
+                word(r.outcome),
+                r.duration_ms as f64 / 1000.0
+            ),
+        );
         results.push(r);
     }
 

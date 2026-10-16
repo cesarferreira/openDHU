@@ -14,6 +14,7 @@ fn validates_suite_relative_globs_and_ui_actions_without_a_device_or_apk() {
             "test",
             dir.join("suite.yaml").to_str().unwrap(),
             "--validate",
+            "--show-head-unit",
             "--json",
         ],
         &[("PATH", "/no/tools")],
