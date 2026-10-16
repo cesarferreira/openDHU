@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-autolab (CLI) ──HTTP, 127.0.0.1──▶ autolab daemon ──stdin/stderr──▶ desktop-head-unit ──USB──▶ phone
+aa (CLI) ──HTTP, 127.0.0.1──▶ aa daemon ──stdin/stderr──▶ desktop-head-unit ──USB──▶ phone
  GUI / curl  ──────────────────────▲   (owns the session)               (Google's DHU)
 ```
 
@@ -19,13 +19,13 @@ daemon is the only process that talks to the DHU.
 | `autolab-test` | YAML test schema, runner, JSON and JUnit reports, artifacts layout. The runner uses only the backend trait, so tests use a mock backend. |
 | `autolab-daemon` | The HTTP server, auth, session state machine, event stream, tunnel keeper, and a small client. |
 | `autolab-gui` | The `autolab-gui` window (egui). A client of the daemon API only; see [gui.md](gui.md). |
-| `autolab-cli` | The `autolab` binary: argument parsing, config file, daemon start-up, output. |
+| `autolab-cli` | The `aa` binary: argument parsing, config file, daemon start-up, output. |
 
 The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `autolab-native`, which starts `autolab-native-hu` as a child; the child links `autolab-native` only for the shared protocol types. Nothing above the trait changed.
 
 ## A request, step by step
 
-`autolab focus video off`:
+`aa focus video off`:
 
 1. The CLI reads `daemon.json` from the runtime directory to get the port and the token.
 2. It sends `POST /v1/focus/video` with the token. The daemon checks the token, then `Host`, then `Origin`.
@@ -34,7 +34,7 @@ The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test
 5. The daemon emits `focus.video.requested` and `focus.video.accepted` (or `failed`) events, and returns the result
    with an operation id.
 
-`autolab start` first launches a daemon if none answers, then sends `POST /v1/session/start`.
+`aa start` first launches a daemon if none answers, then sends `POST /v1/session/start`.
 
 ## State and files
 

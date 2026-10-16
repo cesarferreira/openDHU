@@ -1,4 +1,4 @@
-//! `autolab doctor`: read-only environment checks. It never starts a DHU or touches the phone,
+//! `aa doctor`: read-only environment checks. It never starts a DHU or touches the phone,
 //! so it is safe to run while a session is active.
 
 use std::path::{Path, PathBuf};
@@ -172,7 +172,7 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
             Level::Warn,
             "other dhu",
             format!(
-                "a desktop-head-unit not started by AutoLab is running (pid {}). It holds the phone's USB link and AutoLab cannot control it; stop it before `autolab start`",
+                "a desktop-head-unit not started by AutoLab is running (pid {}). It holds the phone's USB link and AutoLab cannot control it; stop it before `aa start`",
                 pids.join(", ")
             ),
         ));
@@ -180,7 +180,7 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
     out.push(check(
         Level::Info,
         "not checked",
-        "whether Android Auto projection will connect; that needs `autolab start` and a phone with Android Auto set up",
+        "whether Android Auto projection will connect; that needs `aa start` and a phone with Android Auto set up",
     ));
     out
 }

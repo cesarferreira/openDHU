@@ -1,4 +1,4 @@
-//! The daemon as a process: foreground `autolab daemon`, signals, and what survives what.
+//! The daemon as a process: foreground `aa daemon`, signals, and what survives what.
 
 mod common;
 
@@ -11,7 +11,7 @@ use common::*;
 fn spawn_daemon(s: &Sandbox, extra: &[&str]) -> Child {
     let mut args = vec!["daemon", "--port", "0"];
     args.extend_from_slice(extra);
-    let child = Command::new(env!("CARGO_BIN_EXE_autolab"))
+    let child = Command::new(env!("CARGO_BIN_EXE_aa"))
         .args(&args)
         .env("AUTOLAB_RUNTIME_DIR", &s.dir)
         .stdout(Stdio::null())
@@ -154,7 +154,7 @@ fn relative_paths_are_sent_to_the_daemon_as_absolute() {
     let work = s.scratch("work");
     std::fs::create_dir_all(work.join("cfg")).unwrap();
     let args = s.scratch("args.txt");
-    let o = Command::new(env!("CARGO_BIN_EXE_autolab"))
+    let o = Command::new(env!("CARGO_BIN_EXE_aa"))
         .args([
             "start",
             "--dhu-path",

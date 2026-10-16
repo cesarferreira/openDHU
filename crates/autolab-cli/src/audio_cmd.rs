@@ -1,4 +1,4 @@
-//! `autolab audio`: record what the phone plays through the car to a WAV file.
+//! `aa audio`: record what the phone plays through the car to a WAV file.
 //!
 //! This is also how to check audio without listening: the summary says how much sound arrived and how
 //! loud it was.

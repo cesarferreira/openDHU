@@ -7,7 +7,7 @@ license.workspace = true
 description = "Programmable Android Auto head unit control"
 
 [[bin]]
-name = "autolab"
+name = "aa"
 path = "src/main.rs"
 
 [dependencies]

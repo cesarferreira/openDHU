@@ -64,9 +64,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn no_session() -> Error {
-    Error::BackendUnavailable(
-        "no AutoLab session is running; start one with `autolab start`".into(),
-    )
+    Error::BackendUnavailable("no AutoLab session is running; start one with `aa start`".into())
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
@@ -365,7 +363,7 @@ impl Daemon {
                 }
                 Slot::Running(_) => {
                     return Err(Error::SessionConflict(
-                        "an AutoLab session is already running; run `autolab stop` first".into(),
+                        "an AutoLab session is already running; run `aa stop` first".into(),
                     ));
                 }
                 Slot::Stopping { .. } => {

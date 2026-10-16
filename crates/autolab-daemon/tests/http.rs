@@ -856,7 +856,7 @@ fn the_idle_timeout_never_ends_a_running_session_or_a_persistent_daemon() {
     thread::sleep(Duration::from_millis(1800));
     assert!(
         !persistent.finished(),
-        "a daemon started with `autolab daemon` stays up while idle"
+        "a daemon started with `aa daemon` stays up while idle"
     );
 }
 

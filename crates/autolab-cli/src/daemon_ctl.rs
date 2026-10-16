@@ -1,4 +1,4 @@
-//! Finding the daemon, and starting one when `autolab start` needs it.
+//! Finding the daemon, and starting one when `aa start` needs it.
 
 use std::fs::File;
 use std::os::unix::process::CommandExt;
@@ -17,7 +17,7 @@ pub fn connect() -> Result<Client> {
 }
 
 /// Connect to the daemon, starting one if none answers. A daemon started here is detached and
-/// exits when its session ends; run `autolab daemon` yourself for one that stays.
+/// exits when its session ends; run `aa daemon` yourself for one that stays.
 pub fn ensure() -> Result<Client> {
     let dir = runtime::runtime_dir()?;
     if let Ok(client) = Client::connect_in(&dir) {
@@ -39,7 +39,7 @@ pub fn ensure() -> Result<Client> {
 
     let deadline = Instant::now() + STARTUP;
     loop {
-        // Connecting wins over an early exit: a second `autolab start` racing this one may have
+        // Connecting wins over an early exit: a second `aa start` racing this one may have
         // lost the bind to the first daemon, which is exactly the one we want to talk to.
         if let Ok(client) = Client::connect_in(&dir) {
             return Ok(client);

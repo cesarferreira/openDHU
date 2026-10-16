@@ -57,7 +57,7 @@ fn focus_without_session_is_backend_unavailable() {
     let s = Sandbox::new();
     let o = s.autolab(&["focus", "video", "off"]);
     assert_eq!(code(&o), 3);
-    assert!(text(&o).contains("autolab start"), "{}", text(&o));
+    assert!(text(&o).contains("aa start"), "{}", text(&o));
 }
 
 #[test]
@@ -294,4 +294,12 @@ fn screenshot_without_video_focus_reports_the_dhu_refusal() {
     assert_eq!(code(&o), 1, "{}", text(&o));
     assert!(text(&o).contains("nothing to screenshot"), "{}", text(&o));
     assert!(!std::path::Path::new(&file).exists());
+}
+
+#[test]
+fn help_uses_the_aa_executable_name() {
+    let s = Sandbox::new();
+    let output = s.autolab(&["--help"]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert!(text(&output).contains("Usage: aa "), "{}", text(&output));
 }

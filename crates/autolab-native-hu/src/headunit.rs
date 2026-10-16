@@ -1064,7 +1064,7 @@ mod tests {
     #[test]
     fn the_head_unit_is_ready_only_when_a_decodable_picture_has_arrived() {
         // Regression: ready used to fire on the phone's start message, about 3 s before the first
-        // picture, so a screenshot right after `autolab start` failed.
+        // picture, so a screenshot right after `aa start` failed.
         let hu = Shared::new();
         hu.on_frame(&SPS);
         hu.on_frame(&PPS);

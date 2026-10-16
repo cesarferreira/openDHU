@@ -2,7 +2,7 @@
 //!
 //! Trust model: anyone who can read `daemon.json` (it lives in a 0700 directory, mode 0600) holds
 //! the bearer token and can make the daemon launch an executable and write PNG files as the user.
-//! That is the same power as running `autolab` yourself. See `docs/api.md`.
+//! That is the same power as running `aa` yourself. See `docs/api.md`.
 
 pub mod api;
 mod auth;

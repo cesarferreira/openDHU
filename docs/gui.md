@@ -10,8 +10,8 @@ cargo install --path crates/autolab-gui --locked
 ```
 
 The window works with or without a session. If no daemon runs, it says so and offers **Start session**, with a
-choice of head unit (Google DHU or AutoLab native). That button runs `autolab start`, so the daemon start-up and your [config file](configuration.md) behave exactly as in
-the terminal. `autolab` must sit next to `autolab-gui` or be on `PATH`.
+choice of head unit (Google DHU or AutoLab native). That button runs `aa start`, so the daemon start-up and your [config file](configuration.md) behave exactly as in
+the terminal. `aa` must sit next to `autolab-gui` or be on `PATH`.
 
 ## What it shows
 
@@ -42,7 +42,7 @@ session is running). Errors from the daemon appear in the bar at the bottom, in 
   Taps themselves were verified on the phone from the CLI.
 - macOS only so far (that is where it was built and run). It uses `eframe` with the OpenGL backend.
 - A screenshot preview shows whatever is on the phone's screen. Keep saved screenshots out of version control.
-- The GUI adds about 110 crates to the workspace build. The `autolab` binary does not depend on it.
+- The GUI adds about 110 crates to the workspace build. The `aa` binary does not depend on it.
 
 ## Checking how it looks
 

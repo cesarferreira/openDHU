@@ -36,9 +36,7 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 fn no_daemon() -> Error {
-    Error::BackendUnavailable(
-        "no AutoLab session is running; start one with `autolab start`".into(),
-    )
+    Error::BackendUnavailable("no AutoLab session is running; start one with `aa start`".into())
 }
 
 impl Client {

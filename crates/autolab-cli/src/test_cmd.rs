@@ -1,4 +1,4 @@
-//! `autolab test`: parse every file first, then run them through the session backend.
+//! `aa test`: parse every file first, then run them through the session backend.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

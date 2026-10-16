@@ -3,16 +3,16 @@
 AutoLab can act as the Android Auto head unit itself, so Google's DHU is not needed.
 
 ```bash
-cargo build -p autolab-native-hu     # builds next to `autolab`
+cargo build -p autolab-native-hu     # builds next to `aa`
 brew install ffmpeg                  # decodes the phone's video into screenshots
-autolab start --backend native
+aa start --backend native
 ```
 
-`autolab start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
+`aa start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
 screenshot straight afterwards works.
 
 Everything else works the same: `focus`, `screenshot`, `status`, `test`, the HTTP API and the GUI.
-`autolab doctor` shows whether the head unit program and `ffmpeg` were found.
+`aa doctor` shows whether the head unit program and `ffmpeg` were found.
 
 ## What is different from the DHU
 
@@ -49,7 +49,7 @@ the same stream from `GET /v1/video` ([api.md](api.md)). Screenshots remain the 
 The phone plays its sound through the head unit, and the head unit streams it to anyone who asks:
 
 ```bash
-autolab audio out.wav --seconds 10 [--channel media|system|speech] [--json]
+aa audio out.wav --seconds 10 [--channel media|system|speech] [--json]
 ```
 
 records a channel to a WAV file and prints how much sound arrived and how loud (peak and RMS, 0 to 1). The phone sends
@@ -63,8 +63,8 @@ vendored copy now acknowledges each one (`vendor/android-auto/AUTOLAB-PATCHES.md
 ## Touch
 
 ```bash
-autolab tap 764 348                       # a pixel of a screenshot, origin top left
-autolab swipe 300 200 100 200 --duration-ms 400
+aa tap 764 348                       # a pixel of a screenshot, origin top left
+aa swipe 300 200 100 200 --duration-ms 400
 ```
 
 Checked on a Pixel 6 projecting Google Maps, comparing screenshots as numbers (two screenshots with no touch differed
@@ -99,15 +99,15 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
   export AUTOLAB_NATIVE_CERT="$HOME/.config/autolab/credentials/head-unit-cert.pem"
   export AUTOLAB_NATIVE_KEY="$HOME/.config/autolab/credentials/head-unit-key.pem"
-  autolab start --backend native
+  aa start --backend native
   ```
 
 ## Limits
 
-- **Car buttons are sent but not proven.** `autolab key home|back|up|down|...` sends Android key presses, and the phone binds all 13 buttons we declare (it asks for exactly those). But on a Pixel 6 none of Home, Back, the arrows or a long press visibly changed the screen in my tests, so `keyInput` stays `unverified` and the key YAML step cannot be required. Treat buttons as experimental. The cause is unknown: either a detail of the key message that I have wrong, or Android Auto ignoring them on a touch head unit.
+- **Car buttons are sent but not proven.** `aa key home|back|up|down|...` sends Android key presses, and the phone binds all 13 buttons we declare (it asks for exactly those). But on a Pixel 6 none of Home, Back, the arrows or a long press visibly changed the screen in my tests, so `keyInput` stays `unverified` and the key YAML step cannot be required. Treat buttons as experimental. The cause is unknown: either a detail of the key message that I have wrong, or Android Auto ignoring them on a touch head unit.
 - **Audio, navigation, night mode, driving restrictions and multi-touch are not implemented.** The head unit
   answers the phone's sensor requests with fixed values (daytime, unrestricted). Those capabilities stay `unverified`.
-- **Touch is fire-and-forget.** `autolab tap X Y` and `autolab swipe X1 Y1 X2 Y2` send single-finger touches in
+- **Touch is fire-and-forget.** `aa tap X Y` and `aa swipe X1 Y1 X2 Y2` send single-finger touches in
   screenshot pixels (800×480). The phone never acknowledges them, so the result is `accepted` at best.
 - **One phone.** The head unit takes the Android phone it finds on USB. With several attached, `start` refuses
   rather than guess.
@@ -123,7 +123,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 
 `vendor/android-auto` (LGPL-3.0-or-later) and `vendor/rustls-webpki` (ISC) are copies of third-party code with small
 patches, listed in each directory's `AUTOLAB-PATCHES.md`. They are linked into `autolab-native-hu` only; the
-`autolab` binary does not contain them. Keep `vendor/android-auto` rebuildable and its licence files in place.
+`aa` binary does not contain them. Keep `vendor/android-auto` rebuildable and its licence files in place.
 
 `vendor/android-auto/src/cert.rs` contains the head-unit client certificate and private key that the upstream crate
 ships. They are the public, long-known credentials used by open-source head units, not a secret of ours, but a secret

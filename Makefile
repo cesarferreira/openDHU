@@ -28,17 +28,17 @@ help:
 	@echo "    validate-examples   every examples/*.yaml parses (no session needed)"
 	@echo
 	@echo "  Install"
-	@echo "    install             autolab, autolab-native-hu and autolab-gui (debug)"
+	@echo "    install             aa, autolab-native-hu and autolab-gui (debug)"
 	@echo "    install-release     the same, release"
 	@echo "    install-cli | install-native | install-gui   one of them"
 	@echo
 	@echo "  Run (usage: make run ARGS=\"status\")"
-	@echo "    run                 autolab \$$(ARGS)"
+	@echo "    run                 aa \$$(ARGS)"
 	@echo "    daemon              the daemon in the foreground"
 	@echo "    gui                 the desktop window"
 	@echo "    doctor              environment checks (touches no session)"
 	@echo "    stop                stop the running session"
-	@echo "    demo                installed autolab --help"
+	@echo "    demo                installed aa --help"
 	@echo
 	@echo "  Hardware [phone]"
 	@echo "    hw-dhu              real phone + Google DHU"
@@ -78,7 +78,7 @@ vendor-check:
 # exit code 3 (no session) and a bad one in exit code 2.
 validate-examples: build
 	@for f in examples/*.yaml; do \
-		$(BIN)/autolab test $$f --artifacts-dir /tmp/autolab-validate >/dev/null 2>&1; code=$$?; \
+		$(BIN)/aa test $$f --artifacts-dir /tmp/autolab-validate >/dev/null 2>&1; code=$$?; \
 		if [ $$code -eq 2 ]; then echo "validate-examples: $$f does not parse"; exit 1; fi; \
 	done; echo "validate-examples: all examples parse"
 
@@ -118,15 +118,15 @@ stop:
 	cargo run -q -p autolab-cli -- stop
 
 demo: install-cli
-	@echo "=== autolab demo ==="
-	autolab --help
+	@echo "=== aa demo ==="
+	aa --help
 
 # ---- hardware [phone] ---------------------------------------------------------------------------
 
 define require_idle
-	@if pgrep -fl 'desktop-head-unit|autolab daemon|autolab-native-hu' >/dev/null; then \
+	@if pgrep -fl 'desktop-head-unit|(aa|autolab) daemon|autolab-native-hu' >/dev/null; then \
 		echo "refusing to run: a DHU, daemon or native head unit is already running:"; \
-		pgrep -fl 'desktop-head-unit|autolab daemon|autolab-native-hu'; \
+		pgrep -fl 'desktop-head-unit|(aa|autolab) daemon|autolab-native-hu'; \
 		echo "stop it yourself first (it may be someone's session)."; exit 1; fi
 endef
 

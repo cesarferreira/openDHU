@@ -1,4 +1,4 @@
-//! `autolab test` end to end against the fake DHU: real binary, real socket, real report files.
+//! `aa test` end to end against the fake DHU: real binary, real socket, real report files.
 
 mod common;
 
@@ -276,7 +276,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn spawn_test(s: &Sandbox, env: &[(&str, &str)], args: &[&str]) -> Child {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_autolab"));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_aa"));
     c.arg("test")
         .args(args)
         .env("AUTOLAB_RUNTIME_DIR", &s.dir)

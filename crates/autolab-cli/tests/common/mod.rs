@@ -39,7 +39,7 @@ impl Sandbox {
     }
 
     pub fn autolab_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_autolab"));
+        let mut c = Command::new(env!("CARGO_BIN_EXE_aa"));
         c.args(args)
             .env("AUTOLAB_RUNTIME_DIR", &self.dir)
             // Never read the developer's real config file.
@@ -101,7 +101,7 @@ impl Sandbox {
 
 impl Drop for Sandbox {
     fn drop(&mut self) {
-        let _ = Command::new(env!("CARGO_BIN_EXE_autolab"))
+        let _ = Command::new(env!("CARGO_BIN_EXE_aa"))
             .arg("stop")
             .env("AUTOLAB_RUNTIME_DIR", &self.dir)
             .output();

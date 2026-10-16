@@ -1,12 +1,12 @@
 # Writing and running tests
 
 ```bash
-autolab start --reverse 10101          # a session must be running (the runner never starts one)
-autolab test examples/video-focus.yaml
-autolab test tests/ --report junit --report json --artifacts-dir ./test-results
+aa start --reverse 10101          # a session must be running (the runner never starts one)
+aa test examples/video-focus.yaml
+aa test tests/ --report junit --report json --artifacts-dir ./test-results
 ```
 
-`autolab test` takes files or directories (searched recursively for `.yaml` / `.yml`, in sorted order).
+`aa test` takes files or directories (searched recursively for `.yaml` / `.yml`, in sorted order).
 Every file is parsed and validated **before** the session is touched, so a typo exits with code 2 and writes
 nothing.
 
@@ -82,7 +82,7 @@ assume the next one starts clean in any other way: nothing on the phone is reset
 progress is reported as interrupted, video focus is restored if the test had left it off, the artifacts for what
 ran are written (`interrupted: true` in `results.json`), tests that had not started are not run, and the exit code
 is 130. A second Ctrl+C exits immediately, without cleanup, in case a backend call is stuck. In that case run
-`autolab focus video on` yourself. The session itself always survives; only `autolab test` stops.
+`aa focus video on` yourself. The session itself always survives; only `aa test` stops.
 
 ## Results and exit codes
 
@@ -90,7 +90,7 @@ A run stops at the first step that does not pass; later steps are reported as sk
 `failed` (an assertion or wait did not hold), `error` (something else went wrong, such as the session being
 gone, a rejected command or a failed cleanup) or `skipped`.
 
-| Code | Meaning in `autolab test` |
+| Code | Meaning in `aa test` |
 |---|---|
 | 0 | every test passed (skipped tests do not fail a run) |
 | 2 | invalid test file or arguments, or a test written for another backend |
@@ -101,7 +101,7 @@ gone, a rejected command or a failed cleanup) or `skipped`.
 | 130 | interrupted by Ctrl+C or SIGTERM (outranks every other code) |
 | 1 | any other error |
 
-`autolab start` can also return 4 (a device or tunnel problem). `autolab test` cannot: it never starts a session, and a
+`aa start` can also return 4 (a device or tunnel problem). `aa test` cannot: it never starts a session, and a
 DHU that has died shows up as 3.
 
 With several tests, one code is chosen in the fixed order 2, 3, 4, 5, 6, 7, 8, 1, so the result does not depend

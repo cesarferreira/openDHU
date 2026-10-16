@@ -27,7 +27,7 @@ use crate::{client, log, runtime};
 /// PRD section 16 default.
 pub const DEFAULT_PORT: u16 = 8765;
 
-/// Long enough for `autolab start` to spawn the daemon and send its first request.
+/// Long enough for `aa start` to spawn the daemon and send its first request.
 const IDLE_GRACE: Duration = Duration::from_secs(30);
 
 pub struct ServeOptions {
@@ -35,7 +35,7 @@ pub struct ServeOptions {
     /// `None`: try 8765 and fall back to an ephemeral port if it is taken. `Some(p)`: exactly `p`
     /// (`Some(0)` asks the OS for any free port).
     pub port: Option<u16>,
-    /// Exit when the session ends (set for a daemon started by `autolab start`).
+    /// Exit when the session ends (set for a daemon started by `aa start`).
     pub exit_when_idle: bool,
     /// How long an `exit_when_idle` daemon waits with no session before exiting. `None`: 30 s.
     pub idle_grace: Option<Duration>,

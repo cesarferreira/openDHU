@@ -241,7 +241,7 @@ Rust executable providing a user-friendly command-line interface.
 
 Binary name:
 
-`autolab`
+`aa`
 
 ### autolab-dhu
 
@@ -371,17 +371,17 @@ A separate technical feasibility spike is required before committing to the nati
 The CLI must support:
 
 ```bash
-autolab start
-autolab stop
-autolab restart
-autolab status
+aa start
+aa stop
+aa restart
+aa status
 ```
 
 Explicit backend selection:
 
 ```bash
-autolab start --backend dhu
-autolab start --backend native
+aa start --backend dhu
+aa start --backend native
 ```
 
 The default backend for MVP is `dhu`.
@@ -422,8 +422,8 @@ Unknown state must be represented explicitly rather than guessed.
 The system must support:
 
 ```bash
-autolab focus video on
-autolab focus video off
+aa focus video on
+aa focus video off
 ```
 
 Requirements:
@@ -438,7 +438,7 @@ Requirements:
 Example:
 
 ```bash
-autolab focus video off
+aa focus video off
 ```
 
 Expected output:
@@ -458,8 +458,8 @@ This distinction is important for automated testing.
 Commands:
 
 ```bash
-autolab focus audio on
-autolab focus audio off
+aa focus audio on
+aa focus audio off
 ```
 
 The implementation must distinguish between backend-supported audio-focus operations and unsupported generic focus requests.
@@ -473,8 +473,8 @@ Where the backend requires a specific focus type or state, expose that capabilit
 Commands:
 
 ```bash
-autolab focus nav on
-autolab focus nav off
+aa focus nav on
+aa focus nav off
 ```
 
 Must support backend-specific navigation focus capabilities where available.
@@ -488,8 +488,8 @@ Unsupported operations must fail with a clear capability error.
 Commands:
 
 ```bash
-autolab driving parked
-autolab driving moving
+aa driving parked
+aa driving moving
 ```
 
 Expected behaviour:
@@ -511,8 +511,8 @@ Vehicle speed simulation may be added when supported by the native backend.
 Commands:
 
 ```bash
-autolab night-mode on
-autolab night-mode off
+aa night-mode on
+aa night-mode off
 ```
 
 Requirements:
@@ -529,9 +529,9 @@ Requirements:
 Commands:
 
 ```bash
-autolab tap 400 300
-autolab swipe 100 500 100 200
-autolab long-press 400 300
+aa tap 400 300
+aa swipe 100 500 100 200
+aa long-press 400 300
 ```
 
 Coordinate system:
@@ -552,7 +552,7 @@ Requirements:
 Example:
 
 ```bash
-autolab swipe 500 600 500 200 --duration 350
+aa swipe 500 600 500 200 --duration 350
 ```
 
 For the DHU backend, investigate whether these operations can be implemented reliably through supported interfaces.
@@ -568,11 +568,11 @@ If unavailable, mark the operation unsupported for that backend rather than usin
 Proposed commands:
 
 ```bash
-autolab key back
-autolab key home
-autolab rotary clockwise
-autolab rotary counterclockwise
-autolab rotary select
+aa key back
+aa key home
+aa rotary clockwise
+aa rotary counterclockwise
+aa rotary select
 ```
 
 These are capability-dependent operations.
@@ -586,7 +586,7 @@ The initial implementation must discover and document what each backend actually
 Command:
 
 ```bash
-autolab screenshot output.png
+aa screenshot output.png
 ```
 
 Requirements:
@@ -601,7 +601,7 @@ Requirements:
 Additional options:
 
 ```bash
-autolab screenshot --output screenshots/home.png
+aa screenshot --output screenshots/home.png
 ```
 
 Screenshots must contain only the relevant head unit viewport, not desktop window decorations.
@@ -615,8 +615,8 @@ If a backend cannot provide a clean projected frame, that limitation must be rep
 Command:
 
 ```bash
-autolab record start --output recording.mp4
-autolab record stop
+aa record start --output recording.mp4
+aa record stop
 ```
 
 Requirements:
@@ -636,9 +636,9 @@ Recording is a post-MVP feature.
 Commands:
 
 ```bash
-autolab display resolution 1280x720
-autolab display dpi 160
-autolab display orientation landscape
+aa display resolution 1280x720
+aa display dpi 160
+aa display orientation landscape
 ```
 
 Requirements:
@@ -657,9 +657,9 @@ Do not assume all properties can be changed during an active projection session.
 Commands:
 
 ```bash
-autolab devices
-autolab device select SERIAL
-autolab device status
+aa devices
+aa device select SERIAL
+aa device status
 ```
 
 Use ADB where appropriate.
@@ -702,7 +702,7 @@ The CLI is a first-class product interface.
 Example:
 
 ```bash
-autolab status --json
+aa status --json
 ```
 
 Output:
@@ -746,13 +746,13 @@ Default output must be concise and human-readable.
 Machine-readable output:
 
 ```bash
-autolab status --json
+aa status --json
 ```
 
 Diagnostic output:
 
 ```bash
-autolab --verbose status
+aa --verbose status
 ```
 
 The CLI must never report an operation as successful merely because a command was written to a process.
@@ -950,7 +950,7 @@ Search for the DHU executable in:
 Example:
 
 ```bash
-autolab config set dhu.path \
+aa config set dhu.path \
   "$HOME/Library/Android/sdk/extras/google/auto/desktop-head-unit"
 ```
 
@@ -1009,7 +1009,7 @@ Do not silently assume that commands behave identically across versions.
 Provide:
 
 ```bash
-autolab doctor
+aa doctor
 ```
 
 Checks should include:
@@ -1063,7 +1063,7 @@ steps:
 Execution:
 
 ```bash
-autolab test tests/video-focus.yaml
+aa test tests/video-focus.yaml
 ```
 
 ## 12.2 Test result
@@ -1143,8 +1143,8 @@ Do not assume that a fresh DHU session resets application state on the phone.
 Support:
 
 ```bash
-autolab test tests/ --report junit
-autolab test tests/ --report json
+aa test tests/ --report junit
+aa test tests/ --report json
 ```
 
 JUnit XML output must be compatible with common CI systems.
@@ -1568,17 +1568,17 @@ Tasks:
 - Implement screenshot capture where supported.
 - Implement structured errors.
 - Implement configuration loading.
-- Implement `autolab doctor`.
+- Implement `aa doctor`.
 
 Acceptance criteria:
 
 ```bash
-autolab doctor
-autolab start
-autolab status
-autolab focus video off
-autolab focus video on
-autolab stop
+aa doctor
+aa start
+aa status
+aa focus video off
+aa focus video on
+aa stop
 ```
 
 All supported commands must operate against a real DHU session.
@@ -1631,7 +1631,7 @@ Tasks:
 Acceptance criteria:
 
 ```bash
-autolab test examples/video-focus.yaml
+aa test examples/video-focus.yaml
 ```
 
 Produces a deterministic result and a machine-readable report.
@@ -2045,7 +2045,7 @@ fun navigationSurvivesFocusLoss() = autoTest {
 And execute:
 
 ```bash
-autolab test
+aa test
 ```
 
 Without manually operating a head unit, navigating a proprietary console, or visually inspecting the result.

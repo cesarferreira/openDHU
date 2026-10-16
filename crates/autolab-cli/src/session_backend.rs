@@ -27,7 +27,7 @@ impl HeadUnitBackend for DaemonBackend {
     fn status(&mut self) -> Result<HeadUnitStatus> {
         let session = self.client.status()?.session.ok_or_else(|| {
             Error::BackendUnavailable(
-                "no AutoLab session is running; start one with `autolab start`".into(),
+                "no AutoLab session is running; start one with `aa start`".into(),
             )
         })?;
         match session.details {

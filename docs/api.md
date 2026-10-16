@@ -9,9 +9,9 @@ can still happen. There is no changelog yet, so check the commit history.
 ## Running the daemon
 
 ```bash
-autolab start            # starts a daemon if none is running, then a session; the daemon exits when the session ends
-autolab daemon           # foreground daemon that stays up; Ctrl+C or SIGTERM stops the session and exits
-autolab daemon --port 9000
+aa start            # starts a daemon if none is running, then a session; the daemon exits when the session ends
+aa daemon           # foreground daemon that stays up; Ctrl+C or SIGTERM stops the session and exits
+aa daemon --port 9000
 ```
 
 The default port is **8765**. If it is busy and no `--port` was given, the daemon uses any free port. Clients
@@ -48,7 +48,7 @@ web pages out, and the 0700 directory is what keeps the token private.
 
 **Anyone who can read `daemon.json` can run code as you through this API.** `POST /v1/session/start` launches an
 executable (`dhuPath`), and `POST /v1/screenshot` writes a PNG to a path of the caller's choosing. That is the same
-power as running `autolab` yourself. Do not copy the token somewhere less private than the runtime directory.
+power as running `aa` yourself. Do not copy the token somewhere less private than the runtime directory.
 
 ## Errors
 
@@ -217,7 +217,7 @@ the response may sit quiet for a long time. Native backend only: `501` with the 
 
 ```bash
 curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/v1/audio/media | ffplay -f s16le -ar 48000 -ac 2 -nodisp -i -
-autolab audio out.wav --seconds 10        # record a channel to a WAV and print how loud it was
+aa audio out.wav --seconds 10        # record a channel to a WAV and print how loud it was
 ```
 
 ### Touch: `POST /v1/input/tap` and `/v1/input/swipe`
@@ -271,13 +271,13 @@ sees the final `session.stopped`.
 - **One session**, one backend. Commands are serialized on the DHU console, so concurrent clients cannot interleave
   on it. Twenty parallel focus requests all succeed and leave AutoLab's idea of the state equal to the DHU's.
 - **Two clients starting at once:** exactly one gets `201`, the other `409`.
-- **A daemon started by `autolab start`** exits when its session ends (`stop`, a failed start, or the DHU dying).
-  **A daemon you started with `autolab daemon`** stays up and can host another session.
-  A daemon started by `autolab start` also exits after 30 s with no session at all, for example when the CLI that
+- **A daemon started by `aa start`** exits when its session ends (`stop`, a failed start, or the DHU dying).
+  **A daemon you started with `aa daemon`** stays up and can host another session.
+  A daemon started by `aa start` also exits after 30 s with no session at all, for example when the CLI that
   spawned it died before sending `start`, so it cannot linger.
 - **No orphans:** the daemon owns the DHU's stdin, and the DHU quits when it closes. If the daemon is killed with
   `SIGKILL`, the DHU still exits. SIGTERM and Ctrl+C stop the session and remove `daemon.json`.
-- **Logs:** one JSON object per line on stdout (`daemon.log` for a daemon started by `autolab start`). They
+- **Logs:** one JSON object per line on stdout (`daemon.log` for a daemon started by `aa start`). They
   include one `http.request` line per request, with method, path, status and duration, and never the token or
   the `Authorization` header.
 

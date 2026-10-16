@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "autolab",
+    name = "aa",
     version,
     about = "Programmable Android Auto head unit control"
 )]
@@ -130,12 +130,12 @@ enum Command {
     /// Run the AutoLab daemon in the foreground
     ///
     /// It serves the HTTP API on 127.0.0.1 until stopped with Ctrl+C or SIGTERM, which also stops the
-    /// session. `autolab start` starts a daemon by itself when none is running; this one stays up.
+    /// session. `aa start` starts a daemon by itself when none is running; this one stays up.
     Daemon {
         /// Port to listen on [default: 8765, or any free port if that is taken]
         #[arg(long)]
         port: Option<u16>,
-        /// Exit when the session ends. `autolab start` sets this for the daemon it launches.
+        /// Exit when the session ends. `aa start` sets this for the daemon it launches.
         #[arg(long, hide = true)]
         exit_when_idle: bool,
     },
@@ -249,7 +249,7 @@ fn run(cli: Cli) -> Result<u8> {
         }
         Command::Screenshot { path, output } => {
             let raw = path.or(output).ok_or_else(|| {
-                Error::InvalidArgs("give an output path: `autolab screenshot out.png`".into())
+                Error::InvalidArgs("give an output path: `aa screenshot out.png`".into())
             })?;
             let abs = output_path::resolve_png(&raw, &current_dir()?)?;
             print_screenshot(&daemon_ctl::connect()?.screenshot(&abs)?, json);
@@ -383,9 +383,7 @@ fn current_dir() -> Result<PathBuf> {
 /// (exit code 3) as no daemon at all.
 fn expect_session(s: Option<SessionStatus>) -> Result<SessionStatus> {
     s.ok_or_else(|| {
-        Error::BackendUnavailable(
-            "no AutoLab session is running; start one with `autolab start`".into(),
-        )
+        Error::BackendUnavailable("no AutoLab session is running; start one with `aa start`".into())
     })
 }
 
