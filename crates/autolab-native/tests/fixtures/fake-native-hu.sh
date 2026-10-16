@@ -30,7 +30,12 @@ while IFS= read -r line; do
   case "$cmd" in
     quit) exit 0;;
     status)
-      echo "{\"id\":$id,\"ok\":{\"type\":\"status\",\"value\":{\"videoFocus\":{\"requested\":\"$requested\",\"backendReported\":\"$requested\",\"observed\":\"$observed\"},\"frames\":3}}}";;
+      cert_field=
+      case "$mode" in
+        cert-custom) cert_field=',"certificateSource":"custom"';;
+        cert-built-in) cert_field=',"certificateSource":"built-in"';;
+      esac
+      echo "{\"id\":$id,\"ok\":{\"type\":\"status\",\"value\":{\"videoFocus\":{\"requested\":\"$requested\",\"backendReported\":\"$requested\",\"observed\":\"$observed\"},\"frames\":3$cert_field}}}";;
     focus)
       [ "$mode" = crash-on-focus ] && exit 3
       case "$line" in *'"enabled":true'*) want=on;; *) want=off;; esac

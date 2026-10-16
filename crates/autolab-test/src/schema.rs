@@ -545,6 +545,7 @@ steps:
             serial: None,
             backend_version: None,
             backend_build: None,
+            certificate_source: None,
             video_focus: autolab_core::VideoFocusStatus {
                 requested,
                 backend_reported: reported,

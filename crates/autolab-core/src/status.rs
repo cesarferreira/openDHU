@@ -27,6 +27,9 @@ pub struct HeadUnitStatus {
     pub serial: Option<String>,
     pub backend_version: Option<String>,
     pub backend_build: Option<String>,
+    /// Credential source reported by the head unit; absent for older or external backends.
+    #[serde(default)]
+    pub certificate_source: Option<String>,
     pub video_focus: VideoFocusStatus,
 }
 
@@ -42,6 +45,7 @@ mod tests {
             serial: None,
             backend_version: Some("2.0".into()),
             backend_build: None,
+            certificate_source: None,
             video_focus: VideoFocusStatus {
                 requested: FocusState::Off,
                 backend_reported: FocusState::Off,

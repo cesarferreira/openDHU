@@ -275,6 +275,7 @@ mod tests {
             serial: Some("S".into()),
             backend_version: None,
             backend_build: None,
+            certificate_source: None,
             video_focus: VideoFocusStatus {
                 requested: FocusState::Off,
                 backend_reported: FocusState::Off,

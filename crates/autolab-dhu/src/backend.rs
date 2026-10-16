@@ -122,6 +122,7 @@ impl HeadUnitBackend for DhuBackend {
             serial: self.serial.clone(),
             backend_version: self.info.version.clone(),
             backend_build: self.info.build.clone(),
+            certificate_source: None,
             video_focus: VideoFocusStatus {
                 requested: self.requested_video,
                 backend_reported,

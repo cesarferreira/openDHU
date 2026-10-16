@@ -84,6 +84,7 @@ impl MockBackend {
                 serial: Some("MOCK0001".into()),
                 backend_version: Some("0.0-mock".into()),
                 backend_build: Some("mock-build".into()),
+                certificate_source: None,
                 video_focus: VideoFocusStatus {
                     requested: FocusState::Unknown,
                     backend_reported: FocusState::On,

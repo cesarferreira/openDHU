@@ -287,3 +287,32 @@ fn audio_is_recorded_to_a_wav_with_a_summary_and_refused_without_a_native_sessio
     );
     let _ = std::fs::remove_file(&wav);
 }
+
+#[test]
+fn certificate_source_is_visible_in_text_and_json_status() {
+    for (mode, expected) in [
+        ("cert-custom", "custom"),
+        ("cert-built-in", "built-in"),
+        ("", "unknown"),
+    ] {
+        let s = Sandbox::new();
+        let started = start_native(&s, &[], &[("FAKE_NATIVE_MODE", mode)]);
+        assert_eq!(code(&started), 0, "{}", text(&started));
+        let output = s.autolab(&["status"]);
+        assert_eq!(code(&output), 0, "{}", text(&output));
+        assert!(
+            text(&output).contains(&format!("Certificate:  {expected}")),
+            "{}",
+            text(&output)
+        );
+        let status = s.status_json();
+        assert_eq!(
+            status["certificateSource"].as_str(),
+            if expected == "unknown" {
+                None
+            } else {
+                Some(expected)
+            }
+        );
+    }
+}

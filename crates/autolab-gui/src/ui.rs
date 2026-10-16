@@ -373,6 +373,13 @@ fn session_card(
                 h.backend_build.as_deref().unwrap_or("?")
             ),
         );
+        if h.backend == "native" {
+            row(
+                ui,
+                "certificate",
+                h.certificate_source.as_deref().unwrap_or("unknown"),
+            );
+        }
         row(
             ui,
             "phone",
@@ -702,6 +709,7 @@ mod tests {
                         serial: None,
                         backend_version: None,
                         backend_build: None,
+                        certificate_source: None,
                         video_focus: VideoFocusStatus {
                             requested: FocusState::On,
                             backend_reported: FocusState::On,

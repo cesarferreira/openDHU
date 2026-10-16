@@ -507,6 +507,12 @@ fn print_session(s: &SessionStatus, json: bool) {
         h.backend_version.as_deref().unwrap_or("unknown version"),
         h.backend_build.as_deref().unwrap_or("unknown")
     );
+    if h.backend == "native" {
+        println!(
+            "Certificate:  {}",
+            h.certificate_source.as_deref().unwrap_or("unknown")
+        );
+    }
     let state = match h.state {
         SessionState::Running => "running",
     };

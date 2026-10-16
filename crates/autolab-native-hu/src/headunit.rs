@@ -42,6 +42,7 @@ const BACKEND_VERSION: &str = "android-auto 0.3.8";
 const BACKEND_BUILD: &str = "vendored 06c68d5 + AutoLab patches";
 
 struct Inner {
+    certificate_source: Option<String>,
     requested: FocusState,
     reported: FocusState,
     /// What the phone itself last said: its start and stop indications.
@@ -79,6 +80,7 @@ impl Shared {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         Self {
             inner: Mutex::new(Inner {
+                certificate_source: None,
                 requested: FocusState::Unknown,
                 reported: FocusState::Unknown,
                 observed: FocusState::Unknown,
@@ -125,6 +127,7 @@ impl Shared {
             Command::Status => {
                 let i = self.lock();
                 Outcome::Ok(Reply::Status(StatusReport {
+                    certificate_source: i.certificate_source.clone(),
                     video_focus: VideoFocusStatus {
                         requested: i.requested,
                         backend_reported: i.reported,
@@ -586,10 +589,12 @@ fn present(path: Option<&str>) -> Option<&str> {
     path.map(str::trim).filter(|path| !path.is_empty())
 }
 
+type CertificateAndKey = (Vec<u8>, Vec<u8>);
+
 fn load_custom_certificate(
     cert_path: Option<&str>,
     key_path: Option<&str>,
-) -> Result<Option<(Vec<u8>, Vec<u8>)>, String> {
+) -> Result<Option<CertificateAndKey>, String> {
     match (present(cert_path), present(key_path)) {
         (None, None) => Ok(None),
         (Some(cert), Some(key)) => Ok(Some((read_pem(CERT_ENV, cert)?, read_pem(KEY_ENV, key)?))),
@@ -653,6 +658,14 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
             env_value(KEY_ENV).as_deref(),
         )?,
     };
+    hu.lock().certificate_source = Some(
+        if config.custom_certificate.is_some() {
+            "custom"
+        } else {
+            "built-in"
+        }
+        .into(),
+    );
     let mut tasks = tokio::task::JoinSet::new();
     Box::new(Hu(hu)).run(config, &mut tasks, setup).await
 }
@@ -818,18 +831,23 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let cert = dir.join("head-unit-cert.pem");
         let key = dir.join("head-unit-key.pem");
-        std::fs::write(&cert, b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
-            .unwrap();
+        std::fs::write(
+            &cert,
+            b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
         std::fs::write(&key, b"not a pem file").unwrap();
         let bad = load_custom_certificate(cert.to_str(), key.to_str()).unwrap_err();
         assert!(bad.contains(KEY_ENV) && bad.contains("PEM"), "{bad}");
 
-        std::fs::write(&key, b"-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n")
-            .unwrap();
-        let (loaded_cert, loaded_key) =
-            load_custom_certificate(cert.to_str(), key.to_str())
-                .unwrap()
-                .expect("both files are present");
+        std::fs::write(
+            &key,
+            b"-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n",
+        )
+        .unwrap();
+        let (loaded_cert, loaded_key) = load_custom_certificate(cert.to_str(), key.to_str())
+            .unwrap()
+            .expect("both files are present");
         assert!(loaded_cert.starts_with(b"-----BEGIN CERTIFICATE-----"));
         assert!(loaded_key.starts_with(b"-----BEGIN PRIVATE KEY-----"));
 

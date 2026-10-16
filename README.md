@@ -93,7 +93,9 @@ autolab start --backend native
 
 Set both variables or neither. If neither is set, AutoLab uses the certificate shipped by the vendored protocol
 crate. The variables must be exported before AutoLab starts its daemon; stop and restart an existing daemon so it
-inherits them. See [Native backend](docs/native-backend.md) for details.
+inherits them. `autolab status` shows `Certificate: custom` or `Certificate: built-in` for the native backend;
+`--json` includes `certificateSource`. Older head units report `unknown` (`null` in JSON).
+See [Native backend](docs/native-backend.md) for details.
 
 ## Commands
 

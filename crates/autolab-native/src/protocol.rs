@@ -85,6 +85,8 @@ pub struct ErrorInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusReport {
+    #[serde(default)]
+    pub certificate_source: Option<String>,
     pub video_focus: VideoFocusStatus,
     /// Video frames received from the phone so far.
     pub frames: u64,

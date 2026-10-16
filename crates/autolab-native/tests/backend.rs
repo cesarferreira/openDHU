@@ -261,3 +261,17 @@ fn audio_reaches_a_listener_per_channel_and_the_head_unit_stops_when_the_last_on
     b.stop().unwrap();
     let _ = std::fs::remove_file(&log);
 }
+
+#[test]
+fn status_preserves_the_loaded_certificate_source() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    for (mode, expected) in [
+        ("cert-custom", Some("custom")),
+        ("cert-built-in", Some("built-in")),
+        ("", None),
+    ] {
+        let mut backend = start(mode);
+        let status = serde_json::to_value(backend.status().unwrap()).unwrap();
+        assert_eq!(status["certificateSource"].as_str(), expected);
+    }
+}
