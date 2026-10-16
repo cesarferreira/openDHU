@@ -29,6 +29,7 @@ pub enum Requirement {
     VideoFocus,
     Screenshots,
     TouchInput,
+    KeyInput,
 }
 
 impl Requirement {
@@ -37,6 +38,7 @@ impl Requirement {
             Self::VideoFocus => "videoFocus",
             Self::Screenshots => "screenshots",
             Self::TouchInput => "touchInput",
+            Self::KeyInput => "keyInput",
         }
     }
 }
@@ -60,6 +62,14 @@ pub enum Step {
         to: [u32; 2],
         duration: Option<Dur>,
     },
+    /// Press a car button: home, back, up, down, left, right, enter, search, play_pause, next, previous,
+    /// call, end_call. `long: true` holds it for about a second.
+    #[serde(rename = "key")]
+    Key {
+        value: autolab_core::Key,
+        #[serde(default)]
+        long: bool,
+    },
     #[serde(rename = "assert.status")]
     AssertStatus { expect: StatusExpect },
     #[serde(rename = "waitFor")]
@@ -76,6 +86,7 @@ impl Step {
             Self::Wait { .. } => "wait",
             Self::Screenshot { .. } => "screenshot",
             Self::Tap { .. } => "tap",
+            Self::Key { .. } => "key",
             Self::Swipe { .. } => "swipe",
             Self::AssertStatus { .. } => "assert.status",
             Self::WaitFor { .. } => "waitFor",
@@ -299,7 +310,7 @@ fn validate(t: &TestFile) -> Result<()> {
                 }
             }
             Step::Screenshot { path } => validate_screenshot_path(i, a, path)?,
-            Step::Tap { .. } => {}
+            Step::Tap { .. } | Step::Key { .. } => {}
             Step::Swipe { duration, .. } => {
                 if let Some(d) = duration {
                     check_duration(i, a, "duration", *d)?;

@@ -112,6 +112,15 @@ pub struct SwipeRequest {
     pub duration_ms: u64,
 }
 
+/// Press a car button. `key` is one of the names in `autolab_core::Key` (`home`, `back`, `up`, ...).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeyRequest {
+    pub key: autolab_core::Key,
+    #[serde(default)]
+    pub long_press: bool,
+}
+
 pub fn default_swipe_ms() -> u64 {
     300
 }

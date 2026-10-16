@@ -5,7 +5,7 @@
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -25,6 +25,18 @@ pub struct Live {
     last_try: Option<Instant>,
     /// Why the last stream ended, for the window to show.
     pub problem: Arc<Mutex<Option<String>>>,
+    stats: Arc<Stats>,
+    started: Instant,
+}
+
+/// Counters the window shows under the picture, so a frozen or restarting stream can be told apart
+/// from a quiet screen.
+#[derive(Default)]
+struct Stats {
+    frames: AtomicU64,
+    restarts: AtomicU64,
+    /// Milliseconds since `Live::started` when the last frame arrived. 0 means none yet.
+    last_frame_ms: AtomicU64,
 }
 
 impl Live {
@@ -35,6 +47,8 @@ impl Live {
             running: Arc::default(),
             last_try: None,
             problem: Arc::default(),
+            stats: Arc::default(),
+            started: Instant::now(),
         }
     }
 
@@ -51,23 +65,46 @@ impl Live {
             return;
         }
         self.last_try = Some(Instant::now());
+        self.stats.restarts.fetch_add(1, Ordering::SeqCst);
         // A new attempt starts clean: the last attempt's error no longer applies.
         *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.stop = Arc::new(AtomicBool::new(false));
         self.running.store(true, Ordering::SeqCst);
-        let (frame, stop, running, problem, ctx) = (
+        let (frame, stop, running, problem, stats, started, ctx) = (
             Arc::clone(&self.frame),
             Arc::clone(&self.stop),
             Arc::clone(&self.running),
             Arc::clone(&self.problem),
+            Arc::clone(&self.stats),
+            self.started,
             ctx.clone(),
         );
         thread::spawn(move || {
-            let result = stream(&frame, &stop, &ctx);
+            let result = stream(&frame, &stop, &ctx, &stats, started);
             *problem.lock().unwrap_or_else(|e| e.into_inner()) = result.err();
             running.store(false, Ordering::SeqCst);
             ctx.request_repaint();
         });
+    }
+
+    /// One line for the window: how the stream is doing.
+    pub fn summary(&self) -> String {
+        let frames = self.stats.frames.load(Ordering::SeqCst);
+        let restarts = self.stats.restarts.load(Ordering::SeqCst).saturating_sub(1);
+        let last = self.stats.last_frame_ms.load(Ordering::SeqCst);
+        let ago = if last == 0 {
+            "no frame yet".to_string()
+        } else {
+            let now = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            format!(
+                "last frame {:.1} s ago",
+                now.saturating_sub(last) as f64 / 1000.0
+            )
+        };
+        format!(
+            "{frames} frames received, {ago}, {restarts} restart{}",
+            if restarts == 1 { "" } else { "s" }
+        )
     }
 
     /// The newest decoded frame, if one arrived since the last call.
@@ -88,21 +125,16 @@ fn stream(
     frame: &Arc<Mutex<Option<Vec<u8>>>>,
     stop: &AtomicBool,
     ctx: &egui::Context,
+    stats: &Arc<Stats>,
+    started: Instant,
 ) -> Result<(), String> {
     let client = Client::connect().map_err(|e| e.to_string())?;
     let mut video = client.video().map_err(|e| e.to_string())?;
     let ffmpeg = autolab_native::find_ffmpeg()
         .ok_or("ffmpeg not found; it decodes the live picture (macOS: brew install ffmpeg)")?;
     let mut child = Command::new(ffmpeg)
-        .args([
-            "-v",
-            "error",
-            "-nostdin",
-            "-fflags",
-            "nobuffer",
-            "-flags",
-            "low_delay",
-        ])
+        // Not `-fflags nobuffer`: with it ffmpeg stalls on a still screen and on a long burst (checked).
+        .args(["-v", "error", "-nostdin", "-flags", "low_delay"])
         .args([
             "-probesize",
             "32",
@@ -123,11 +155,17 @@ fn stream(
     let mut stdout = child.stdout.take().expect("stdout is piped");
 
     let sink = {
-        let (slot, ctx) = (Arc::clone(frame), ctx.clone());
+        let (slot, ctx, stats) = (Arc::clone(frame), ctx.clone(), Arc::clone(stats));
         thread::spawn(move || {
             let mut buf = vec![0u8; FRAME_BYTES];
             while stdout.read_exact(&mut buf).is_ok() {
-                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(buf.clone());
+                // Swap, don't copy: the slot's old buffer (if the window has not taken it) becomes the
+                // next one to fill, so catching up on a long burst allocates nothing.
+                let old = slot.lock().unwrap_or_else(|e| e.into_inner()).replace(buf);
+                buf = old.unwrap_or_else(|| vec![0u8; FRAME_BYTES]);
+                stats.frames.fetch_add(1, Ordering::SeqCst);
+                let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                stats.last_frame_ms.store(ms.max(1), Ordering::SeqCst);
                 ctx.request_repaint();
             }
         })

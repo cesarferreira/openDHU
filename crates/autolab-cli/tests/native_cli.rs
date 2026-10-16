@@ -212,3 +212,33 @@ fn the_dhu_backend_answers_touch_with_unsupported() {
     let o = s.autolab(&["tap", "1", "1"]);
     assert_eq!(code(&o), 5, "{}", text(&o));
 }
+
+#[test]
+fn key_presses_go_through_the_daemon_and_bad_names_list_the_valid_ones() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.autolab(&["key", "home"])), 3, "no session");
+    let bad = s.autolab(&["key", "volume"]);
+    assert_eq!(code(&bad), 2, "{}", text(&bad));
+    assert!(
+        text(&bad).contains("home") && text(&bad).contains("end_call"),
+        "{}",
+        text(&bad)
+    );
+
+    assert_eq!(code(&start_native(&s, &[], &[])), 0);
+    let o = s.autolab(&["key", "home", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["status"], "accepted");
+    assert_eq!(code(&s.autolab(&["key", "back", "--long"])), 0);
+    assert_eq!(code(&s.autolab(&["focus", "video", "off"])), 0);
+    let refused = s.autolab(&["key", "home"]);
+    assert_eq!(code(&refused), 1, "{}", text(&refused));
+}
+
+#[test]
+fn the_dhu_backend_answers_a_key_press_with_unsupported() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    assert_eq!(code(&s.autolab(&["key", "home"])), 5);
+}

@@ -73,6 +73,15 @@ enum Command {
     },
     /// Touch a pixel of the projected screen (0,0 is the top left of a screenshot)
     Tap { x: u32, y: u32 },
+    /// Press one of the car's buttons: home, back, up, down, left, right, enter, search, play_pause,
+    /// next, previous, call, end_call
+    Key {
+        #[arg(value_parser = parse_key)]
+        key: autolab_core::Key,
+        /// Hold it for about a second, as a long press
+        #[arg(long)]
+        long: bool,
+    },
     /// Drag from one pixel to another
     Swipe {
         x1: u32,
@@ -236,6 +245,11 @@ fn run(cli: Cli) -> Result<u8> {
             print_input(&r, json);
             Ok(status_exit_code(r.result.status))
         }
+        Command::Key { key, long } => {
+            let r = daemon_ctl::connect()?.key(key, long)?;
+            print_input(&r, json);
+            Ok(status_exit_code(r.result.status))
+        }
         Command::Swipe {
             x1,
             y1,
@@ -314,6 +328,10 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
     }
+}
+
+fn parse_key(s: &str) -> std::result::Result<autolab_core::Key, String> {
+    s.parse()
 }
 
 fn current_dir() -> Result<PathBuf> {
@@ -405,7 +423,7 @@ fn print_input(resp: &InputResponse, json: bool) {
         );
         return;
     }
-    println!("Touch sent (the phone does not acknowledge touch)");
+    println!("Sent (the phone does not acknowledge touch or buttons)");
     for l in &resp.result.evidence {
         println!("  {l}");
     }

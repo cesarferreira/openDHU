@@ -308,6 +308,7 @@ fn preflight(
                 Requirement::VideoFocus => caps.video_focus,
                 Requirement::Screenshots => caps.screenshots,
                 Requirement::TouchInput => caps.touch_input,
+                Requirement::KeyInput => caps.key_input,
             };
             have != Support::Supported
         })
@@ -375,6 +376,15 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
             End::pass(format!("waited {}", fmt_dur(duration.0)))
         }
         Step::Screenshot { path } => screenshot(path, backend, cfg.artifacts_dir),
+        Step::Key { value, long } => match backend.press_key(*value, *long) {
+            Ok(r) => End::pass(format!(
+                "{}{} pressed; {}",
+                if *long { "long press of " } else { "" },
+                value.name(),
+                touch_note(&r.status)
+            )),
+            Err(e) => End::error(&e),
+        },
         Step::Tap { x, y } => match backend.tap(*x, *y) {
             Ok(r) => End::pass(format!("tap at ({x}, {y}) sent; {}", touch_note(&r.status))),
             Err(e) => End::error(&e),

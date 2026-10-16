@@ -29,8 +29,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult,
-    Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
+    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult, Key,
+    OperationResult, Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
 };
 use protocol::{Command as Cmd, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, Request};
 
@@ -54,7 +54,14 @@ pub type VideoChunk = Arc<Vec<u8>>;
 /// always subscribe again, which restarts the stream at a keyframe.
 #[derive(Default)]
 struct VideoHub {
-    viewers: Mutex<Vec<SyncSender<VideoChunk>>>,
+    viewers: Mutex<Vec<Viewer>>,
+}
+
+struct Viewer {
+    tx: SyncSender<VideoChunk>,
+    /// Has seen a start-up burst. Until then it gets nothing: live frames without the parameter sets
+    /// and a keyframe cannot be decoded.
+    started: bool,
 }
 
 /// How many chunks a viewer may lag by before it is dropped.
@@ -66,14 +73,25 @@ impl VideoHub {
         self.viewers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push(tx);
+            .push(Viewer { tx, started: false });
         rx
     }
 
-    /// Send to everyone still listening. Returns how many viewers remain.
-    fn publish(&self, chunk: &VideoChunk) -> usize {
+    /// Send to the viewers it is meant for. A burst starts the viewers still waiting for one; a live
+    /// chunk goes to the viewers that have started. Returns how many viewers remain.
+    fn publish(&self, chunk: &VideoChunk, burst: bool) -> usize {
         let mut viewers = self.viewers.lock().unwrap_or_else(|e| e.into_inner());
-        viewers.retain(|v| v.try_send(Arc::clone(chunk)).is_ok());
+        viewers.retain_mut(|v| {
+            if burst == v.started {
+                // A burst for a viewer that is already running, or a live chunk for one that is not
+                // started yet: not for this viewer.
+                return true;
+            }
+            if burst {
+                v.started = true;
+            }
+            v.tx.try_send(Arc::clone(chunk)).is_ok()
+        });
         viewers.len()
     }
 
@@ -341,12 +359,12 @@ fn read_child(
         }
         let text = line.trim_end();
         match protocol::decode_line(text) {
-            Ok(Line::Event(Event::VideoData { len })) => {
+            Ok(Line::Event(Event::VideoData { len, burst })) => {
                 let mut data = vec![0u8; len];
                 if out.read_exact(&mut data).is_err() {
                     break;
                 }
-                if video.publish(&Arc::new(data)) == 0 {
+                if video.publish(&Arc::new(data), burst) == 0 {
                     // Nobody is watching any more.
                     let _ = write_line(
                         stdin,
@@ -389,6 +407,7 @@ impl HeadUnitBackend for NativeBackend {
             nav_focus: Support::Unverified,
             night_mode: Support::Unverified,
             touch_input: Support::Supported,
+            key_input: Support::Unverified, // becomes Supported once checked on a phone
             screen_recording: Support::Unsupported,
         })
     }
@@ -456,6 +475,13 @@ impl HeadUnitBackend for NativeBackend {
         }
     }
 
+    fn press_key(&mut self, key: Key, long_press: bool) -> Result<InputResult> {
+        match self.send(Cmd::Key { key, long_press }, TOUCH_TIMEOUT)? {
+            Reply::Input(r) => Ok(r),
+            _ => Err(unexpected("key")),
+        }
+    }
+
     fn stop(&mut self) -> Result<()> {
         if self.child.try_wait().ok().flatten().is_some() {
             return Ok(());
@@ -492,5 +518,70 @@ impl Drop for NativeBackend {
                 self.kill();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hub_tests {
+    use super::*;
+
+    fn chunk(s: &str) -> VideoChunk {
+        Arc::new(s.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn a_new_viewer_gets_nothing_until_a_burst_then_live_chunks_and_no_second_burst() {
+        let hub = VideoHub::default();
+        let rx = hub.add();
+        assert_eq!(hub.publish(&chunk("live-1"), false), 1);
+        assert!(
+            rx.try_recv().is_err(),
+            "live frames before the burst are undecodable"
+        );
+        hub.publish(&chunk("burst"), true);
+        assert_eq!(rx.try_recv().unwrap().as_slice(), b"burst");
+        hub.publish(&chunk("live-2"), false);
+        assert_eq!(rx.try_recv().unwrap().as_slice(), b"live-2");
+        // Another viewer's burst must not repeat itself to a viewer that is already running.
+        hub.publish(&chunk("burst-for-someone-else"), true);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_late_viewer_is_started_by_a_burst_without_disturbing_the_running_one() {
+        let hub = VideoHub::default();
+        let first = hub.add();
+        hub.publish(&chunk("burst-1"), true);
+        let second = hub.add();
+        hub.publish(&chunk("live"), false);
+        hub.publish(&chunk("burst-2"), true);
+        hub.publish(&chunk("live-after"), false);
+        let got = |rx: &Receiver<VideoChunk>| -> Vec<String> {
+            rx.try_iter()
+                .map(|c| String::from_utf8_lossy(&c).into_owned())
+                .collect()
+        };
+        assert_eq!(got(&first), ["burst-1", "live", "live-after"]);
+        assert_eq!(got(&second), ["burst-2", "live-after"]);
+    }
+
+    #[test]
+    fn a_viewer_that_is_gone_or_too_slow_is_dropped_and_the_count_reaches_zero() {
+        let hub = VideoHub::default();
+        let rx = hub.add();
+        hub.publish(&chunk("burst"), true);
+        drop(rx);
+        assert_eq!(hub.publish(&chunk("live"), false), 0);
+        let slow = hub.add();
+        hub.publish(&chunk("burst"), true);
+        let mut remaining = 1;
+        for _ in 0..(VIEWER_BACKLOG + 5) {
+            remaining = hub.publish(&chunk("x"), false);
+        }
+        assert_eq!(
+            remaining, 0,
+            "a viewer that never reads is dropped, not waited for"
+        );
+        drop(slow);
     }
 }

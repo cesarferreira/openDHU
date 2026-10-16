@@ -17,6 +17,8 @@ pub struct Form {
     pub headless: bool,
     /// Show the live picture while a native session runs.
     pub live: bool,
+    /// Hold the next button press for about a second.
+    pub long_press: bool,
     /// A drag in progress on the live picture: where it began, and when.
     pub drag: Option<((u32, u32), std::time::Instant)>,
     pub shot_path: String,
@@ -34,6 +36,7 @@ impl Form {
             native: false,
             headless: false,
             live: true,
+            long_press: false,
             drag: None,
             shot_path: format!("{}/autolab-screenshot.png", dir.trim_end_matches('/')),
         }
@@ -199,6 +202,20 @@ pub fn gesture(start: (u32, u32), end: (u32, u32), held: std::time::Duration) ->
     }
 }
 
+/// The buttons under the live picture, in the order a car lays them out.
+const BUTTONS: [(&str, autolab_core::Key); 10] = [
+    ("Back", autolab_core::Key::Back),
+    ("Home", autolab_core::Key::Home),
+    ("Up", autolab_core::Key::Up),
+    ("Down", autolab_core::Key::Down),
+    ("Left", autolab_core::Key::Left),
+    ("Right", autolab_core::Key::Right),
+    ("Enter", autolab_core::Key::Enter),
+    ("Prev", autolab_core::Key::Previous),
+    ("Play/Pause", autolab_core::Key::PlayPause),
+    ("Next", autolab_core::Key::Next),
+];
+
 /// A touch from the live picture: no disabled buttons, no "busy" state.
 fn touch(cmd: Cmd, tx: &mpsc::Sender<crate::model::Update>, ctx: &egui::Context) {
     #[cfg(test)]
@@ -234,6 +251,7 @@ fn live_card(
                 Some(p) => ui.label(RichText::new(format!("No picture: {p}")).color(BAD)),
                 None => ui.label(RichText::new("Waiting for the first picture…").color(DIM)),
             };
+            ui.label(RichText::new(&state.live_summary).color(DIM).monospace());
             return;
         };
         let width = ui.available_width().min(800.0);
@@ -244,6 +262,20 @@ fn live_card(
             RichText::new("This is the head unit display, as a car would show it. Click to tap, drag to swipe: touches go to the phone.")
                 .color(DIM),
         );
+        // A picture that has stopped updating must not look like a working one.
+        if let Some(p) = &state.live_problem {
+            ui.label(RichText::new(format!("Stream problem: {p}")).color(BAD));
+        }
+        ui.label(RichText::new(&state.live_summary).color(DIM).monospace());
+        // The car's buttons. They go to the phone as key presses, like the buttons beside a real screen.
+        ui.horizontal_wrapped(|ui| {
+            for (label, key) in BUTTONS {
+                if ui.button(label).clicked() {
+                    touch(Cmd::Key(key, form.long_press), tx, ctx);
+                }
+            }
+            ui.checkbox(&mut form.long_press, "long press");
+        });
         let at = |p: egui::Pos2| to_pixel(p - response.rect.min, response.rect.size());
         if response.drag_started()
             && let Some(p) = response.interact_pointer_pos()

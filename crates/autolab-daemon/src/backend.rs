@@ -6,8 +6,8 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use autolab_core::{
-    Capabilities, Error, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult, Result,
-    ScreenshotResult,
+    Capabilities, Error, HeadUnitBackend, HeadUnitStatus, InputResult, Key, OperationResult,
+    Result, ScreenshotResult,
 };
 use autolab_dhu::DhuBackend;
 use autolab_native::{NativeBackend, VideoChunk};
@@ -79,6 +79,12 @@ impl HeadUnitBackend for AnyBackend {
         match self {
             Self::Dhu(b) => b.swipe(from, to, d),
             Self::Native(b) => b.swipe(from, to, d),
+        }
+    }
+    fn press_key(&mut self, key: Key, long_press: bool) -> Result<InputResult> {
+        match self {
+            Self::Dhu(b) => b.press_key(key, long_press),
+            Self::Native(b) => b.press_key(key, long_press),
         }
     }
     fn stop(&mut self) -> Result<()> {

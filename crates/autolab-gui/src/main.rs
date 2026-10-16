@@ -101,6 +101,7 @@ impl eframe::App for App {
         if !want {
             self.state.live_texture = None;
         }
+        self.state.live_summary = self.live.summary();
         self.state.live_problem = self
             .live
             .problem

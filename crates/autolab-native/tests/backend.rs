@@ -72,6 +72,7 @@ fn status_focus_and_screenshot_follow_the_phone_not_the_request() {
     assert_eq!(caps.backend, "native");
     assert_eq!(caps.video_focus, Support::Supported);
     assert_eq!(caps.touch_input, Support::Supported);
+    assert_eq!(caps.key_input, Support::Unverified);
     assert_eq!(caps.audio_focus, Support::Unverified);
     b.stop().unwrap();
 }
@@ -204,4 +205,19 @@ fn video_reaches_a_viewer_starting_with_a_burst_and_the_head_unit_stops_when_the
     unsafe { std::env::remove_var("FAKE_NATIVE_LOG") };
     b.stop().unwrap();
     let _ = std::fs::remove_file(&log);
+}
+
+#[test]
+fn buttons_are_pressed_through_the_head_unit_and_refused_while_the_phone_is_not_projecting() {
+    use autolab_core::Key;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = start("");
+    let r = b.press_key(Key::Home, false).unwrap();
+    assert_eq!(r.status, OpStatus::Accepted);
+    b.set_video_focus(false).unwrap();
+    let refused = b.press_key(Key::Back, true).unwrap_err();
+    assert!(
+        refused.to_string().contains("nothing to touch"),
+        "{refused}"
+    );
 }

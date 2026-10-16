@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{Error, HeadUnitStatus, InputResult, OperationResult, Result, ScreenshotResult};
+use crate::{Error, HeadUnitStatus, InputResult, Key, OperationResult, Result, ScreenshotResult};
 
 /// Capability levels. `Unverified` means "not yet proven against real hardware".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +27,7 @@ pub struct Capabilities {
     pub nav_focus: Support,
     pub night_mode: Support,
     pub touch_input: Support,
+    pub key_input: Support,
     pub screen_recording: Support,
 }
 
@@ -54,6 +55,12 @@ pub trait HeadUnitBackend {
     ) -> Result<InputResult> {
         Err(Error::Unsupported(
             "touch input is not supported by this backend".into(),
+        ))
+    }
+    /// Press one of the car's buttons. A long press is held for about a second.
+    fn press_key(&mut self, _key: Key, _long_press: bool) -> Result<InputResult> {
+        Err(Error::Unsupported(
+            "key input is not supported by this backend".into(),
         ))
     }
     fn stop(&mut self) -> Result<()>;

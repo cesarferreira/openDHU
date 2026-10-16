@@ -26,6 +26,7 @@ pub enum Cmd {
     Focus(bool),
     Screenshot(PathBuf),
     Tap(u32, u32),
+    Key(autolab_core::Key, bool),
     Swipe {
         from: (u32, u32),
         to: (u32, u32),
@@ -172,6 +173,11 @@ fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<
             client.tap(*x, *y).map_err(|e| e.to_string())?;
             // The phone never acknowledges touch, so say only that it was sent.
             Ok(format!("Tap sent at ({x}, {y})"))
+        }
+        Cmd::Key(key, long) => {
+            let client = Client::connect().map_err(|e| e.to_string())?;
+            client.key(*key, *long).map_err(|e| e.to_string())?;
+            Ok(format!("{} pressed", key.name()))
         }
         Cmd::Swipe {
             from,

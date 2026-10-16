@@ -54,13 +54,13 @@ while IFS= read -r line; do
           log stream-on
           stop_stream
           # A burst first (parameter sets and keyframe), then a chunk every 50 ms until told to stop.
-          printf '{"event":"video_data","len":9}\nSPSPPSIDR'
+          printf '{"event":"video_data","len":9,"burst":true}\nSPSPPSIDR'
           ( n=0; while sleep 0.05; do n=$((n+1)); printf '{"event":"video_data","len":8}\nFRAME%03d' "$n"; done ) &
           streamer=$!; disown;;
         *) log stream-off; stop_stream;;
       esac
       echo "{\"id\":$id,\"ok\":{\"type\":\"done\"}}";;
-    tap|swipe)
+    tap|swipe|key)
       if [ "$observed" = off ]; then
         echo "{\"id\":$id,\"err\":{\"kind\":\"other\",\"message\":\"The phone is not projecting - nothing to touch.\"}}"
       else

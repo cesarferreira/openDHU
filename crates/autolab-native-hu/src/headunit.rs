@@ -13,7 +13,7 @@ use android_auto::{
     HeadUnitInfo, InputConfiguration, SendableAndroidAutoMessage, SensorInformation,
     VideoConfiguration, Wifi,
 };
-use autolab_core::{FocusState, InputResult, OpStatus, OperationResult, VideoFocusStatus};
+use autolab_core::{FocusState, InputResult, Key, OpStatus, OperationResult, VideoFocusStatus};
 use autolab_native::protocol::{
     Command, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, SCREEN_HEIGHT, SCREEN_WIDTH,
     SWIPE_MAX_MS, SWIPE_MIN_MS, SWIPE_STEP_MS, StatusReport,
@@ -31,6 +31,8 @@ const GOP_CAP: usize = 16 * 1024 * 1024;
 
 /// How long a tap holds the finger down.
 const TAP_HOLD: Duration = Duration::from_millis(60);
+/// How long a long press holds the button down.
+const LONG_PRESS_HOLD: Duration = Duration::from_millis(1000);
 /// How long to watch the video after a touch.
 const WATCH_AFTER: Duration = Duration::from_millis(150);
 
@@ -53,6 +55,8 @@ struct Inner {
     have_keyframe: bool,
     /// A viewer is watching: every frame is also sent to the daemon.
     streaming: bool,
+    /// The viewer asked before a keyframe had arrived: send the burst as soon as one does.
+    burst_pending: bool,
 }
 
 pub struct Shared {
@@ -80,6 +84,7 @@ impl Shared {
                 gop: Vec::new(),
                 have_keyframe: false,
                 streaming: false,
+                burst_pending: false,
             }),
             ready: AtomicBool::new(false),
             tx,
@@ -96,7 +101,9 @@ impl Shared {
                 ]),
             },
             input: InputConfiguration {
-                keycodes: vec![1, 2, 3, 4, 5],
+                // The buttons we can press. The phone asks to bind the ones it wants and is refused any
+                // that are not listed here.
+                keycodes: Key::ALL.map(Key::android_code).to_vec(),
                 touchscreen: Some((SCREEN_WIDTH, SCREEN_HEIGHT)),
             },
         }
@@ -137,17 +144,13 @@ impl Shared {
                 }
                 self.touch((x1, y1), (x2, y2), duration_ms).await
             }
+            Command::Key { key, long_press } => self.press(key, long_press).await,
             Command::VideoStream { enabled } => {
                 let mut i = self.lock();
                 i.streaming = enabled;
+                i.burst_pending = enabled;
                 if enabled {
-                    // Start at a keyframe: parameter sets first, then the last keyframe and what followed.
-                    let mut burst = i.sps.clone();
-                    burst.extend_from_slice(&i.pps);
-                    burst.extend_from_slice(&i.gop);
-                    if i.have_keyframe && !burst.is_empty() {
-                        crate::emit_video(&burst);
-                    }
+                    Self::send_burst(&mut i);
                 }
                 Outcome::Ok(Reply::Done)
             }
@@ -183,6 +186,61 @@ impl Shared {
                 kind: ErrorKind::Unavailable,
                 message: "the Android Auto session is not running".into(),
             })
+    }
+
+    /// One button press: down, hold, up. Android Auto reads a long press from how long it is held.
+    async fn press(&self, key: Key, long_press: bool) -> Outcome {
+        if self.lock().observed != FocusState::On {
+            return fail(
+                ErrorKind::Other,
+                "The phone is not projecting - nothing to press.".to_string(),
+            );
+        }
+        let send = |pressed: bool| async move {
+            let mut event = Wifi::ButtonEvent::new();
+            event.set_scan_code(key.android_code());
+            event.set_is_pressed(pressed);
+            if long_press {
+                event.set_long_press(true);
+            }
+            let mut events = Wifi::ButtonEvents::new();
+            events.button_events.push(event);
+            let mut m = Wifi::InputEventIndication::new();
+            m.set_timestamp(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_micros() as u64),
+            );
+            m.button_event = android_auto::protobuf::MessageField::some(events);
+            self.tx
+                .send(AndroidAutoMessage::Input(m).sendable())
+                .await
+                .map_err(|_| ErrorInfo {
+                    kind: ErrorKind::Unavailable,
+                    message: "the Android Auto session is not running".into(),
+                })
+        };
+        if let Err(e) = send(true).await {
+            return Outcome::Err(e);
+        }
+        tokio::time::sleep(if long_press {
+            LONG_PRESS_HOLD
+        } else {
+            TAP_HOLD
+        })
+        .await;
+        if let Err(e) = send(false).await {
+            return Outcome::Err(e);
+        }
+        Outcome::Ok(Reply::Input(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec![format!(
+                "sent {}{} (Android key code {}); the phone does not acknowledge buttons",
+                if long_press { "a long press of " } else { "" },
+                key.name(),
+                key.android_code()
+            )],
+        }))
     }
 
     /// A tap is a swipe of zero length and duration. Touch gets no acknowledgement from the phone,
@@ -363,7 +421,12 @@ impl Shared {
             // Sent under the same lock that updated the buffers, so a viewer that joins gets every
             // frame exactly once: either in its first burst or live.
             if i.streaming {
-                crate::emit_video(data);
+                if i.burst_pending {
+                    // A viewer is waiting for its start: this frame is in the burst, not sent twice.
+                    Self::send_burst(&mut i);
+                } else {
+                    crate::emit_video(data, false);
+                }
             }
             i.have_keyframe && !i.sps.is_empty() && !i.pps.is_empty()
         };
@@ -376,6 +439,19 @@ impl Shared {
                 backend_build: BACKEND_BUILD.into(),
             }));
         }
+    }
+
+    /// Start a viewer: parameter sets first, then the last keyframe and what followed. Without a
+    /// keyframe yet it does nothing and tries again at the next frame.
+    fn send_burst(i: &mut Inner) {
+        if !i.have_keyframe || i.sps.is_empty() || i.pps.is_empty() {
+            return;
+        }
+        let mut burst = i.sps.clone();
+        burst.extend_from_slice(&i.pps);
+        burst.extend_from_slice(&i.gop);
+        crate::emit_video(&burst, true);
+        i.burst_pending = false;
     }
 
     fn take_frame(i: &mut Inner, data: &[u8]) {
@@ -669,6 +745,74 @@ mod tests {
                     })
                 ),
                 "{ms} ms"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_button_press_sends_down_then_up_and_is_refused_without_video() {
+        let hu = Shared::new();
+        let refused = hu
+            .handle(Command::Key {
+                key: Key::Home,
+                long_press: false,
+            })
+            .await;
+        assert!(matches!(
+            refused,
+            Outcome::Err(ErrorInfo {
+                kind: ErrorKind::Other,
+                ..
+            })
+        ));
+        hu.lock().observed = FocusState::On;
+        let mut rx = hu.rx.lock().await.take().unwrap();
+        let Outcome::Ok(Reply::Input(r)) = hu
+            .handle(Command::Key {
+                key: Key::Back,
+                long_press: false,
+            })
+            .await
+        else {
+            panic!("a key press must be accepted");
+        };
+        assert_eq!(r.status, OpStatus::Accepted);
+        assert!(
+            r.evidence[0].contains("back") && r.evidence[0].contains("code 4"),
+            "{:?}",
+            r.evidence
+        );
+        let mut sent = 0;
+        while rx.try_recv().is_ok() {
+            sent += 1;
+        }
+        assert_eq!(sent, 2, "a press is a down and an up");
+    }
+
+    #[test]
+    fn a_viewer_that_asks_before_a_keyframe_gets_its_burst_when_one_arrives() {
+        let hu = Shared::new();
+        {
+            let mut i = hu.lock();
+            i.streaming = true;
+            i.burst_pending = true;
+            Shared::send_burst(&mut i); // nothing to send yet
+            assert!(i.burst_pending, "still waiting for a keyframe");
+        }
+        hu.on_frame(&SPS);
+        hu.on_frame(&PPS);
+        assert!(hu.lock().burst_pending);
+        hu.on_frame(&IDR);
+        assert!(!hu.lock().burst_pending, "the keyframe completed the burst");
+    }
+
+    #[test]
+    fn every_button_is_declared_to_the_phone() {
+        let hu = Shared::new();
+        for k in Key::ALL {
+            assert!(
+                hu.input.keycodes.contains(&k.android_code()),
+                "{k} is not declared"
             );
         }
     }

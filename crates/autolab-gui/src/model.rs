@@ -62,6 +62,8 @@ pub struct State {
     pub live_texture: Option<eframe::egui::TextureHandle>,
     /// Why the live picture is not showing, if it is not.
     pub live_problem: Option<String>,
+    /// Frame counters, shown under the picture.
+    pub live_summary: String,
 }
 
 /// Which buttons are usable right now.
@@ -82,6 +84,7 @@ impl State {
             shot: None,
             live_texture: None,
             live_problem: None,
+            live_summary: String::new(),
         }
     }
 

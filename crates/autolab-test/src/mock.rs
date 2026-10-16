@@ -75,6 +75,7 @@ impl MockBackend {
                 nav_focus: Support::Unverified,
                 night_mode: Support::Unverified,
                 touch_input: Support::Unverified,
+                key_input: Support::Unverified,
                 screen_recording: Support::Unsupported,
             },
             state: HeadUnitStatus {
@@ -111,6 +112,18 @@ fn fail(f: &Failure) -> Result<()> {
 impl HeadUnitBackend for MockBackend {
     fn tap(&mut self, x: u32, y: u32) -> Result<InputResult> {
         self.calls.push(format!("tap {x} {y}"));
+        Ok(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec!["mock".into()],
+        })
+    }
+
+    fn press_key(&mut self, key: autolab_core::Key, long_press: bool) -> Result<InputResult> {
+        self.calls.push(format!(
+            "key {}{}",
+            key.name(),
+            if long_press { " long" } else { "" }
+        ));
         Ok(InputResult {
             status: OpStatus::Accepted,
             evidence: vec!["mock".into()],

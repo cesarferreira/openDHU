@@ -106,6 +106,7 @@ impl HeadUnitBackend for DhuBackend {
             nav_focus: Support::Unverified,
             night_mode: Support::Unverified,
             touch_input: Support::Unverified,
+            key_input: Support::Unverified,
             screen_recording: Support::Unsupported,
         })
     }

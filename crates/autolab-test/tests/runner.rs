@@ -395,3 +395,30 @@ fn a_swipe_duration_outside_the_allowed_range_is_rejected_when_the_file_is_read(
         assert!(e.to_string().contains("between 50ms and 10s"), "{d}: {e}");
     }
 }
+
+#[test]
+fn key_steps_reach_the_backend_and_need_the_key_input_capability() {
+    let yaml = "name: Keys\nrequirements: [keyInput]\nsteps:\n  - action: key\n    value: home\n  - action: key\n    value: back\n    long: true\n";
+    let mut b = MockBackend::new();
+    b.caps.key_input = Support::Supported;
+    let (r, _, _) = run(yaml, &mut b, "keys", false);
+    assert_eq!(r.outcome, Outcome::Passed, "{:?}", r.message);
+    assert!(b.calls.contains(&"key home".to_string()), "{:?}", b.calls);
+    assert!(b.calls.contains(&"key back long".to_string()));
+    assert!(r.steps[1].detail.contains("not acknowledged by the phone"));
+
+    let mut unproven = MockBackend::new();
+    let (r, _, _) = run(yaml, &mut unproven, "keys-unproven", false);
+    assert_ne!(r.outcome, Outcome::Passed);
+    assert!(r.message.as_deref().unwrap_or("").contains("keyInput"));
+    assert!(!unproven.calls.iter().any(|c| c.starts_with("key ")));
+}
+
+#[test]
+fn an_unknown_key_name_is_rejected_when_the_file_is_read() {
+    let e = parse("name: K\nsteps:\n  - action: key\n    value: volume_up\n").unwrap_err();
+    assert!(
+        e.to_string().contains("volume_up") || e.to_string().contains("unknown variant"),
+        "{e}"
+    );
+}

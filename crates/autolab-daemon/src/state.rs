@@ -271,6 +271,15 @@ impl Daemon {
         }
     }
 
+    pub async fn key(&self, key: autolab_core::Key, long_press: bool) -> Result<InputResponse> {
+        self.input(
+            "key",
+            json!({ "key": key.name(), "longPress": long_press }),
+            move |b| b.press_key(key, long_press),
+        )
+        .await
+    }
+
     pub async fn tap(&self, x: u32, y: u32) -> Result<InputResponse> {
         self.input("tap", json!({ "x": x, "y": y }), move |b| b.tap(x, y))
             .await

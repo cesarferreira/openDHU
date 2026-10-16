@@ -23,8 +23,11 @@ pub fn emit(line: &Line) {
 
 /// A `VideoData` line followed by that many raw bytes, written under one lock so nothing can come
 /// between them.
-pub fn emit_video(data: &[u8]) {
-    let head = protocol::encode(&Line::Event(Event::VideoData { len: data.len() }));
+pub fn emit_video(data: &[u8], burst: bool) {
+    let head = protocol::encode(&Line::Event(Event::VideoData {
+        len: data.len(),
+        burst,
+    }));
     let mut out = std::io::stdout().lock();
     let _ = out.write_all(head.as_bytes());
     let _ = out.write_all(data);

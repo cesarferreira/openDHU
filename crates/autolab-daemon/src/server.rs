@@ -15,8 +15,9 @@ use axum::{Json, Router, middleware};
 use serde_json::json;
 
 use crate::api::{
-    DaemonInfo, DevicesResponse, FocusRequest, InputResponse, OperationResponse, ScreenshotRequest,
-    ScreenshotResponse, StartRequest, StatusResponse, StoppedResponse, SwipeRequest, TapRequest,
+    DaemonInfo, DevicesResponse, FocusRequest, InputResponse, KeyRequest, OperationResponse,
+    ScreenshotRequest, ScreenshotResponse, StartRequest, StatusResponse, StoppedResponse,
+    SwipeRequest, TapRequest,
 };
 use crate::auth::{self, Guard};
 use crate::error::{ApiError, AppJson, method_not_allowed, not_found};
@@ -85,6 +86,13 @@ async fn input_tap(
     AppJson(req): AppJson<TapRequest>,
 ) -> ApiResult<InputResponse> {
     Ok(Json(d.tap(req.x, req.y).await?))
+}
+
+async fn input_key(
+    State(d): State<Daemon>,
+    AppJson(req): AppJson<KeyRequest>,
+) -> ApiResult<InputResponse> {
+    Ok(Json(d.key(req.key, req.long_press).await?))
 }
 
 async fn input_swipe(
@@ -228,6 +236,7 @@ pub fn router(daemon: Daemon) -> Router {
         .route("/v1/focus/navigation", post(focus_navigation))
         .route("/v1/display/configure", post(display_configure))
         .route("/v1/input/tap", post(input_tap))
+        .route("/v1/input/key", post(input_key))
         .route("/v1/input/swipe", post(input_swipe))
         .route("/v1/screenshot", post(screenshot))
         .route("/v1/events", get(events))

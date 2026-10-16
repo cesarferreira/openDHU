@@ -6,7 +6,9 @@
 
 use std::path::PathBuf;
 
-use autolab_core::{FocusState, InputResult, OperationResult, ScreenshotResult, VideoFocusStatus};
+use autolab_core::{
+    FocusState, InputResult, Key, OperationResult, ScreenshotResult, VideoFocusStatus,
+};
 use serde::{Deserialize, Serialize};
 
 /// The projected screen, in pixels. The head unit declares this as its touch screen and asks the
@@ -38,6 +40,11 @@ pub enum Command {
         x2: u32,
         y2: u32,
         duration_ms: u64,
+    },
+    /// Press one of the car's buttons.
+    Key {
+        key: Key,
+        long_press: bool,
     },
     /// Start or stop streaming the phone's raw H.264 video as `Event::VideoData`. Starting resends the
     /// parameter sets and the last keyframe first, so a late viewer can decode from the first byte.
@@ -115,7 +122,13 @@ pub enum Event {
     Video { state: FocusState },
     /// `len` raw bytes follow this line, with no newline after them: Annex-B H.264, one or more NAL
     /// units. Only sent while a `VideoStream` is on.
-    VideoData { len: usize },
+    VideoData {
+        len: usize,
+        /// This chunk is a start-up burst: parameter sets, then a keyframe and everything since. A viewer
+        /// can start decoding only at one.
+        #[serde(default)]
+        burst: bool,
+    },
     /// The USB link ended. The child exits right after.
     Disconnected { reason: String },
 }
@@ -158,6 +171,10 @@ mod tests {
                 y2: 4,
                 duration_ms: 300,
             },
+            Command::Key {
+                key: Key::Home,
+                long_press: true,
+            },
             Command::VideoStream { enabled: true },
             Command::Quit,
         ] {
@@ -192,7 +209,10 @@ mod tests {
             Line::Response(ok),
             Line::Response(err),
             Line::Event(ev),
-            Line::Event(Event::VideoData { len: 1234 }),
+            Line::Event(Event::VideoData {
+                len: 1234,
+                burst: true,
+            }),
             Line::Event(Event::Disconnected {
                 reason: "unplugged".into(),
             }),

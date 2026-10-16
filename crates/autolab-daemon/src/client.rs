@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::api::{
-    DevicesResponse, ErrorEnvelope, FocusRequest, InputResponse, OperationResponse,
+    DevicesResponse, ErrorEnvelope, FocusRequest, InputResponse, KeyRequest, OperationResponse,
     ScreenshotRequest, ScreenshotResponse, StartRequest, StatusResponse, SwipeRequest, TapRequest,
 };
 use crate::runtime;
@@ -154,6 +154,10 @@ impl Client {
 
     pub fn tap(&self, x: u32, y: u32) -> Result<InputResponse> {
         self.post_json("/v1/input/tap", &TapRequest { x, y }, false)
+    }
+
+    pub fn key(&self, key: autolab_core::Key, long_press: bool) -> Result<InputResponse> {
+        self.post_json("/v1/input/key", &KeyRequest { key, long_press }, false)
     }
 
     pub fn swipe(
