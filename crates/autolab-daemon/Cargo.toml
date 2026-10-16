@@ -1,0 +1,17 @@
+[package]
+name = "autolab-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "AutoLab daemon: owns the head unit session and serves the loopback HTTP API"
+
+[dependencies]
+autolab-core = { path = "../autolab-core" }
+autolab-dhu = { path = "../autolab-dhu" }
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+ureq.workspace = true

@@ -45,6 +45,16 @@ pub fn resolve_png(raw: &Path, cwd: &Path) -> Result<PathBuf> {
     Ok(abs)
 }
 
+/// An absolute, lexically clean version of `raw`. The daemon's working directory is not the
+/// caller's, so relative paths must be resolved here, before they are sent.
+pub fn absolute(raw: &Path, cwd: &Path) -> PathBuf {
+    normalize(&if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        cwd.join(raw)
+    })
+}
+
 /// Collapse `.` and `..` lexically.
 fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -73,6 +83,23 @@ mod tests {
         let got = resolve_png(Path::new("./a/../shot.png"), &cwd()).unwrap();
         assert_eq!(got, normalize(&cwd().join("shot.png")));
         assert!(got.is_absolute());
+    }
+
+    #[test]
+    fn absolute_resolves_against_the_callers_directory() {
+        let cwd = Path::new("/work/proj");
+        assert_eq!(
+            absolute(Path::new("cfg/a.ini"), cwd),
+            Path::new("/work/proj/cfg/a.ini")
+        );
+        assert_eq!(
+            absolute(Path::new("../x.ini"), cwd),
+            Path::new("/work/x.ini")
+        );
+        assert_eq!(
+            absolute(Path::new("/abs/y.ini"), cwd),
+            Path::new("/abs/y.ini")
+        );
     }
 
     #[test]

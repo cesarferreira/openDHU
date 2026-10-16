@@ -53,8 +53,13 @@ pub fn find_adb(path_var: Option<&str>, sdk_roots: &[PathBuf]) -> Option<PathBuf
 }
 
 pub fn list_devices(adb: &Path) -> std::io::Result<Vec<AdbDevice>> {
-    let out = Command::new(adb).args(["devices", "-l"]).output()?;
-    Ok(parse_devices(&String::from_utf8_lossy(&out.stdout)))
+    let out = run_bounded(adb, &["devices", "-l"], Duration::from_secs(10)).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "`adb devices` did not answer in time",
+        )
+    })?;
+    Ok(parse_devices(&out.stdout))
 }
 
 /// Captured result of a bounded child process.

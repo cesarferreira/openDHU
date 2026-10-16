@@ -1,17 +1,15 @@
+mod daemon_ctl;
 mod doctor;
 mod output_path;
-mod session;
 mod session_backend;
 mod test_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
 
-use autolab_core::{
-    Error, FocusState, OpStatus, OperationResult, Result, ScreenshotResult, SessionState,
-};
-use autolab_dhu::{DhuLaunch, adb, discovery};
+use autolab_core::{Error, FocusState, OpStatus, Result, SessionState};
+use autolab_daemon::api::{OperationResponse, ScreenshotResponse, SessionStatus, StartRequest};
+use autolab_daemon::{ServeOptions, runtime};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
@@ -30,7 +28,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Start a DHU session (launches Google's DHU over USB and keeps it under AutoLab's control)
+    /// Start a DHU session (launches Google's DHU over USB; the AutoLab daemon keeps it running)
     Start {
         /// Path to the desktop-head-unit executable [env: AUTOLAB_DHU_PATH]
         #[arg(long)]
@@ -87,18 +85,17 @@ enum Command {
         #[arg(long)]
         dhu_path: Option<PathBuf>,
     },
-    #[command(name = "__supervise", hide = true)]
-    Supervise {
+    /// Run the AutoLab daemon in the foreground
+    ///
+    /// It serves the HTTP API on 127.0.0.1 until stopped with Ctrl+C or SIGTERM, which also stops the
+    /// session. `autolab start` starts a daemon by itself when none is running; this one stays up.
+    Daemon {
+        /// Port to listen on [default: 8765, or any free port if that is taken]
         #[arg(long)]
-        dhu_path: PathBuf,
-        #[arg(long)]
-        serial: String,
-        #[arg(long)]
-        config: Option<PathBuf>,
-        #[arg(long)]
-        headless: bool,
-        #[arg(long = "reverse")]
-        reverse: Vec<u16>,
+        port: Option<u16>,
+        /// Exit when the session ends. `autolab start` sets this for the daemon it launches.
+        #[arg(long, hide = true)]
+        exit_when_idle: bool,
     },
 }
 
@@ -115,17 +112,10 @@ enum OnOff {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let supervising = matches!(cli.command, Command::Supervise { .. });
-    match run(cli) {
+    match run(Cli::parse()) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
-            // The supervisor's stderr is read back by `start`, which re-wraps the message.
-            if supervising {
-                eprintln!("{}", e.message());
-            } else {
-                eprintln!("error: {e}");
-            }
+            eprintln!("error: {e}");
             ExitCode::from(e.exit_code())
         }
     }
@@ -141,13 +131,21 @@ fn run(cli: Cli) -> Result<u8> {
             headless,
             reverse,
         } => {
-            let launch = resolve_launch(dhu_path, serial, config, headless)?;
-            let s = session::start(&launch, &reverse)?;
-            print_status(&s, json);
+            let cwd = current_dir()?;
+            // The daemon's working directory is not ours, so paths are resolved here.
+            let req = StartRequest {
+                serial,
+                dhu_path: dhu_path.map(|p| output_path::absolute(&p, &cwd)),
+                config: config.map(|p| output_path::absolute(&p, &cwd)),
+                headless,
+                reverse,
+            };
+            let status = daemon_ctl::ensure()?.start(&req)?;
+            print_session(&expect_session(status.session)?, json);
             Ok(0)
         }
         Command::Stop => {
-            session::stop()?;
+            daemon_ctl::connect()?.stop()?;
             println!(
                 "{}",
                 if json {
@@ -159,24 +157,23 @@ fn run(cli: Cli) -> Result<u8> {
             Ok(0)
         }
         Command::Status => {
-            print_status(&session::status()?, json);
+            let status = daemon_ctl::connect()?.status()?;
+            print_session(&expect_session(status.session)?, json);
             Ok(0)
         }
         Command::Focus {
             kind: FocusKind::Video { state },
         } => {
-            let r = session::set_video_focus(matches!(state, OnOff::On))?;
+            let r = daemon_ctl::connect()?.focus_video(matches!(state, OnOff::On))?;
             print_focus(&r, json);
-            Ok(status_exit_code(r.status))
+            Ok(status_exit_code(r.result.status))
         }
         Command::Screenshot { path, output } => {
             let raw = path.or(output).ok_or_else(|| {
                 Error::InvalidArgs("give an output path: `autolab screenshot out.png`".into())
             })?;
-            let cwd = std::env::current_dir()
-                .map_err(|e| Error::Other(format!("cannot read current directory: {e}")))?;
-            let abs = output_path::resolve_png(&raw, &cwd)?;
-            print_screenshot(&session::screenshot(&abs)?, json);
+            let abs = output_path::resolve_png(&raw, &current_dir()?)?;
+            print_screenshot(&daemon_ctl::connect()?.screenshot(&abs)?, json);
             Ok(0)
         }
         Command::Test {
@@ -211,25 +208,33 @@ fn run(cli: Cli) -> Result<u8> {
             }
             Ok(if doctor::has_failures(&checks) { 3 } else { 0 })
         }
-        Command::Supervise {
-            dhu_path,
-            serial,
-            config,
-            headless,
-            reverse,
+        Command::Daemon {
+            port,
+            exit_when_idle,
         } => {
-            session::supervise(
-                DhuLaunch {
-                    program: dhu_path,
-                    serial,
-                    config,
-                    headless,
-                },
-                reverse,
-            )?;
+            autolab_daemon::run(ServeOptions {
+                runtime_dir: runtime::runtime_dir()?,
+                port,
+                exit_when_idle,
+                idle_grace: None,
+            })?;
             Ok(0)
         }
     }
+}
+
+fn current_dir() -> Result<PathBuf> {
+    std::env::current_dir().map_err(|e| Error::Other(format!("cannot read current directory: {e}")))
+}
+
+/// `None` means the daemon is up but has no session. That is the same "no session" condition
+/// (exit code 3) as no daemon at all.
+fn expect_session(s: Option<SessionStatus>) -> Result<SessionStatus> {
+    s.ok_or_else(|| {
+        Error::BackendUnavailable(
+            "no AutoLab session is running; start one with `autolab start`".into(),
+        )
+    })
 }
 
 fn status_exit_code(s: OpStatus) -> u8 {
@@ -241,78 +246,6 @@ fn status_exit_code(s: OpStatus) -> u8 {
     }
 }
 
-fn resolve_launch(
-    dhu_path: Option<PathBuf>,
-    serial: Option<String>,
-    config: Option<PathBuf>,
-    headless: bool,
-) -> Result<DhuLaunch> {
-    let env = discovery::Env::from_process(dhu_path);
-    let found = discovery::find_dhu(&env).map_err(|tried| {
-        let list: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
-        Error::BackendUnavailable(format!(
-            "DHU executable not found (install extras;google;auto or pass --dhu-path). Tried: {}",
-            list.join(", ")
-        ))
-    })?;
-    let serial = match serial {
-        Some(s) => s,
-        None => pick_device()?,
-    };
-    Ok(DhuLaunch {
-        program: found.path,
-        serial,
-        config,
-        headless,
-    })
-}
-
-/// How long to wait for a phone that has just dropped off adb. After a DHU session ends the
-/// phone leaves USB accessory mode and is briefly invisible to adb.
-const DEVICE_WAIT: Duration = Duration::from_secs(10);
-
-/// Pick the only authorized device. `Ok(None)` means none yet; several is always an error.
-fn select_device(devices: &[adb::AdbDevice]) -> Result<Option<String>> {
-    let ready: Vec<_> = devices.iter().filter(|d| d.state == "device").collect();
-    match ready.as_slice() {
-        [] => Ok(None),
-        [one] => Ok(Some(one.serial.clone())),
-        many => Err(Error::InvalidArgs(format!(
-            "multiple devices attached ({}); pass --serial",
-            many.iter()
-                .map(|d| d.serial.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
-    }
-}
-
-/// Choose the device only when there is exactly one authorized candidate.
-fn pick_device() -> Result<String> {
-    let sdk_roots = adb::sdk_roots_from_env();
-    let adb_path =
-        adb::find_adb(std::env::var("PATH").ok().as_deref(), &sdk_roots).ok_or_else(|| {
-            Error::BackendUnavailable(
-                "adb not found; pass --serial or install platform-tools".into(),
-            )
-        })?;
-    let deadline = Instant::now() + DEVICE_WAIT;
-    loop {
-        let devices = adb::list_devices(&adb_path)
-            .map_err(|e| Error::BackendUnavailable(format!("adb failed: {e}")))?;
-        if let Some(serial) = select_device(&devices)? {
-            return Ok(serial);
-        }
-        if Instant::now() >= deadline {
-            return Err(Error::DeviceDisconnected(format!(
-                "no authorized adb device appeared within {}s",
-                DEVICE_WAIT.as_secs()
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-}
-
 fn focus_word(s: FocusState) -> &'static str {
     match s {
         FocusState::On => "on",
@@ -321,11 +254,15 @@ fn focus_word(s: FocusState) -> &'static str {
     }
 }
 
-fn print_focus(r: &OperationResult, json: bool) {
+fn print_focus(resp: &OperationResponse, json: bool) {
     if json {
-        println!("{}", serde_json::to_string_pretty(r).expect("serializes"));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(resp).expect("serializes")
+        );
         return;
     }
+    let r = &resp.result;
     match r.status {
         OpStatus::Accepted => {
             println!("Video focus {} command accepted", focus_word(r.requested));
@@ -348,10 +285,14 @@ fn print_focus(r: &OperationResult, json: bool) {
     }
 }
 
-fn print_screenshot(r: &ScreenshotResult, json: bool) {
+fn print_screenshot(resp: &ScreenshotResponse, json: bool) {
     if json {
-        println!("{}", serde_json::to_string_pretty(r).expect("serializes"));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(resp).expect("serializes")
+        );
     } else {
+        let r = &resp.result;
         println!(
             "Screenshot saved: {} ({}x{})",
             r.path.display(),
@@ -361,15 +302,20 @@ fn print_screenshot(r: &ScreenshotResult, json: bool) {
     }
 }
 
-fn print_status(s: &session::StatusInfo, json: bool) {
+fn print_session(s: &SessionStatus, json: bool) {
     if json {
         println!("{}", serde_json::to_string_pretty(s).expect("serializes"));
         return;
     }
-    let h = &s.head_unit;
+    println!("AutoLab {}\n", env!("CARGO_PKG_VERSION"));
+    let Some(d) = &s.details else {
+        println!("State:        {:?}", s.phase);
+        println!("Session:      {}", s.session_id);
+        return;
+    };
+    let h = &d.head_unit;
     let v = &h.video_focus;
     let serial = h.serial.as_deref().unwrap_or("unknown");
-    println!("AutoLab {}\n", env!("CARGO_PKG_VERSION"));
     println!(
         "Backend:      {} ({}, build {})",
         h.backend,
@@ -380,14 +326,14 @@ fn print_status(s: &session::StatusInfo, json: bool) {
         SessionState::Running => "running",
     };
     println!("State:        {state}");
-    println!("Transport:    {} (serial {serial})", s.transport);
+    println!("Transport:    {} (serial {serial})", d.transport);
     println!(
         "Video focus:  requested {}; DHU reports {}; phone confirmed {}",
         focus_word(v.requested),
         focus_word(v.backend_reported),
         focus_word(v.observed)
     );
-    for t in &s.tunnels {
+    for t in &d.tunnels {
         let again = match t.reapplied {
             0 => String::new(),
             n => format!(", re-applied {n}x"),
@@ -398,41 +344,7 @@ fn print_status(s: &session::StatusInfo, json: bool) {
         );
     }
     println!(
-        "Session:      supervisor pid {}, dhu pid {}",
-        s.supervisor_pid, s.dhu_pid
+        "Session:      {} (daemon pid {}, dhu pid {})",
+        s.session_id, d.daemon_pid, d.dhu_pid
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn dev(serial: &str, state: &str) -> adb::AdbDevice {
-        adb::AdbDevice {
-            serial: serial.into(),
-            state: state.into(),
-            model: None,
-        }
-    }
-
-    #[test]
-    fn selects_only_a_single_authorized_device() {
-        assert_eq!(select_device(&[]).unwrap(), None);
-        assert_eq!(
-            select_device(&[dev("A", "unauthorized")]).unwrap(),
-            None,
-            "unauthorized devices are never chosen"
-        );
-        assert_eq!(
-            select_device(&[dev("A", "device"), dev("B", "offline")]).unwrap(),
-            Some("A".into())
-        );
-    }
-
-    #[test]
-    fn several_authorized_devices_is_an_error_not_a_guess() {
-        let err = select_device(&[dev("A", "device"), dev("B", "device")]).unwrap_err();
-        assert_eq!(err.exit_code(), 2);
-        assert!(err.to_string().contains("A, B"));
-    }
 }

@@ -14,7 +14,8 @@ use autolab_test::runner::{Clock, INTERRUPTED, RunConfig, SystemClock, run_test}
 use autolab_test::{Outcome, TestFile, TestResult};
 use clap::ValueEnum;
 
-use crate::session_backend::SessionBackend;
+use crate::daemon_ctl;
+use crate::session_backend::DaemonBackend;
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReportFormat {
@@ -164,7 +165,7 @@ pub fn run(opts: Options) -> Result<u8> {
     });
     let dir = artifacts_dir(opts.artifacts_dir, needs_shots)?;
 
-    let mut backend = SessionBackend;
+    let mut backend = DaemonBackend::new(daemon_ctl::connect()?);
     let head = backend.status()?; // no session or dead DHU: exit 3 before any test runs
     let cancel = Arc::new(AtomicBool::new(false));
     install_interrupt_handler(&cancel)?;

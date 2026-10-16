@@ -3,6 +3,12 @@
 # silent success for `focus video on|off`, `[I]: Has video focus: <bool>` for the query,
 # `[E]: ...` for errors, a bare `> ` prompt with no newline, exit on `quit` or stdin EOF.
 # Stream split matches the real DHU (verified): prompt and banner on stdout, [I]/[E]/log lines on stderr.
+# Record the argv when asked, so tests can check exactly what the DHU was launched with.
+[ -n "$FAKE_DHU_ARGS_FILE" ] && printf '%s\n' "$@" > "$FAKE_DHU_ARGS_FILE"
+# A `--config=` argument containing "slow" delays startup by 3 s (a slow handshake).
+for arg in "$@"; do
+  case "$arg" in --config=*slow*) sleep 3;; esac
+done
 # FAKE_DHU_MODE: fail-start | late-fail-start | hang-start | hang-on-focus-on | (default) normal
 case "$FAKE_DHU_MODE" in
   fail-start)

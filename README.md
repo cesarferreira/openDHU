@@ -16,7 +16,7 @@ Status and verified behaviour: [docs/feasibility.md](docs/feasibility.md).
 ```bash
 cargo install --path crates/autolab-cli
 autolab doctor                  # read-only environment check
-autolab start                   # launches the DHU over USB and keeps it under AutoLab's control
+autolab start                   # starts the AutoLab daemon if needed, then a DHU session over USB
                                 # add --reverse 10101 to re-apply an adb reverse tunnel (repeatable)
 autolab focus video off
 autolab focus video on
@@ -25,6 +25,10 @@ autolab test examples/video-focus.yaml   # YAML tests against the running sessio
 autolab status --json
 autolab stop
 ```
+
+The CLI talks to a local daemon over an HTTP API on `127.0.0.1`, and so can any other client; see
+[docs/api.md](docs/api.md) (`autolab daemon` runs one in the foreground). A bearer token in a 0700 directory guards
+it, and anyone who can read that token can run code as you through the API.
 
 `autolab focus video off` prints `Video focus off command accepted`. That means the DHU took the
 command. It does not mean the phone acknowledged it. The output shows the DHU's own readback separately,
@@ -41,8 +45,8 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
   `--reverse PORT` to `autolab start` to restore the ones you need; AutoLab also re-applies them if the phone drops
   them later in the session. Only `adb reverse` is supported.
 - USB transport only. Only one DHU can hold a phone at a time, so stop other DHUs first.
-- Video focus, screenshots and the YAML test runner are implemented. Night mode, driving restrictions, audio and
-  nav focus, and the HTTP daemon are not.
+- Video focus, screenshots, the YAML test runner and the HTTP API are implemented. Night mode, driving restrictions,
+  audio and nav focus are not; their API endpoints answer `501`.
 - A passing `focus.video` step means the command was accepted, not that the phone confirmed it. Ctrl+C during
   `autolab test` stops cleanly (focus restored, artifacts written, exit 130); a second Ctrl+C exits at once without
   cleanup (details in docs/testing.md).

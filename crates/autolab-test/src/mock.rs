@@ -71,6 +71,11 @@ impl MockBackend {
                 backend: "dhu".into(),
                 video_focus: Support::Supported,
                 screenshots: Support::Supported,
+                audio_focus: Support::Unverified,
+                nav_focus: Support::Unverified,
+                night_mode: Support::Unverified,
+                touch_input: Support::Unverified,
+                screen_recording: Support::Unsupported,
             },
             state: HeadUnitStatus {
                 backend: "dhu".into(),

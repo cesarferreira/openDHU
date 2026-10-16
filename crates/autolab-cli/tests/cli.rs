@@ -3,7 +3,6 @@
 
 mod common;
 
-use std::os::unix::net::UnixListener;
 use std::time::Duration;
 
 use common::*;
@@ -41,7 +40,7 @@ fn full_lifecycle_start_focus_status_stop() {
     assert_eq!(r["observed"], "unknown");
 
     let (sup, dhu) = (
-        st["supervisorPid"].as_u64().unwrap(),
+        st["daemonPid"].as_u64().unwrap(),
         st["dhuPid"].as_u64().unwrap(),
     );
     let stop = s.autolab(&["stop"]);
@@ -121,7 +120,7 @@ fn killed_dhu_ends_the_session_and_cleans_up() {
     assert_eq!(code(&s.start_fake()), 0);
     let st = s.status_json();
     let (sup, dhu) = (
-        st["supervisorPid"].as_u64().unwrap(),
+        st["daemonPid"].as_u64().unwrap(),
         st["dhuPid"].as_u64().unwrap(),
     );
     std::process::Command::new("kill")
@@ -130,11 +129,11 @@ fn killed_dhu_ends_the_session_and_cleans_up() {
         .unwrap();
     assert!(
         wait_until(Duration::from_secs(5), || !alive(sup)),
-        "supervisor must exit when the DHU dies"
+        "the daemon must exit when the DHU dies (it was started for this one session)"
     );
     assert!(
-        !s.dir.join("session.sock").exists(),
-        "socket must be removed"
+        !s.dir.join("daemon.json").exists(),
+        "daemon.json must be removed"
     );
     let o = s.autolab(&["focus", "video", "on"]);
     assert_eq!(
@@ -146,27 +145,33 @@ fn killed_dhu_ends_the_session_and_cleans_up() {
 }
 
 #[test]
-fn stale_socket_file_does_not_block_start() {
+fn stale_daemon_file_does_not_block_start() {
     let s = Sandbox::new();
     std::fs::create_dir_all(&s.dir).unwrap();
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let _l = UnixListener::bind(s.dir.join("session.sock")).unwrap(); // dropped: file remains, nobody listens
     }
-    let sock = s.dir.join("session.sock");
-    assert!(sock.exists());
-    // Other tests fork child processes in parallel. A child caught between fork and exec still
-    // holds a copy of the listening socket, so the socket can briefly stay live after the drop.
-    // Wait for the precondition (nobody listening) instead of assuming it.
-    assert!(
-        wait_until(Duration::from_secs(5), || {
-            std::os::unix::net::UnixStream::connect(&sock).is_err()
-        }),
-        "stale socket never became unreachable"
+    // What a crashed daemon leaves behind: a daemon.json pointing at a port nobody listens on, with
+    // the pid of a live process (this one). The pid must not be trusted.
+    let stale = serde_json::json!({
+        "port": 1, "pid": std::process::id(), "token": "old", "version": "0.0.0"
+    });
+    std::fs::write(s.dir.join("daemon.json"), stale.to_string()).unwrap();
+    assert_eq!(
+        code(&s.autolab(&["status"])),
+        3,
+        "a stale file is not a running session"
     );
+    std::fs::write(s.dir.join("daemon.json"), stale.to_string()).unwrap();
     let o = s.start_fake();
     assert_eq!(code(&o), 0, "{}", text(&o));
+    let now: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.dir.join("daemon.json")).unwrap()).unwrap();
+    assert_ne!(
+        now["token"], "old",
+        "a new daemon must replace the stale file"
+    );
 }
 
 #[test]
@@ -269,7 +274,7 @@ fn screenshot_the_dhu_accepts_but_never_writes_is_a_timeout() {
     let o = s.autolab(&["screenshot", &file]);
     assert_eq!(code(&o), 6, "{}", text(&o));
     assert!(text(&o).contains("did not appear"), "{}", text(&o));
-    // Regression: the supervisor once sent the already-prefixed Display text, so the client
+    // Regression: the daemon once sent the already-prefixed Display text, so the client
     // printed "timed out: timed out: ...".
     assert_eq!(
         text(&o).matches("timed out").count(),

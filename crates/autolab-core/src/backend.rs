@@ -19,6 +19,14 @@ pub struct Capabilities {
     pub backend: String,
     pub video_focus: Support,
     pub screenshots: Support,
+    // The rest are not implemented in AutoLab yet. `Unverified` means the backend may offer it
+    // (the DHU console has the command) but AutoLab has not exercised it; `Unsupported` means the
+    // backend has no way to do it.
+    pub audio_focus: Support,
+    pub nav_focus: Support,
+    pub night_mode: Support,
+    pub touch_input: Support,
+    pub screen_recording: Support,
 }
 
 /// The only way callers (CLI, future test runner, daemon) reach a head unit.

@@ -1,39 +1,52 @@
-//! `HeadUnitBackend` over the session socket. This is how the test runner (which knows only the
-//! trait) reaches the DHU supervisor, so it never talks to the DHU directly.
+//! `HeadUnitBackend` over the daemon's HTTP API. This is how the test runner (which knows only the
+//! trait) reaches the session, so it never talks to the DHU directly.
 
 use std::path::Path;
 
 use autolab_core::{
     Capabilities, Error, HeadUnitBackend, HeadUnitStatus, OperationResult, Result, ScreenshotResult,
 };
+use autolab_daemon::Client;
+use autolab_daemon::api::Phase;
 
-use crate::session::{self, Request, Response};
+pub struct DaemonBackend {
+    client: Client,
+}
 
-pub struct SessionBackend;
+impl DaemonBackend {
+    pub fn new(client: Client) -> Self {
+        Self { client }
+    }
+}
 
-impl HeadUnitBackend for SessionBackend {
+impl HeadUnitBackend for DaemonBackend {
     fn capabilities(&mut self) -> Result<Capabilities> {
-        match session::request(&Request::Capabilities)? {
-            Response::Capabilities(c) => Ok(c),
-            other => Err(Error::Other(format!(
-                "unexpected reply to capabilities: {other:?}"
-            ))),
-        }
+        self.client.capabilities()
     }
 
     fn status(&mut self) -> Result<HeadUnitStatus> {
-        Ok(session::status()?.head_unit)
+        let session = self.client.status()?.session.ok_or_else(|| {
+            Error::BackendUnavailable(
+                "no AutoLab session is running; start one with `autolab start`".into(),
+            )
+        })?;
+        match session.details {
+            Some(d) if session.phase == Phase::Running => Ok(d.head_unit),
+            _ => Err(Error::BackendUnavailable(
+                format!("the session is {:?}", session.phase).to_lowercase(),
+            )),
+        }
     }
 
     fn set_video_focus(&mut self, enabled: bool) -> Result<OperationResult> {
-        session::set_video_focus(enabled)
+        Ok(self.client.focus_video(enabled)?.result)
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<ScreenshotResult> {
-        session::screenshot(path)
+        Ok(self.client.screenshot(path)?.result)
     }
 
     fn stop(&mut self) -> Result<()> {
-        session::stop()
+        self.client.stop()
     }
 }

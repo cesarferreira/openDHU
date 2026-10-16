@@ -8,8 +8,6 @@ use std::time::Duration;
 use autolab_dhu::{adb, console, discovery};
 use serde::Serialize;
 
-use crate::session;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -132,15 +130,19 @@ pub fn run(explicit_dhu: Option<PathBuf>) -> Vec<Check> {
         }
     }
 
-    let session = session::status().ok();
+    let session = autolab_daemon::Client::connect()
+        .and_then(|c| c.status())
+        .ok()
+        .and_then(|st| st.session)
+        .and_then(|s| s.details);
     match &session {
-        Some(s) => out.push(check(
+        Some(d) => out.push(check(
             Level::Info,
             "session",
             format!(
                 "running (dhu pid {}, serial {})",
-                s.dhu_pid,
-                s.head_unit.serial.as_deref().unwrap_or("unknown")
+                d.dhu_pid,
+                d.head_unit.serial.as_deref().unwrap_or("unknown")
             ),
         )),
         None => out.push(check(Level::Info, "session", "none running")),
@@ -150,7 +152,7 @@ pub fn run(explicit_dhu: Option<PathBuf>) -> Vec<Check> {
         .output()
         .map(|o| parse_pids(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or_default();
-    let foreign = foreign_dhu_pids(&running, session.as_ref().map(|s| s.dhu_pid));
+    let foreign = foreign_dhu_pids(&running, session.as_ref().map(|d| d.dhu_pid));
     if !foreign.is_empty() {
         let pids: Vec<String> = foreign.iter().map(u32::to_string).collect();
         out.push(check(

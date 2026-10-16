@@ -179,8 +179,8 @@ All **observed** on a live USB session:
 accessory link. `autolab doctor` reports a `desktop-head-unit` that AutoLab did not start, because that is
 the likeliest cause of a failed `autolab start`.
 
-Because a closed stdin ends the DHU, a supervisor that owns the pipe cannot leave an orphan behind, even if
-the supervisor is killed. **Not tested:** physically unplugging the phone while a session is active. The
+Because a closed stdin ends the DHU, the daemon that owns the pipe cannot leave an orphan behind, even if
+the daemon is killed. **Not tested:** physically unplugging the phone while a session is active. The
 exit status 0 on every path means the exit code cannot tell a crash from a clean exit.
 
 ## 7. The "existing session" constraint
@@ -193,10 +193,11 @@ A DHU has exactly one command channel: its own stdin. AutoLab cannot write to an
 The only way in would be pushing keystrokes into the user's terminal, which is fragile, depends on the
 terminal, and is global desktop-style input injection that the PRD forbids.
 
-**Consequence.** "Existing session" means a session AutoLab started. `autolab start` launches a detached
-supervisor that owns the DHU's pipes and serves requests over a user-only Unix socket
-(`$TMPDIR/autolab-$USER/session.sock`, directory mode 0700). `autolab focus video on|off`, `status` and
-`stop` talk to it. The supervisor is the seed of the Milestone 2 daemon.
+**Consequence.** "Existing session" means a session AutoLab started. `autolab start` launches (if none is
+running) the AutoLab daemon, which owns the DHU's pipes and serves the loopback HTTP API described in
+[api.md](api.md). `autolab focus video on|off`, `status`, `stop` and every other command are clients of that
+API. (The first version used a Unix socket owned by a supervisor process; the PRD requires the CLI and GUI to
+share one API, so that socket is gone.)
 
 Options for teams that already launch the DHU from their own script (not implemented, not tested):
 
@@ -217,7 +218,7 @@ Options for teams that already launch the DHU from their own script (not impleme
   ports asked for are added, and nothing is ever removed.
 - **Verified on the phone:** after `autolab start --reverse 10101`, `adb reverse --list` independently showed
   `UsbFfs tcp:10101 tcp:10101`.
-- **Handled mid-session too:** a supervisor thread checks `adb reverse --list` every 2 s and re-applies only the
+- **Handled mid-session too:** a daemon thread checks `adb reverse --list` every 2 s and re-applies only the
   requested tunnels that are missing. It acts only when adb answers, so a phone that is mid-re-enumeration is left
   alone and never hammered. `status` shows how many times each tunnel was re-applied.
 - **Verified on the phone:** with `--reverse 47123`, removing that tunnel with `adb reverse --remove` was repaired
@@ -285,8 +286,11 @@ see [testing.md](testing.md). Verified on the phone with `examples/video-focus.y
 `screenshots.yaml`, and the generated JUnit passes `xmllint`. Ctrl+C and SIGTERM stop a run cleanly (focus restored, artifacts
 written, exit 130); this was verified with real signals against the fake DHU and on the phone.
 
-Not implemented: HTTP daemon, event stream, night mode, driving restrictions, audio and
-nav focus, TOML config file, `--adb` transport, device selection beyond `--serial`.
+The daemon serves a versioned loopback HTTP API with an event stream ([api.md](api.md)), checked with real
+HTTP clients (including plain `curl` against the real phone). The CLI is a client of it.
+
+Not implemented: night mode, driving restrictions, audio and nav focus (their endpoints answer `501`), TOML
+config file, `--adb` transport, device selection beyond `--serial`.
 
 ## 11. Tests and how to run them
 
