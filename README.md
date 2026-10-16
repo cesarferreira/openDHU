@@ -73,6 +73,28 @@ autolab stop
 
 Every command takes `--json` for machine-readable output.
 
+### Custom native head-unit certificate
+
+The native backend can use your own PEM client certificate and matching private key. A recommended location is:
+
+```text
+~/.config/autolab/credentials/head-unit-cert.pem
+~/.config/autolab/credentials/head-unit-key.pem
+```
+
+Keep the private key outside the repository and restrict its permissions:
+
+```bash
+chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
+export AUTOLAB_NATIVE_CERT="$HOME/.config/autolab/credentials/head-unit-cert.pem"
+export AUTOLAB_NATIVE_KEY="$HOME/.config/autolab/credentials/head-unit-key.pem"
+autolab start --backend native
+```
+
+Set both variables or neither. If neither is set, AutoLab uses the certificate shipped by the vendored protocol
+crate. The variables must be exported before AutoLab starts its daemon; stop and restart an existing daemon so it
+inherits them. See [Native backend](docs/native-backend.md) for details.
+
 ## Commands
 
 | Command | What it does |

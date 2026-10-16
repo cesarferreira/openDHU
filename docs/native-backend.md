@@ -89,6 +89,18 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 - `AUTOLAB_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
 - `AUTOLAB_NATIVE_IDENTITY=dhu` makes it introduce itself to the phone as Google's "Desktop Head Unit" instead of
   "AutoLab". It made no difference to which apps the launcher lists, but it is a quick way to rule identity out.
+- `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY` point at your own PEM client certificate and matching private key.
+  Set both, or neither. When neither is set, the head unit uses the certificate shipped by the vendored protocol
+  crate. Keep the key outside this repository (`chmod 600`). The variables must be present in the environment of
+  the daemon that starts the head unit. Recommended paths and setup:
+
+  ```bash
+  mkdir -p ~/.config/autolab/credentials
+  chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
+  export AUTOLAB_NATIVE_CERT="$HOME/.config/autolab/credentials/head-unit-cert.pem"
+  export AUTOLAB_NATIVE_KEY="$HOME/.config/autolab/credentials/head-unit-key.pem"
+  autolab start --backend native
+  ```
 
 ## Limits
 

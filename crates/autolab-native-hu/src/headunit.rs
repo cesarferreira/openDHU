@@ -570,6 +570,48 @@ impl std::ops::Deref for Hu {
     }
 }
 
+const CERT_ENV: &str = "AUTOLAB_NATIVE_CERT";
+const KEY_ENV: &str = "AUTOLAB_NATIVE_KEY";
+
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The head unit's own TLS credential, when both paths are set. Neither path means the vendored
+/// certificate. One path without the other is a configuration error.
+fn present(path: Option<&str>) -> Option<&str> {
+    path.map(str::trim).filter(|path| !path.is_empty())
+}
+
+fn load_custom_certificate(
+    cert_path: Option<&str>,
+    key_path: Option<&str>,
+) -> Result<Option<(Vec<u8>, Vec<u8>)>, String> {
+    match (present(cert_path), present(key_path)) {
+        (None, None) => Ok(None),
+        (Some(cert), Some(key)) => Ok(Some((read_pem(CERT_ENV, cert)?, read_pem(KEY_ENV, key)?))),
+        (Some(_), None) => Err(format!(
+            "{CERT_ENV} is set but {KEY_ENV} is not; set both paths, or neither"
+        )),
+        (None, Some(_)) => Err(format!(
+            "{KEY_ENV} is set but {CERT_ENV} is not; set both paths, or neither"
+        )),
+    }
+}
+
+fn read_pem(name: &str, path: &str) -> Result<Vec<u8>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {name} ({path}): {e}"))?;
+    if !String::from_utf8_lossy(&bytes).contains("-----BEGIN ") {
+        return Err(format!(
+            "{name} ({path}) is not a PEM file; expected a -----BEGIN line"
+        ));
+    }
+    Ok(bytes)
+}
+
 pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String> {
     // How this head unit introduces itself to the phone. Android Auto may treat head units differently
     // (for example which apps it lists), so AUTOLAB_NATIVE_IDENTITY=dhu presents it as Google's DHU.
@@ -606,7 +648,10 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
     };
     let config = AndroidAutoConfiguration {
         unit,
-        custom_certificate: None,
+        custom_certificate: load_custom_certificate(
+            env_value(CERT_ENV).as_deref(),
+            env_value(KEY_ENV).as_deref(),
+        )?,
     };
     let mut tasks = tokio::task::JoinSet::new();
     Box::new(Hu(hu)).run(config, &mut tasks, setup).await
@@ -745,6 +790,57 @@ impl AndroidAutoMainTrait for Hu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neither_certificate_path_keeps_the_built_in_certificate() {
+        assert_eq!(load_custom_certificate(None, None).unwrap(), None);
+        assert_eq!(load_custom_certificate(Some(""), Some("  ")).unwrap(), None);
+    }
+
+    #[test]
+    fn one_certificate_path_without_the_other_is_refused() {
+        let missing_key = load_custom_certificate(Some("cert.pem"), None).unwrap_err();
+        assert!(missing_key.contains(KEY_ENV), "{missing_key}");
+        let missing_cert = load_custom_certificate(None, Some("key.pem")).unwrap_err();
+        assert!(missing_cert.contains(CERT_ENV), "{missing_cert}");
+    }
+
+    #[test]
+    fn both_pem_files_are_passed_through_and_a_bad_file_is_named() {
+        let dir = std::env::temp_dir().join(format!(
+            "autolab-cert-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cert = dir.join("head-unit-cert.pem");
+        let key = dir.join("head-unit-key.pem");
+        std::fs::write(&cert, b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+            .unwrap();
+        std::fs::write(&key, b"not a pem file").unwrap();
+        let bad = load_custom_certificate(cert.to_str(), key.to_str()).unwrap_err();
+        assert!(bad.contains(KEY_ENV) && bad.contains("PEM"), "{bad}");
+
+        std::fs::write(&key, b"-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n")
+            .unwrap();
+        let (loaded_cert, loaded_key) =
+            load_custom_certificate(cert.to_str(), key.to_str())
+                .unwrap()
+                .expect("both files are present");
+        assert!(loaded_cert.starts_with(b"-----BEGIN CERTIFICATE-----"));
+        assert!(loaded_key.starts_with(b"-----BEGIN PRIVATE KEY-----"));
+
+        let missing = load_custom_certificate(
+            Some(dir.join("missing-cert.pem").to_str().unwrap()),
+            key.to_str(),
+        )
+        .unwrap_err();
+        assert!(missing.contains(CERT_ENV), "{missing}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn lerp_runs_from_start_to_end_in_either_direction() {
