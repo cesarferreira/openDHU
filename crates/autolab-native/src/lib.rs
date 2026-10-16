@@ -28,8 +28,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, OperationResult, Result,
-    ScreenshotResult, SessionState, Support, VideoFocusStatus,
+    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult,
+    Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
 };
 use protocol::{Command as Cmd, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, Request};
 
@@ -41,6 +41,8 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 const FOCUS_TIMEOUT: Duration = Duration::from_secs(8);
 /// Decoding a screenshot runs `ffmpeg` in the child.
 const SHOT_TIMEOUT: Duration = Duration::from_secs(20);
+/// A tap is quick; the child also watches the screen for half a second afterwards.
+const TOUCH_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
 /// How to launch the head unit. The phone is found by the child itself over USB.
@@ -276,7 +278,7 @@ fn unexpected(what: &str) -> Error {
 
 impl HeadUnitBackend for NativeBackend {
     fn capabilities(&mut self) -> Result<Capabilities> {
-        // Video focus and screenshots were exercised on a real phone; the rest is not implemented.
+        // Video focus, screenshots and touch were exercised on a real phone; the rest is not implemented.
         Ok(Capabilities {
             backend: "native".into(),
             video_focus: Support::Supported,
@@ -284,7 +286,7 @@ impl HeadUnitBackend for NativeBackend {
             audio_focus: Support::Unverified,
             nav_focus: Support::Unverified,
             night_mode: Support::Unverified,
-            touch_input: Support::Unverified,
+            touch_input: Support::Supported,
             screen_recording: Support::Unsupported,
         })
     }
@@ -323,6 +325,32 @@ impl HeadUnitBackend for NativeBackend {
         )? {
             Reply::Screenshot(r) => Ok(r),
             _ => Err(unexpected("screenshot")),
+        }
+    }
+
+    fn tap(&mut self, x: u32, y: u32) -> Result<InputResult> {
+        match self.send(Cmd::Tap { x, y }, TOUCH_TIMEOUT)? {
+            Reply::Input(r) => Ok(r),
+            _ => Err(unexpected("tap")),
+        }
+    }
+
+    fn swipe(
+        &mut self,
+        from: (u32, u32),
+        to: (u32, u32),
+        duration: Duration,
+    ) -> Result<InputResult> {
+        let command = Cmd::Swipe {
+            x1: from.0,
+            y1: from.1,
+            x2: to.0,
+            y2: to.1,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+        };
+        match self.send(command, duration + TOUCH_TIMEOUT)? {
+            Reply::Input(r) => Ok(r),
+            _ => Err(unexpected("swipe")),
         }
     }
 

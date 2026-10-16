@@ -27,6 +27,13 @@ steps:
     value: on
   - action: screenshot
     path: screenshots/restored.png
+  - action: tap            # native backend only; needs `requirements: [touchInput]`
+    x: 764                 # pixels of a screenshot (800x480), origin top left
+    y: 348
+  - action: swipe
+    from: [300, 200]
+    to: [100, 200]
+    duration: 400ms        # optional, 50ms to 10s, default 300ms
 ```
 
 The first example above is the PRD's, and it parses verbatim. Unknown keys, unknown actions, unknown
@@ -125,4 +132,7 @@ to the DHU console, whose handling of quoting is unverified.
 
 ## Not implemented
 
-Retry policies, image assertions, tap/swipe/key steps, event assertions and a Kotlin DSL.
+Retry policies, image assertions, key steps, event assertions and a Kotlin DSL.
+
+A `tap` or `swipe` step passing means the touch was **sent**. The phone does not acknowledge touch, and the step
+says so. To check that something happened, follow it with a `screenshot` and compare the pictures outside the test.

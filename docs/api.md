@@ -92,7 +92,9 @@ Request bodies are JSON and reject unknown fields. Keys are camelCase.
 | `POST /v1/screenshot` | `{"path": "/abs/file.png"}` |
 | `GET /v1/events` | server-sent events |
 | `POST /v1/daemon/shutdown` | stop the session and exit the daemon |
-| `POST /v1/focus/audio`, `/v1/focus/navigation`, `/v1/display/configure`, `/v1/input/tap`, `/v1/input/swipe` | **not implemented**: always `501 unsupported` |
+| `POST /v1/input/tap` | `{"x": 400, "y": 240}`: touch a pixel of the screenshot (800×480, origin top left) |
+| `POST /v1/input/swipe` | `{"x1":..,"y1":..,"x2":..,"y2":..,"durationMs": 300}`: drag; 50 to 10000 ms, default 300 |
+| `POST /v1/focus/audio`, `/v1/focus/navigation`, `/v1/display/configure` | **not implemented**: always `501 unsupported` |
 
 ### `GET /v1/status`
 
@@ -180,12 +182,25 @@ DHU refuses screenshots while video focus is off, which comes back as an error c
 ```json
 { "backend": "dhu", "videoFocus": "supported", "screenshots": "supported",
   "audioFocus": "unverified", "navFocus": "unverified", "nightMode": "unverified",
-  "touchInput": "unverified", "screenRecording": "unsupported" }
+  "touchInput": "unverified", "screenRecording": "unsupported" }  // DHU; native reports touchInput "supported"
 ```
 
 `supported` was verified on real hardware. `unverified` means the backend may offer it (the DHU console has the
 command) but AutoLab has not exercised it, so the matching endpoint returns `501`. `unsupported` means the
 backend has no way to do it. Requires a running session, because it asks the backend.
+
+### Touch: `POST /v1/input/tap` and `/v1/input/swipe`
+
+```json
+{ "operationId": "op-4", "backend": "native", "status": "accepted",
+  "evidence": ["sent tap at (764, 348)", "25 video frames arrived during and after it (context only: ...)"] }
+```
+
+Only the native backend can touch; the DHU answers `501 unsupported`. Coordinates are pixels of a screenshot, and a
+point outside 800×480 is `400`. Touch is refused (`500`-class `error`, CLI exit code 1) while the phone is not
+projecting. The best status is `accepted`: **the phone never acknowledges touch**, so whether anything on the
+screen reacted is for the caller to check, for example by comparing screenshots. The frame count in `evidence` is
+context, not proof. Events: `input.requested`, then `input.accepted` or `input.failed` (`kind` is `tap` or `swipe`).
 
 ## Events
 
@@ -210,6 +225,7 @@ keepalive comment is sent every 15 s. A subscriber that falls too far behind get
 | `focus.video.requested` | **AutoLab issued the command** (`operationId`, `enabled`) |
 | `focus.video.accepted` / `focus.video.failed` | **what the backend answered** (`requested`, `backendReported`, `observed`, `evidence`). `accepted` includes a native-backend change the phone confirmed; a `timed_out` one is `failed` |
 | `screenshot.requested` / `screenshot.saved` / `screenshot.failed` | same split for screenshots |
+| `input.requested` / `input.accepted` / `input.failed` | touch, same split (`operationId`, `kind`, `at`, `evidence`) |
 | `tunnel.reapplied` | a dropped `adb reverse` tunnel was put back (`port`) |
 
 `requested` events are commands AutoLab issued; `accepted` and `failed` events report the backend's answer. No
@@ -237,5 +253,5 @@ sees the final `session.stopped`.
 ## Not in this API
 
 HTTP is loopback only, with no TLS and no remote access. There is no event replay, no pagination, and no
-per-client sessions. Audio and navigation focus, driving restrictions, night mode, touch input, display
+per-client sessions. Audio and navigation focus, driving restrictions, night mode, multi-touch and key input, display
 configuration and screen recording are not implemented.

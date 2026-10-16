@@ -6,15 +6,39 @@
 
 use std::path::PathBuf;
 
-use autolab_core::{FocusState, OperationResult, ScreenshotResult, VideoFocusStatus};
+use autolab_core::{FocusState, InputResult, OperationResult, ScreenshotResult, VideoFocusStatus};
 use serde::{Deserialize, Serialize};
+
+/// The projected screen, in pixels. The head unit declares this as its touch screen and asks the
+/// phone for the matching video size, so touches and screenshots share one coordinate system.
+pub const SCREEN_WIDTH: u16 = 800;
+pub const SCREEN_HEIGHT: u16 = 480;
+/// A swipe is dragged in steps of about this many milliseconds.
+pub const SWIPE_STEP_MS: u64 = 16;
+pub const SWIPE_MIN_MS: u64 = 50;
+pub const SWIPE_MAX_MS: u64 = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
     Status,
-    Focus { enabled: bool },
-    Screenshot { path: PathBuf },
+    Focus {
+        enabled: bool,
+    },
+    Screenshot {
+        path: PathBuf,
+    },
+    Tap {
+        x: u32,
+        y: u32,
+    },
+    Swipe {
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration_ms: u64,
+    },
     Quit,
 }
 
@@ -55,6 +79,7 @@ pub enum Reply {
     Status(StatusReport),
     Focus(OperationResult),
     Screenshot(ScreenshotResult),
+    Input(InputResult),
     Done,
 }
 
@@ -116,6 +141,14 @@ mod tests {
             Command::Focus { enabled: false },
             Command::Screenshot {
                 path: "/tmp/a b.png".into(),
+            },
+            Command::Tap { x: 1, y: 2 },
+            Command::Swipe {
+                x1: 1,
+                y1: 2,
+                x2: 3,
+                y2: 4,
+                duration_ms: 300,
             },
             Command::Quit,
         ] {

@@ -15,8 +15,8 @@ use axum::{Json, Router, middleware};
 use serde_json::json;
 
 use crate::api::{
-    DaemonInfo, DevicesResponse, FocusRequest, OperationResponse, ScreenshotRequest,
-    ScreenshotResponse, StartRequest, StatusResponse, StoppedResponse,
+    DaemonInfo, DevicesResponse, FocusRequest, InputResponse, OperationResponse, ScreenshotRequest,
+    ScreenshotResponse, StartRequest, StatusResponse, StoppedResponse, SwipeRequest, TapRequest,
 };
 use crate::auth::{self, Guard};
 use crate::error::{ApiError, AppJson, method_not_allowed, not_found};
@@ -80,6 +80,27 @@ async fn screenshot(
     Ok(Json(d.screenshot(req.path).await?))
 }
 
+async fn input_tap(
+    State(d): State<Daemon>,
+    AppJson(req): AppJson<TapRequest>,
+) -> ApiResult<InputResponse> {
+    Ok(Json(d.tap(req.x, req.y).await?))
+}
+
+async fn input_swipe(
+    State(d): State<Daemon>,
+    AppJson(req): AppJson<SwipeRequest>,
+) -> ApiResult<InputResponse> {
+    Ok(Json(
+        d.swipe(
+            (req.x1, req.y1),
+            (req.x2, req.y2),
+            std::time::Duration::from_millis(req.duration_ms),
+        )
+        .await?,
+    ))
+}
+
 async fn daemon_shutdown(State(d): State<Daemon>) -> Json<serde_json::Value> {
     d.shutdown().await;
     Json(json!({ "shuttingDown": true }))
@@ -99,12 +120,6 @@ async fn focus_navigation() -> ApiError {
 }
 async fn display_configure() -> ApiError {
     unimplemented_feature("display configuration")
-}
-async fn input_tap() -> ApiError {
-    unimplemented_feature("tap input")
-}
-async fn input_swipe() -> ApiError {
-    unimplemented_feature("swipe input")
 }
 
 fn sse_event(e: &crate::api::Event) -> SseEvent {

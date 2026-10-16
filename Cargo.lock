@@ -241,6 +241,7 @@ version = "0.1.0"
 dependencies = [
  "autolab-core",
  "autolab-daemon",
+ "autolab-native",
  "eframe",
  "image",
  "serde_json",

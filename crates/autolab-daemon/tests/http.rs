@@ -328,8 +328,6 @@ fn endpoints_that_exist_in_the_prd_but_not_here_say_so() {
         "/v1/focus/audio",
         "/v1/focus/navigation",
         "/v1/display/configure",
-        "/v1/input/tap",
-        "/v1/input/swipe",
     ] {
         let (st, b) = raw(d.port(), "POST", path, &h, Some("{}"));
         assert_eq!((st, error_of(&b)), (501, ("unsupported", 5)), "{path}: {b}");
@@ -886,4 +884,108 @@ fn the_typed_client_stream_delivers_the_same_events_in_order() {
     assert!(pos("session.started") < pos("focus.video.accepted"));
     assert!(pos("focus.video.accepted") < pos("session.stopped"));
     assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
+}
+
+#[test]
+fn touch_endpoints_validate_bodies_and_need_a_session_and_a_backend_that_can_touch() {
+    let d = TestDaemon::start(false);
+    let h = authed(&d);
+    // Bad bodies are 400 before anything else is considered.
+    for (path, body) in [
+        ("/v1/input/tap", "{}"),
+        ("/v1/input/tap", r#"{"x":1,"y":2,"z":3}"#),
+        ("/v1/input/tap", r#"{"x":-1,"y":2}"#),
+        ("/v1/input/swipe", r#"{"x1":1,"y1":2}"#),
+    ] {
+        let (st, b) = raw(d.port(), "POST", path, &h, Some(body));
+        assert_eq!(
+            (st, error_of(&b).0),
+            (400, "invalid_args"),
+            "{path} {body}: {b}"
+        );
+    }
+    // No session.
+    let (st, b) = raw(
+        d.port(),
+        "POST",
+        "/v1/input/tap",
+        &h,
+        Some(r#"{"x":1,"y":2}"#),
+    );
+    assert_eq!((st, error_of(&b).0), (503, "backend_unavailable"), "{b}");
+    // The DHU backend cannot touch: unsupported, with the DHU left running.
+    d.client.start(&d.dhu()).unwrap();
+    let (st, b) = raw(
+        d.port(),
+        "POST",
+        "/v1/input/tap",
+        &h,
+        Some(r#"{"x":1,"y":2}"#),
+    );
+    assert_eq!((st, error_of(&b)), (501, ("unsupported", 5)), "{b}");
+    assert_eq!(
+        d.client.status().unwrap().session.unwrap().phase,
+        Phase::Running
+    );
+    d.client.stop().unwrap();
+}
+
+#[test]
+fn touch_on_the_native_backend_emits_input_events_and_stays_out_of_the_focus_events() {
+    let fake = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../autolab-native/tests/fixtures/fake-native-hu.sh"
+    );
+    // SAFETY: no other test in this file reads this variable.
+    unsafe { std::env::set_var("AUTOLAB_NATIVE_HU", fake) };
+    let d = TestDaemon::start(false);
+    let mut stream = d.client.events().unwrap();
+    assert_eq!(stream.next().unwrap().unwrap().event, "stream.opened");
+    d.client
+        .start(&StartRequest {
+            backend: autolab_daemon::api::BackendKind::Native,
+            serial: Some("FAKE0001".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let tap = d.client.tap(10, 20).unwrap();
+    assert_eq!(tap.result.status, autolab_core::OpStatus::Accepted);
+    let swipe = d
+        .client
+        .swipe((1, 2), (3, 4), Duration::from_millis(200))
+        .unwrap();
+    assert_ne!(tap.operation_id, swipe.operation_id);
+    d.client.focus_video(false).unwrap();
+    let refused = d.client.tap(1, 1).unwrap_err();
+    assert!(
+        refused.to_string().contains("nothing to touch"),
+        "{refused}"
+    );
+    d.client.stop().unwrap();
+
+    let mut kinds = Vec::new();
+    for m in stream.by_ref() {
+        let m = m.unwrap();
+        kinds.push(m.event.clone());
+        if m.event == "session.stopped" {
+            break;
+        }
+    }
+    let input: Vec<&str> = kinds
+        .iter()
+        .filter(|k| k.starts_with("input."))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        input,
+        [
+            "input.requested",
+            "input.accepted",
+            "input.requested",
+            "input.accepted",
+            "input.requested",
+            "input.failed"
+        ],
+        "{kinds:?}"
+    );
 }

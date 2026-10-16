@@ -7,12 +7,13 @@ use autolab_daemon::api::{Phase, SessionStatus, TunnelState};
 use eframe::egui::{self, Color32, RichText};
 
 use crate::model::{Conn, State};
-use crate::worker::{self, Cmd};
+use crate::worker::Cmd;
 
 /// What the user typed. Kept apart from `State` because only the window edits it.
 pub struct Form {
     pub serial: String,
     pub reverse: String,
+    pub native: bool,
     pub headless: bool,
     pub shot_path: String,
 }
@@ -26,6 +27,7 @@ impl Form {
         Self {
             serial: String::new(),
             reverse: String::new(),
+            native: false,
             headless: false,
             shot_path: format!("{}/autolab-screenshot.png", dir.trim_end_matches('/')),
         }
@@ -156,7 +158,19 @@ pub fn draw(
                 start_card(ui, form, controls.can_start, tx, ctx, state);
             }
             focus_card(ui, session.as_ref(), controls.can_focus, tx, ctx, state);
-            screenshot_card(ui, form, controls.can_focus, tx, ctx, state);
+            let native = session
+                .as_ref()
+                .and_then(|s| s.details.as_ref())
+                .is_some_and(|d| d.head_unit.backend == "native");
+            screenshot_card(
+                ui,
+                form,
+                controls.can_focus,
+                native && controls.can_focus,
+                tx,
+                ctx,
+                state,
+            );
         });
     });
 }
@@ -169,7 +183,15 @@ fn dispatch(
     state: &mut State,
 ) {
     state.begin_command(what);
-    worker::run(cmd, ctx.clone(), tx.clone());
+    // Tests only record what the window would send. They must never reach a real daemon: a click
+    // test could otherwise touch a phone that happens to be running a session.
+    #[cfg(test)]
+    {
+        let _ = (tx, ctx);
+        tests::SENT.with(|s| s.borrow_mut().push(cmd));
+    }
+    #[cfg(not(test))]
+    crate::worker::run(cmd, ctx.clone(), tx.clone());
 }
 
 fn session_card(
@@ -265,7 +287,15 @@ fn start_card(
             ui.label("Reverse ports");
             ui.add(egui::TextEdit::singleline(&mut form.reverse).hint_text("e.g. 10101, 8080"));
         });
-        ui.checkbox(&mut form.headless, "Run the DHU without its window");
+        ui.horizontal(|ui| {
+            ui.label("Head unit");
+            ui.selectable_value(&mut form.native, false, "Google DHU");
+            ui.selectable_value(&mut form.native, true, "AutoLab native");
+        });
+        ui.add_enabled(
+            !form.native,
+            egui::Checkbox::new(&mut form.headless, "Run the DHU without its window"),
+        );
         ui.add_space(4.0);
         if ui
             .add_enabled(can_start, egui::Button::new("Start session"))
@@ -276,9 +306,10 @@ fn start_card(
                     let serial = Some(form.serial.trim().to_string()).filter(|s| !s.is_empty());
                     dispatch(
                         Cmd::Start {
+                            native: form.native,
                             serial,
                             reverse,
-                            headless: form.headless,
+                            headless: form.headless && !form.native,
                         },
                         "Starting the session (about 5 s)",
                         tx,
@@ -353,10 +384,23 @@ fn focus_card(
     });
 }
 
+/// The screenshot pixel under a click. `offset` is from the picture's top left and `shown` is the
+/// size it is drawn at, so scaling is undone and the result is clamped to the 800x480 touch screen.
+pub fn to_pixel(offset: egui::Vec2, shown: egui::Vec2) -> (u32, u32) {
+    let (w, h) = (
+        f32::from(autolab_native::protocol::SCREEN_WIDTH),
+        f32::from(autolab_native::protocol::SCREEN_HEIGHT),
+    );
+    let x = (offset.x / shown.x.max(1.0) * w).clamp(0.0, w - 1.0);
+    let y = (offset.y / shown.y.max(1.0) * h).clamp(0.0, h - 1.0);
+    (x as u32, y as u32)
+}
+
 fn screenshot_card(
     ui: &mut egui::Ui,
     form: &mut Form,
     can_shoot: bool,
+    can_tap: bool,
     tx: &mpsc::Sender<crate::model::Update>,
     ctx: &egui::Context,
     state: &mut State,
@@ -391,10 +435,32 @@ fn screenshot_card(
             );
             let width = ui.available_width().min(shot.width as f32);
             let height = width * shot.height as f32 / shot.width.max(1) as f32;
-            ui.add(egui::Image::new((
-                shot.texture.id(),
-                egui::vec2(width, height),
-            )));
+            // Clicking the picture taps the phone at the same spot, but only on the native backend and
+            // only when no command is running. It is a real touch on the real phone.
+            let tappable = can_tap;
+            let image = egui::Image::new((shot.texture.id(), egui::vec2(width, height))).sense(
+                if tappable {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                },
+            );
+            let response = ui.add(image);
+            if can_tap {
+                ui.label(
+                    RichText::new(
+                        "Click the picture to tap the phone at that spot (native backend).",
+                    )
+                    .color(DIM),
+                );
+            }
+            if tappable
+                && response.clicked()
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                let (x, y) = to_pixel(pos - response.rect.min, response.rect.size());
+                dispatch(Cmd::Tap(x, y), "Sending a tap", tx, ctx, state);
+            }
         }
     });
 }
@@ -403,6 +469,11 @@ fn screenshot_card(
 mod tests {
     use super::*;
     use crate::model::{LogLine, Notice, Update};
+
+    thread_local! {
+        /// Every command the window would have sent on this test's thread.
+        pub static SENT: std::cell::RefCell<Vec<Cmd>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
     use autolab_daemon::api::{DaemonInfo, StatusResponse};
 
     fn frame(state: &mut State, form: &mut Form) {
@@ -457,6 +528,207 @@ mod tests {
             texture,
         });
         frame(&mut s, &mut Form::new());
+    }
+
+    /// A running native session with a screenshot on show, as the window sees it.
+    fn native_state_with_a_shot(ctx: &egui::Context) -> State {
+        use autolab_core::{FocusState, SessionState, VideoFocusStatus};
+        use autolab_daemon::api::{Phase, RunningDetails, SessionStatus};
+        let mut s = State::new();
+        s.conn = Conn::Connected(Box::new(StatusResponse {
+            daemon: DaemonInfo {
+                version: "0".into(),
+                pid: 1,
+                port: 1,
+                exit_when_idle: false,
+            },
+            session: Some(SessionStatus {
+                session_id: "s".into(),
+                phase: Phase::Running,
+                details: Some(RunningDetails {
+                    head_unit: autolab_core::HeadUnitStatus {
+                        backend: "native".into(),
+                        state: SessionState::Running,
+                        serial: None,
+                        backend_version: None,
+                        backend_build: None,
+                        video_focus: VideoFocusStatus {
+                            requested: FocusState::On,
+                            backend_reported: FocusState::On,
+                            observed: FocusState::On,
+                        },
+                    },
+                    transport: "usb".into(),
+                    daemon_pid: 1,
+                    dhu_pid: 2,
+                    tunnels: vec![],
+                }),
+            }),
+        }));
+        let texture = ctx.load_texture(
+            "t",
+            egui::ColorImage::filled([800, 480], Color32::RED),
+            egui::TextureOptions::LINEAR,
+        );
+        s.apply(Update::Screenshot {
+            path: "/x.png".into(),
+            width: 800,
+            height: 480,
+            texture,
+        });
+        s
+    }
+
+    #[test]
+    fn clicking_the_preview_of_a_native_session_sends_a_tap_and_a_dhu_session_does_not() {
+        for native in [true, false] {
+            let ctx = egui::Context::default();
+            let mut state = native_state_with_a_shot(&ctx);
+            if !native {
+                if let Conn::Connected(s) = &mut state.conn {
+                    s.session
+                        .as_mut()
+                        .unwrap()
+                        .details
+                        .as_mut()
+                        .unwrap()
+                        .head_unit
+                        .backend = "dhu".into();
+                }
+            }
+            let mut form = Form::new();
+            let (tx, _rx) = mpsc::channel();
+            let raw = |events: Vec<egui::Event>| egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    egui::vec2(1000.0, 1400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            // Two quiet frames so every widget has a size, then click a grid of points.
+            for _ in 0..2 {
+                let _ = ctx.run(raw(vec![]), |c| draw(c, &mut state, &mut form, &tx));
+            }
+            let mut tapped = false;
+            'grid: for y in (100..1300).step_by(40) {
+                for x in (20..600).step_by(40) {
+                    let at = egui::pos2(x as f32, y as f32);
+                    let button = |pressed| egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    for events in [
+                        vec![egui::Event::PointerMoved(at)],
+                        vec![button(true)],
+                        vec![button(false)],
+                        vec![],
+                    ] {
+                        let _ = ctx.run(raw(events), |c| draw(c, &mut state, &mut form, &tx));
+                    }
+                    let sent = SENT.with(|s| s.borrow_mut().drain(..).collect::<Vec<_>>());
+                    if let Some(Cmd::Tap(px, py)) =
+                        sent.into_iter().find(|c| matches!(c, Cmd::Tap(..)))
+                    {
+                        assert!(
+                            px < 800 && py < 480,
+                            "({px}, {py}) is on the phone's screen"
+                        );
+                        tapped = true;
+                        break 'grid;
+                    }
+                    // Ignore anything else a click may have started (focus, screenshot...).
+                    state.busy = 0;
+                    state.notice = None;
+                }
+            }
+            assert_eq!(tapped, native, "native={native}");
+        }
+    }
+
+    #[test]
+    fn choosing_native_and_pressing_start_sends_a_native_start() {
+        let ctx = egui::Context::default();
+        let mut state = State::new(); // no daemon: the Start card is shown
+        let mut form = Form::new();
+        let (tx, _rx) = mpsc::channel();
+        let raw = |events: Vec<egui::Event>| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1000.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let click = |at: egui::Pos2, state: &mut State, form: &mut Form| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for events in [
+                vec![egui::Event::PointerMoved(at)],
+                vec![button(true)],
+                vec![button(false)],
+                vec![],
+            ] {
+                let _ = ctx.run(raw(events), |c| draw(c, state, form, &tx));
+            }
+        };
+        for _ in 0..2 {
+            let _ = ctx.run(raw(vec![]), |c| draw(c, &mut state, &mut form, &tx));
+        }
+        let grid = || {
+            (60..700).step_by(8).flat_map(|y| {
+                (20..600)
+                    .step_by(12)
+                    .map(move |x| egui::pos2(x as f32, y as f32))
+            })
+        };
+        // Click around until the "AutoLab native" choice takes.
+        let mut chose = false;
+        for at in grid() {
+            click(at, &mut state, &mut form);
+            if form.native {
+                chose = true;
+                break;
+            }
+            form.headless = false; // a stray click may have ticked the checkbox
+        }
+        assert!(chose, "no click selected AutoLab native");
+        // Then click around until something sends a start.
+        SENT.with(|s| s.borrow_mut().clear());
+        let mut started = None;
+        for at in grid() {
+            click(at, &mut state, &mut form);
+            let sent = SENT.with(|s| s.borrow_mut().drain(..).collect::<Vec<_>>());
+            if let Some(Cmd::Start { native, .. }) =
+                sent.into_iter().find(|c| matches!(c, Cmd::Start { .. }))
+            {
+                started = Some(native);
+                break;
+            }
+            state.busy = 0;
+        }
+        assert_eq!(started, Some(true), "Start must carry the native choice");
+    }
+
+    #[test]
+    fn a_click_on_the_picture_maps_back_to_screen_pixels_and_stays_on_the_screen() {
+        // Drawn at 400x240, half size: the middle is (400, 240) on the real screen.
+        let shown = egui::vec2(400.0, 240.0);
+        assert_eq!(to_pixel(egui::vec2(200.0, 120.0), shown), (400, 240));
+        assert_eq!(to_pixel(egui::vec2(0.0, 0.0), shown), (0, 0));
+        assert_eq!(to_pixel(egui::vec2(400.0, 240.0), shown), (799, 479));
+        assert_eq!(to_pixel(egui::vec2(-5.0, 9999.0), shown), (0, 479));
+        // Full size: one to one.
+        assert_eq!(
+            to_pixel(egui::vec2(764.0, 348.0), egui::vec2(800.0, 480.0)),
+            (764, 348)
+        );
     }
 
     #[test]

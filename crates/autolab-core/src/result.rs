@@ -78,6 +78,15 @@ impl OperationResult {
     }
 }
 
+/// The outcome of a touch. Touch has no phone-side acknowledgement, so the status is `Accepted` at best:
+/// the head unit sent it. Whether anything on the screen reacted is for the caller to check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputResult {
+    pub status: OpStatus,
+    pub evidence: Vec<String>,
+}
+
 /// A screenshot that exists on disk. Dimensions are read from the written PNG, not assumed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

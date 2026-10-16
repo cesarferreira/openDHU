@@ -17,6 +17,7 @@ const POLL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone)]
 pub enum Cmd {
     Start {
+        native: bool,
         serial: Option<String>,
         reverse: Vec<u16>,
         headless: bool,
@@ -24,6 +25,7 @@ pub enum Cmd {
     Stop,
     Focus(bool),
     Screenshot(PathBuf),
+    Tap(u32, u32),
 }
 
 fn send(tx: &mpsc::Sender<Update>, ctx: &egui::Context, u: Update) -> bool {
@@ -91,6 +93,8 @@ fn spawn_stream(
 }
 
 /// Run one command on its own thread so a slow start never freezes the window or the polling.
+// Tests record commands instead of running them (see `ui::dispatch`), so only the real build calls this.
+#[cfg_attr(test, allow(dead_code))]
 pub fn run(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
     thread::spawn(move || {
         let result = execute(&cmd, &ctx, &tx);
@@ -101,10 +105,11 @@ pub fn run(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
 fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<String, String> {
     match cmd {
         Cmd::Start {
+            native,
             serial,
             reverse,
             headless,
-        } => start_with_cli(serial.as_deref(), reverse, *headless),
+        } => start_with_cli(*native, serial.as_deref(), reverse, *headless),
         Cmd::Stop => {
             Client::connect()
                 .and_then(|c| c.stop())
@@ -120,6 +125,12 @@ fn execute(cmd: &Cmd, ctx: &egui::Context, tx: &mpsc::Sender<Update>) -> Result<
                 "Video focus {word}: {:?} by the DHU ({})",
                 r.result.status, r.operation_id
             ))
+        }
+        Cmd::Tap(x, y) => {
+            let client = Client::connect().map_err(|e| e.to_string())?;
+            client.tap(*x, *y).map_err(|e| e.to_string())?;
+            // The phone never acknowledges touch, so say only that it was sent.
+            Ok(format!("Tap sent at ({x}, {y})"))
         }
         Cmd::Screenshot(path) => {
             let client = Client::connect().map_err(|e| e.to_string())?;
@@ -165,9 +176,17 @@ fn cli_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("autolab"))
 }
 
-fn start_with_cli(serial: Option<&str>, reverse: &[u16], headless: bool) -> Result<String, String> {
+fn start_with_cli(
+    native: bool,
+    serial: Option<&str>,
+    reverse: &[u16],
+    headless: bool,
+) -> Result<String, String> {
     let mut cmd = Command::new(cli_path());
     cmd.arg("start");
+    if native {
+        cmd.args(["--backend", "native"]);
+    }
     if let Some(s) = serial.filter(|s| !s.is_empty()) {
         cmd.args(["--serial", s]);
     }

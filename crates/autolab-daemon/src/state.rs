@@ -18,8 +18,8 @@ use serde_json::json;
 use tokio::sync::watch;
 
 use crate::api::{
-    BackendKind, DaemonInfo, DeviceInfo, DevicesResponse, OperationResponse, Phase, RunningDetails,
-    ScreenshotResponse, SessionStatus, StartRequest, StatusResponse,
+    BackendKind, DaemonInfo, DeviceInfo, DevicesResponse, InputResponse, OperationResponse, Phase,
+    RunningDetails, ScreenshotResponse, SessionStatus, StartRequest, StatusResponse,
 };
 use crate::backend::AnyBackend;
 use crate::events::EventBus;
@@ -230,6 +230,64 @@ impl Daemon {
                 Err(e)
             }
         }
+    }
+
+    /// Both touch kinds share one path so they log and emit the same way.
+    async fn input(
+        &self,
+        kind: &'static str,
+        detail: serde_json::Value,
+        f: impl FnOnce(&mut AnyBackend) -> Result<autolab_core::InputResult> + Send + 'static,
+    ) -> Result<InputResponse> {
+        let r = self.running()?;
+        let op = self.next_op();
+        let events = &self.inner.events;
+        events.emit(
+            "input.requested",
+            Some(&r.id),
+            json!({ "operationId": op, "kind": kind, "at": detail }),
+        );
+        match with_backend(r.backend, f).await? {
+            Ok(result) => {
+                events.emit(
+                    "input.accepted",
+                    Some(&r.id),
+                    json!({ "operationId": op, "kind": kind, "evidence": result.evidence }),
+                );
+                Ok(InputResponse {
+                    operation_id: op,
+                    backend: r.kind,
+                    result,
+                })
+            }
+            Err(e) => {
+                events.emit(
+                    "input.failed",
+                    Some(&r.id),
+                    json!({ "operationId": op, "kind": kind, "message": e.message() }),
+                );
+                Err(e)
+            }
+        }
+    }
+
+    pub async fn tap(&self, x: u32, y: u32) -> Result<InputResponse> {
+        self.input("tap", json!({ "x": x, "y": y }), move |b| b.tap(x, y))
+            .await
+    }
+
+    pub async fn swipe(
+        &self,
+        from: (u32, u32),
+        to: (u32, u32),
+        duration: std::time::Duration,
+    ) -> Result<InputResponse> {
+        self.input(
+            "swipe",
+            json!({ "from": [from.0, from.1], "to": [to.0, to.1], "durationMs": duration.as_millis() as u64 }),
+            move |b| b.swipe(from, to, duration),
+        )
+        .await
     }
 
     pub async fn screenshot(&self, path: PathBuf) -> Result<ScreenshotResponse> {

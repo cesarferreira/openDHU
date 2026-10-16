@@ -21,6 +21,8 @@ autolab start                   # starts the AutoLab daemon if needed, then a DH
 autolab focus video off
 autolab focus video on
 autolab screenshot out.png   # needs video focus on
+autolab tap 400 240          # native backend only: touch a pixel of a screenshot
+autolab swipe 300 200 100 200 --duration-ms 400
 autolab test examples/video-focus.yaml   # YAML tests against the running session; see docs/testing.md
 autolab status --json
 autolab stop

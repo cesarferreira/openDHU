@@ -8,6 +8,9 @@ brew install ffmpeg                  # decodes the phone's video into screenshot
 autolab start --backend native
 ```
 
+`autolab start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
+screenshot straight afterwards works.
+
 Everything else works the same: `focus`, `screenshot`, `status`, `test`, the HTTP API and the GUI.
 `autolab doctor` shows whether the head unit program and `ffmpeg` were found.
 
@@ -35,6 +38,23 @@ Release of video focus is a `VideoFocusIndication` the head unit sends on its ow
 the phone answers a release with a stop message after about 0.5 s and frames stop; it answers a take-back with a
 start message within milliseconds and frames resume.
 
+## Touch
+
+```bash
+autolab tap 764 348                       # a pixel of a screenshot, origin top left
+autolab swipe 300 200 100 200 --duration-ms 400
+```
+
+Checked on a Pixel 6 projecting Google Maps, comparing screenshots as numbers (two screenshots with no touch differed
+by 0.4 to 0.5% of pixels):
+
+- a tap on the map's zoom-in button changed 34.7% of the pixels and visibly zoomed the map; a tap on zoom-out
+  zoomed it back;
+- a swipe of 200 pixels panned the map (9.8% changed) and collapsed the destinations panel;
+- taps on Re-centre and on the panel's chevron put the view back (the rest was live map data).
+
+Touches are refused while the phone is not projecting, and outside the 800×480 screen.
+
 ## Verified on a real phone
 
 Pixel 6, Android 17, Android Auto 18.0.164204, macOS arm64, USB: start, six focus changes each confirmed by the
@@ -44,9 +64,10 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 
 ## Limits
 
-- **Touch, audio, navigation, night mode and driving restrictions are not implemented.** The head unit answers the
-  phone's sensor requests with fixed values (daytime, unrestricted) and declares a touch screen it never sends
-  events from. Those capabilities stay `unverified`.
+- **Audio, navigation, night mode, driving restrictions, multi-touch and keys are not implemented.** The head unit
+  answers the phone's sensor requests with fixed values (daytime, unrestricted). Those capabilities stay `unverified`.
+- **Touch is fire-and-forget.** `autolab tap X Y` and `autolab swipe X1 Y1 X2 Y2` send single-finger touches in
+  screenshot pixels (800×480). The phone never acknowledges them, so the result is `accepted` at best.
 - **One phone.** The head unit takes the Android phone it finds on USB. With several attached, `start` refuses
   rather than guess.
 - **Screenshots need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the

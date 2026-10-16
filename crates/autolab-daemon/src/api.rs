@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use autolab_core::{Error, HeadUnitStatus, OperationResult, ScreenshotResult};
+use autolab_core::{Error, HeadUnitStatus, InputResult, OperationResult, ScreenshotResult};
 use serde::{Deserialize, Serialize};
 
 // ---- errors ----------------------------------------------------------------------------------
@@ -90,6 +90,39 @@ pub struct StartRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FocusRequest {
     pub enabled: bool,
+}
+
+/// A touch at a pixel of the screenshot (origin top left).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TapRequest {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SwipeRequest {
+    pub x1: u32,
+    pub y1: u32,
+    pub x2: u32,
+    pub y2: u32,
+    /// Default 300 ms; 50 to 10000.
+    #[serde(default = "default_swipe_ms")]
+    pub duration_ms: u64,
+}
+
+pub fn default_swipe_ms() -> u64 {
+    300
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputResponse {
+    pub operation_id: String,
+    pub backend: BackendKind,
+    #[serde(flatten)]
+    pub result: InputResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

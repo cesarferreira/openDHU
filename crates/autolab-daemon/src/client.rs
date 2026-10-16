@@ -10,8 +10,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::api::{
-    DevicesResponse, ErrorEnvelope, FocusRequest, OperationResponse, ScreenshotRequest,
-    ScreenshotResponse, StartRequest, StatusResponse,
+    DevicesResponse, ErrorEnvelope, FocusRequest, InputResponse, OperationResponse,
+    ScreenshotRequest, ScreenshotResponse, StartRequest, StatusResponse, SwipeRequest, TapRequest,
 };
 use crate::runtime;
 
@@ -150,6 +150,26 @@ impl Client {
 
     pub fn focus_video(&self, enabled: bool) -> Result<OperationResponse> {
         self.post_json("/v1/focus/video", &FocusRequest { enabled }, false)
+    }
+
+    pub fn tap(&self, x: u32, y: u32) -> Result<InputResponse> {
+        self.post_json("/v1/input/tap", &TapRequest { x, y }, false)
+    }
+
+    pub fn swipe(
+        &self,
+        from: (u32, u32),
+        to: (u32, u32),
+        duration: Duration,
+    ) -> Result<InputResponse> {
+        let body = SwipeRequest {
+            x1: from.0,
+            y1: from.1,
+            x2: to.0,
+            y2: to.1,
+            duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+        };
+        self.post_json("/v1/input/swipe", &body, false)
     }
 
     pub fn screenshot(&self, path: &Path) -> Result<ScreenshotResponse> {

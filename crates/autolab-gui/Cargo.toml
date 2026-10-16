@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 autolab-core = { path = "../autolab-core" }
 autolab-daemon = { path = "../autolab-daemon" }
+autolab-native = { path = "../autolab-native" }
 eframe.workspace = true
 image.workspace = true
 serde_json.workspace = true

@@ -342,3 +342,56 @@ fn interrupt_while_waiting_for_a_condition_exits_130_not_6() {
         "must stop within one poll, not run the 10m timeout"
     );
 }
+
+const TOUCH: &str = "name: Touch\nrequirements: [touchInput]\nsteps:\n  - action: tap\n    x: 400\n    y: 240\n  - action: swipe\n    from: [100, 240]\n    to: [700, 240]\n    duration: 500ms\n  - action: swipe\n    from: [1, 2]\n    to: [3, 4]\n";
+
+#[test]
+fn tap_and_swipe_steps_reach_the_backend_and_say_the_phone_did_not_acknowledge() {
+    let mut b = MockBackend::new();
+    b.caps.touch_input = Support::Supported;
+    let (r, _, _) = run(TOUCH, &mut b, "touch", false);
+    assert_eq!(r.outcome, Outcome::Passed, "{:?}", r.message);
+    assert!(
+        b.calls.contains(&"tap 400 240".to_string()),
+        "{:?}",
+        b.calls
+    );
+    assert!(b.calls.contains(&"swipe 100 240 700 240 500ms".to_string()));
+    assert!(
+        b.calls.contains(&"swipe 1 2 3 4 300ms".to_string()),
+        "default duration is 300ms: {:?}",
+        b.calls
+    );
+    assert!(
+        r.steps[1].detail.contains("not acknowledged by the phone"),
+        "{}",
+        r.steps[1].detail
+    );
+}
+
+#[test]
+fn a_test_that_needs_touch_is_skipped_or_fails_when_the_backend_cannot_prove_it() {
+    let mut b = MockBackend::new(); // touch_input is Unverified
+    let (r, _, _) = run(TOUCH, &mut b, "touch-unverified", false);
+    assert_ne!(r.outcome, Outcome::Passed);
+    assert!(
+        r.message.as_deref().unwrap_or("").contains("touchInput"),
+        "{:?}",
+        r.message
+    );
+    assert!(!b.calls.iter().any(|c| c.starts_with("tap")));
+    let mut b2 = MockBackend::new();
+    let (skipped, _, _) = run(TOUCH, &mut b2, "touch-skip", true);
+    assert_eq!(skipped.outcome, Outcome::Skipped);
+}
+
+#[test]
+fn a_swipe_duration_outside_the_allowed_range_is_rejected_when_the_file_is_read() {
+    for d in ["10ms", "11s"] {
+        let yaml = format!(
+            "name: T\nsteps:\n  - action: swipe\n    from: [0, 0]\n    to: [5, 5]\n    duration: {d}\n"
+        );
+        let e = parse(&yaml).unwrap_err();
+        assert!(e.to_string().contains("between 50ms and 10s"), "{d}: {e}");
+    }
+}

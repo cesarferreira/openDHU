@@ -43,6 +43,12 @@ while IFS= read -r line; do
         printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x03\x20\x00\x00\x01\xe0\x08\x06\x00\x00\x00' > "$path"
         echo "{\"id\":$id,\"ok\":{\"type\":\"screenshot\",\"value\":{\"path\":\"$path\",\"width\":800,\"height\":480}}}"
       fi;;
+    tap|swipe)
+      if [ "$observed" = off ]; then
+        echo "{\"id\":$id,\"err\":{\"kind\":\"other\",\"message\":\"The phone is not projecting - nothing to touch.\"}}"
+      else
+        echo "{\"id\":$id,\"ok\":{\"type\":\"input\",\"value\":{\"status\":\"accepted\",\"evidence\":[\"sent $cmd (fake)\"]}}}"
+      fi;;
     *) echo "{\"id\":$id,\"err\":{\"kind\":\"invalid_args\",\"message\":\"unknown command\"}}";;
   esac
 done

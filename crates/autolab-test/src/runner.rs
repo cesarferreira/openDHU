@@ -307,6 +307,7 @@ fn preflight(
             let have = match r {
                 Requirement::VideoFocus => caps.video_focus,
                 Requirement::Screenshots => caps.screenshots,
+                Requirement::TouchInput => caps.touch_input,
             };
             have != Support::Supported
         })
@@ -374,6 +375,25 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
             End::pass(format!("waited {}", fmt_dur(duration.0)))
         }
         Step::Screenshot { path } => screenshot(path, backend, cfg.artifacts_dir),
+        Step::Tap { x, y } => match backend.tap(*x, *y) {
+            Ok(r) => End::pass(format!("tap at ({x}, {y}) sent; {}", touch_note(&r.status))),
+            Err(e) => End::error(&e),
+        },
+        Step::Swipe { from, to, duration } => {
+            let d = duration.map_or(Duration::from_millis(300), |d| d.0);
+            match backend.swipe((from[0], from[1]), (to[0], to[1]), d) {
+                Ok(r) => End::pass(format!(
+                    "swipe ({}, {}) to ({}, {}) over {} sent; {}",
+                    from[0],
+                    from[1],
+                    to[0],
+                    to[1],
+                    fmt_dur(d),
+                    touch_note(&r.status)
+                )),
+                Err(e) => End::error(&e),
+            }
+        }
         Step::AssertStatus { expect } => match backend.status() {
             Err(e) => End::error(&e),
             Ok(st) => {
@@ -415,6 +435,11 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
             }
         }
     }
+}
+
+/// Touch is never acknowledged by the phone, so a pass only means it was sent.
+fn touch_note(_status: &OpStatus) -> &'static str {
+    "not acknowledged by the phone (touch never is); assert on what changed"
 }
 
 fn focus_video(requested: FocusState, backend: &mut dyn HeadUnitBackend) -> End {

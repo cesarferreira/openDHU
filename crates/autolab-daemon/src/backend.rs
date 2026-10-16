@@ -2,9 +2,11 @@
 //! each backend's process id and liveness, which are not part of `HeadUnitBackend`.
 
 use std::path::Path;
+use std::time::Duration;
 
 use autolab_core::{
-    Capabilities, HeadUnitBackend, HeadUnitStatus, OperationResult, Result, ScreenshotResult,
+    Capabilities, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult, Result,
+    ScreenshotResult,
 };
 use autolab_dhu::DhuBackend;
 use autolab_native::NativeBackend;
@@ -54,6 +56,18 @@ impl HeadUnitBackend for AnyBackend {
         match self {
             Self::Dhu(b) => b.screenshot(path),
             Self::Native(b) => b.screenshot(path),
+        }
+    }
+    fn tap(&mut self, x: u32, y: u32) -> Result<InputResult> {
+        match self {
+            Self::Dhu(b) => b.tap(x, y),
+            Self::Native(b) => b.tap(x, y),
+        }
+    }
+    fn swipe(&mut self, from: (u32, u32), to: (u32, u32), d: Duration) -> Result<InputResult> {
+        match self {
+            Self::Dhu(b) => b.swipe(from, to, d),
+            Self::Native(b) => b.swipe(from, to, d),
         }
     }
     fn stop(&mut self) -> Result<()> {

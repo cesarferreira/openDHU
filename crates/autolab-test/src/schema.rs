@@ -28,6 +28,7 @@ pub struct TestFile {
 pub enum Requirement {
     VideoFocus,
     Screenshots,
+    TouchInput,
 }
 
 impl Requirement {
@@ -35,6 +36,7 @@ impl Requirement {
         match self {
             Self::VideoFocus => "videoFocus",
             Self::Screenshots => "screenshots",
+            Self::TouchInput => "touchInput",
         }
     }
 }
@@ -48,6 +50,16 @@ pub enum Step {
     Wait { duration: Dur },
     #[serde(rename = "screenshot")]
     Screenshot { path: String },
+    /// Touch a pixel of the screenshot (origin top left). The phone does not acknowledge touch.
+    #[serde(rename = "tap")]
+    Tap { x: u32, y: u32 },
+    /// Drag from one pixel to another. `duration` defaults to 300ms.
+    #[serde(rename = "swipe")]
+    Swipe {
+        from: [u32; 2],
+        to: [u32; 2],
+        duration: Option<Dur>,
+    },
     #[serde(rename = "assert.status")]
     AssertStatus { expect: StatusExpect },
     #[serde(rename = "waitFor")]
@@ -63,6 +75,8 @@ impl Step {
             Self::FocusVideo { .. } => "focus.video",
             Self::Wait { .. } => "wait",
             Self::Screenshot { .. } => "screenshot",
+            Self::Tap { .. } => "tap",
+            Self::Swipe { .. } => "swipe",
             Self::AssertStatus { .. } => "assert.status",
             Self::WaitFor { .. } => "waitFor",
         }
@@ -285,6 +299,16 @@ fn validate(t: &TestFile) -> Result<()> {
                 }
             }
             Step::Screenshot { path } => validate_screenshot_path(i, a, path)?,
+            Step::Tap { .. } => {}
+            Step::Swipe { duration, .. } => {
+                if let Some(d) = duration {
+                    check_duration(i, a, "duration", *d)?;
+                    let ms = d.0.as_millis();
+                    if !(50..=10_000).contains(&ms) {
+                        return Err(bad(i, a, "`duration` must be between 50ms and 10s"));
+                    }
+                }
+            }
         }
     }
     Ok(())

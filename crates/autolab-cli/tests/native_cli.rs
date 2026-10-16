@@ -166,3 +166,49 @@ fn the_config_file_can_choose_the_backend_and_its_dhu_settings_are_then_ignored(
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert_eq!(s.status_json()["backend"], "native");
 }
+
+#[test]
+fn tap_and_swipe_go_through_the_daemon_to_the_native_backend() {
+    let s = Sandbox::new();
+    assert_eq!(code(&start_native(&s, &[], &[])), 0);
+    let tap = s.autolab(&["tap", "400", "240", "--json"]);
+    assert_eq!(code(&tap), 0, "{}", text(&tap));
+    let v: serde_json::Value = serde_json::from_slice(&tap.stdout).unwrap();
+    assert_eq!(v["status"], "accepted");
+    assert_eq!(v["backend"], "native");
+    assert!(v["operationId"].as_str().unwrap().starts_with("op-"));
+
+    let swipe = s.autolab(&["swipe", "10", "20", "700", "20", "--duration-ms", "500"]);
+    assert_eq!(code(&swipe), 0, "{}", text(&swipe));
+    assert!(
+        text(&swipe).contains("does not acknowledge touch"),
+        "{}",
+        text(&swipe)
+    );
+
+    // The phone has stopped projecting: there is nothing to touch.
+    assert_eq!(code(&s.autolab(&["focus", "video", "off"])), 0);
+    let refused = s.autolab(&["tap", "1", "1"]);
+    assert_eq!(code(&refused), 1, "{}", text(&refused));
+    assert!(
+        text(&refused).contains("nothing to touch"),
+        "{}",
+        text(&refused)
+    );
+}
+
+#[test]
+fn touch_without_a_session_is_backend_unavailable_and_bad_arguments_exit_2() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.autolab(&["tap", "1", "1"])), 3);
+    assert_eq!(code(&s.autolab(&["tap", "-1", "1"])), 2);
+    assert_eq!(code(&s.autolab(&["swipe", "1", "1"])), 2);
+}
+
+#[test]
+fn the_dhu_backend_answers_touch_with_unsupported() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let o = s.autolab(&["tap", "1", "1"]);
+    assert_eq!(code(&o), 5, "{}", text(&o));
+}

@@ -13,9 +13,10 @@ use android_auto::{
     HeadUnitInfo, InputConfiguration, SendableAndroidAutoMessage, SensorInformation,
     VideoConfiguration, Wifi,
 };
-use autolab_core::{FocusState, OpStatus, OperationResult, VideoFocusStatus};
+use autolab_core::{FocusState, InputResult, OpStatus, OperationResult, VideoFocusStatus};
 use autolab_native::protocol::{
-    Command, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, StatusReport,
+    Command, ErrorInfo, ErrorKind, Event, Line, Outcome, Reply, SCREEN_HEIGHT, SCREEN_WIDTH,
+    SWIPE_MAX_MS, SWIPE_MIN_MS, SWIPE_STEP_MS, StatusReport,
 };
 use std::sync::Arc;
 
@@ -27,6 +28,11 @@ const CONFIRM_WAIT: Duration = Duration::from_secs(4);
 /// Frames since the last keyframe are kept for screenshots. A phone that sends this much without a
 /// keyframe is not behaving, so the buffer is dropped and a new keyframe awaited.
 const GOP_CAP: usize = 16 * 1024 * 1024;
+
+/// How long a tap holds the finger down.
+const TAP_HOLD: Duration = Duration::from_millis(60);
+/// How long to watch the video after a touch.
+const WATCH_AFTER: Duration = Duration::from_millis(500);
 
 const BACKEND_VERSION: &str = "android-auto 0.3.8";
 const BACKEND_BUILD: &str = "vendored 06c68d5 + AutoLab patches";
@@ -40,7 +46,8 @@ struct Inner {
     phone_events: u64,
     frames: u64,
     /// SPS and PPS, needed to decode.
-    config: Vec<u8>,
+    sps: Vec<u8>,
+    pps: Vec<u8>,
     /// Every frame since the last keyframe, including it.
     gop: Vec<u8>,
     have_keyframe: bool,
@@ -66,7 +73,8 @@ impl Shared {
                 observed: FocusState::Unknown,
                 phone_events: 0,
                 frames: 0,
-                config: Vec::new(),
+                sps: Vec::new(),
+                pps: Vec::new(),
                 gop: Vec::new(),
                 have_keyframe: false,
             }),
@@ -86,7 +94,7 @@ impl Shared {
             },
             input: InputConfiguration {
                 keycodes: vec![1, 2, 3, 4, 5],
-                touchscreen: Some((800, 480)),
+                touchscreen: Some((SCREEN_WIDTH, SCREEN_HEIGHT)),
             },
         }
     }
@@ -110,8 +118,121 @@ impl Shared {
             }
             Command::Focus { enabled } => self.focus(enabled).await,
             Command::Screenshot { path } => self.screenshot(&path).await,
+            Command::Tap { x, y } => self.touch((x, y), (x, y), 0).await,
+            Command::Swipe {
+                x1,
+                y1,
+                x2,
+                y2,
+                duration_ms,
+            } => {
+                if !(SWIPE_MIN_MS..=SWIPE_MAX_MS).contains(&duration_ms) {
+                    return fail(
+                        ErrorKind::InvalidArgs,
+                        format!("swipe duration must be {SWIPE_MIN_MS}-{SWIPE_MAX_MS} ms"),
+                    );
+                }
+                self.touch((x1, y1), (x2, y2), duration_ms).await
+            }
             Command::Quit => Outcome::Ok(Reply::Done),
         }
+    }
+
+    /// One send of a touch event. The unit and the action names follow the protocol crate's own
+    /// example app: microseconds since the epoch, `POINTER_DOWN`, `DRAG`, `POINTER_UP`.
+    async fn send_touch(
+        &self,
+        action: Wifi::touch_action::Enum,
+        at: (u32, u32),
+    ) -> Result<(), ErrorInfo> {
+        let mut location = Wifi::TouchLocation::new();
+        location.set_x(at.0);
+        location.set_y(at.1);
+        location.set_pointer_id(0);
+        let mut event = Wifi::TouchEvent::new();
+        event.touch_location = vec![location];
+        event.set_touch_action(action);
+        let mut m = Wifi::InputEventIndication::new();
+        m.set_timestamp(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_micros() as u64),
+        );
+        m.touch_event = android_auto::protobuf::MessageField::some(event);
+        self.tx
+            .send(AndroidAutoMessage::Input(m).sendable())
+            .await
+            .map_err(|_| ErrorInfo {
+                kind: ErrorKind::Unavailable,
+                message: "the Android Auto session is not running".into(),
+            })
+    }
+
+    /// A tap is a swipe of zero length and duration. Touch gets no acknowledgement from the phone,
+    /// so the best status is `Accepted`: it was sent. The frames that follow are context, not proof.
+    async fn touch(&self, from: (u32, u32), to: (u32, u32), duration_ms: u64) -> Outcome {
+        for (x, y) in [from, to] {
+            if x >= u32::from(SCREEN_WIDTH) || y >= u32::from(SCREEN_HEIGHT) {
+                return fail(
+                    ErrorKind::InvalidArgs,
+                    format!(
+                        "({x}, {y}) is outside the {SCREEN_WIDTH}x{SCREEN_HEIGHT} screen (x 0-{}, y 0-{})",
+                        SCREEN_WIDTH - 1,
+                        SCREEN_HEIGHT - 1
+                    ),
+                );
+            }
+        }
+        let frames_before = {
+            let i = self.lock();
+            if i.observed != FocusState::On {
+                return fail(
+                    ErrorKind::Other,
+                    "The phone is not projecting - nothing to touch.".to_string(),
+                );
+            }
+            i.frames
+        };
+        use Wifi::touch_action::Enum::{DRAG, POINTER_DOWN, POINTER_UP};
+        let sent = async {
+            self.send_touch(POINTER_DOWN, from).await?;
+            if duration_ms == 0 {
+                tokio::time::sleep(TAP_HOLD).await;
+            } else {
+                let steps = (duration_ms / SWIPE_STEP_MS).max(1);
+                for n in 1..=steps {
+                    tokio::time::sleep(Duration::from_millis(duration_ms / steps)).await;
+                    let at = (lerp(from.0, to.0, n, steps), lerp(from.1, to.1, n, steps));
+                    if n < steps {
+                        self.send_touch(DRAG, at).await?;
+                    }
+                }
+            }
+            self.send_touch(POINTER_UP, to).await
+        }
+        .await;
+        if let Err(e) = sent {
+            return Outcome::Err(e);
+        }
+        tokio::time::sleep(WATCH_AFTER).await;
+        let frames = self.lock().frames - frames_before;
+        let what = if from == to && duration_ms == 0 {
+            format!("tap at ({}, {})", from.0, from.1)
+        } else {
+            format!(
+                "swipe ({}, {}) to ({}, {}) over {duration_ms} ms",
+                from.0, from.1, to.0, to.1
+            )
+        };
+        Outcome::Ok(Reply::Input(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec![
+                format!("sent {what}"),
+                format!(
+                    "{frames} video frames arrived during and after it (context only: the phone does not acknowledge touch)"
+                ),
+            ],
+        }))
     }
 
     async fn focus(&self, enabled: bool) -> Outcome {
@@ -189,12 +310,7 @@ impl Shared {
     }
 
     async fn screenshot(&self, path: &std::path::Path) -> Outcome {
-        let err = |kind, message: &str| {
-            Outcome::Err(ErrorInfo {
-                kind,
-                message: message.into(),
-            })
-        };
+        let err = fail;
         if !path.is_absolute() {
             return err(ErrorKind::InvalidArgs, "screenshot path must be absolute");
         }
@@ -206,13 +322,14 @@ impl Shared {
                     "Don't have video focus - nothing to screenshot.",
                 );
             }
-            if !i.have_keyframe || i.config.is_empty() {
+            if !i.have_keyframe || i.sps.is_empty() || i.pps.is_empty() {
                 return err(
                     ErrorKind::Unavailable,
                     "no complete picture has arrived from the phone yet",
                 );
             }
-            let mut s = i.config.clone();
+            let mut s = i.sps.clone();
+            s.extend_from_slice(&i.pps);
             s.extend_from_slice(&i.gop);
             s
         };
@@ -223,31 +340,98 @@ impl Shared {
     }
 
     fn on_frame(&self, data: &[u8]) {
-        let mut i = self.lock();
-        i.frames += 1;
-        // The first NAL unit's type is in the low five bits of the byte after the start code.
-        let nal = data.get(4).map(|b| b & 0x1f);
-        match nal {
-            Some(7) => i.config = data.to_vec(),
-            Some(8) if !i.config.is_empty() && !contains_pps(&i.config) => {
-                i.config.extend_from_slice(data);
-            }
-            Some(5) => {
-                i.gop.clear();
-                i.gop.extend_from_slice(data);
-                i.have_keyframe = true;
-            }
-            _ if i.have_keyframe => {
-                if i.gop.len() + data.len() > GOP_CAP {
-                    i.gop.clear();
-                    i.have_keyframe = false;
-                } else {
-                    i.gop.extend_from_slice(data);
-                }
-            }
-            _ => {}
+        let picture_ready = {
+            let mut i = self.lock();
+            Self::take_frame(&mut i, data);
+            i.have_keyframe && !i.sps.is_empty() && !i.pps.is_empty()
+        };
+        // "Ready" means a screenshot is possible: the phone said it is projecting AND a decodable
+        // picture has arrived. The picture comes about 3 s after the phone's start message, and a
+        // screenshot taken in between would fail.
+        if picture_ready && !self.ready.swap(true, Ordering::SeqCst) {
+            crate::emit(&Line::Event(Event::Ready {
+                backend_version: BACKEND_VERSION.into(),
+                backend_build: BACKEND_BUILD.into(),
+            }));
         }
     }
+
+    fn take_frame(i: &mut Inner, data: &[u8]) {
+        i.frames += 1;
+        // A buffer may hold one NAL unit or several (the phone can send SPS, PPS and the keyframe
+        // together), so each is handled on its own. Judging by the first byte alone missed keyframes
+        // that arrived behind a parameter set.
+        for nal in nal_units(data) {
+            match nal.kind {
+                7 => i.sps = nal.bytes.to_vec(),
+                8 => i.pps = nal.bytes.to_vec(),
+                5 => {
+                    i.gop.clear();
+                    i.gop.extend_from_slice(nal.bytes);
+                    i.have_keyframe = true;
+                }
+                _ if i.have_keyframe => {
+                    if i.gop.len() + nal.bytes.len() > GOP_CAP {
+                        i.gop.clear();
+                        i.have_keyframe = false;
+                    } else {
+                        i.gop.extend_from_slice(nal.bytes);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// One NAL unit of an Annex-B stream, with its start code.
+struct Nal<'a> {
+    kind: u8,
+    bytes: &'a [u8],
+}
+
+/// Split an Annex-B buffer at its start codes (`00 00 01` or `00 00 00 01`).
+fn nal_units(data: &[u8]) -> Vec<Nal<'_>> {
+    let mut starts = Vec::new();
+    let mut n = 0;
+    while n + 3 <= data.len() {
+        if data[n..n + 3] == [0, 0, 1] {
+            // A four-byte start code begins one byte earlier.
+            starts.push(if n > 0 && data[n - 1] == 0 { n - 1 } else { n });
+            n += 3;
+        } else {
+            n += 1;
+        }
+    }
+    let mut out = Vec::new();
+    for (idx, &start) in starts.iter().enumerate() {
+        let end = starts.get(idx + 1).copied().unwrap_or(data.len());
+        // The NAL header is the byte after the `01` that ends the start code.
+        let header = data[start..end]
+            .iter()
+            .position(|&b| b == 1)
+            .map(|p| start + p + 1);
+        if let Some(h) = header.filter(|&h| h < end) {
+            out.push(Nal {
+                kind: data[h] & 0x1f,
+                bytes: &data[start..end],
+            });
+        }
+    }
+    out
+}
+
+/// The point `n` of `steps` of the way from `a` to `b`.
+fn lerp(a: u32, b: u32, n: u64, steps: u64) -> u32 {
+    let (a, b) = (i64::from(a), i64::from(b));
+    (a + (b - a) * n as i64 / steps as i64) as u32
+}
+
+fn fail(kind: ErrorKind, message: impl Into<String>) -> Outcome {
+    Outcome::Err(ErrorInfo {
+        kind,
+        message: message.into(),
+    })
 }
 
 fn word(f: FocusState) -> &'static str {
@@ -256,12 +440,6 @@ fn word(f: FocusState) -> &'static str {
         FocusState::Off => "off",
         FocusState::Unknown => "unknown",
     }
-}
-
-/// Whether an Annex-B buffer already holds a PPS (NAL type 8).
-fn contains_pps(buf: &[u8]) -> bool {
-    buf.windows(5)
-        .any(|w| w[..4] == [0, 0, 0, 1] && w[4] & 0x1f == 8)
 }
 
 #[derive(Clone)]
@@ -317,12 +495,6 @@ impl AndroidAutoVideoChannelTrait for Hu {
             let mut i = self.lock();
             i.observed = FocusState::On;
             i.phone_events += 1;
-        }
-        if !self.ready.swap(true, Ordering::SeqCst) {
-            crate::emit(&Line::Event(Event::Ready {
-                backend_version: BACKEND_VERSION.into(),
-                backend_build: BACKEND_BUILD.into(),
-            }));
         }
         crate::emit(&Line::Event(Event::Video {
             state: FocusState::On,
@@ -423,6 +595,100 @@ impl AndroidAutoMainTrait for Hu {
 mod tests {
     use super::*;
 
+    #[test]
+    fn lerp_runs_from_start_to_end_in_either_direction() {
+        assert_eq!(lerp(0, 100, 0, 4), 0);
+        assert_eq!(lerp(0, 100, 2, 4), 50);
+        assert_eq!(lerp(0, 100, 4, 4), 100);
+        assert_eq!(lerp(100, 0, 1, 4), 75);
+        assert_eq!(lerp(7, 7, 3, 5), 7);
+    }
+
+    #[tokio::test]
+    async fn touches_outside_the_screen_or_without_video_or_with_a_bad_duration_are_refused() {
+        let hu = Shared::new();
+        let outside = hu
+            .handle(Command::Tap {
+                x: SCREEN_WIDTH.into(),
+                y: 0,
+            })
+            .await;
+        match outside {
+            Outcome::Err(e) => {
+                assert_eq!(e.kind, ErrorKind::InvalidArgs);
+                assert!(e.message.contains("outside the 800x480 screen"), "{e:?}");
+            }
+            _ => panic!("must refuse"),
+        }
+        let none = hu.handle(Command::Tap { x: 1, y: 1 }).await;
+        assert!(matches!(
+            none,
+            Outcome::Err(ErrorInfo {
+                kind: ErrorKind::Other,
+                ..
+            })
+        ));
+        for ms in [0, SWIPE_MIN_MS - 1, SWIPE_MAX_MS + 1] {
+            let r = hu
+                .handle(Command::Swipe {
+                    x1: 0,
+                    y1: 0,
+                    x2: 5,
+                    y2: 5,
+                    duration_ms: ms,
+                })
+                .await;
+            assert!(
+                matches!(
+                    r,
+                    Outcome::Err(ErrorInfo {
+                        kind: ErrorKind::InvalidArgs,
+                        ..
+                    })
+                ),
+                "{ms} ms"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tap_sends_down_then_up_and_a_swipe_drags_in_between() {
+        let hu = Shared::new();
+        hu.lock().observed = FocusState::On;
+        let mut rx = hu.rx.lock().await.take().unwrap();
+        let Outcome::Ok(Reply::Input(r)) = hu.handle(Command::Tap { x: 10, y: 20 }).await else {
+            panic!("tap must be accepted");
+        };
+        assert_eq!(r.status, OpStatus::Accepted);
+        assert!(
+            r.evidence[0].contains("tap at (10, 20)"),
+            "{:?}",
+            r.evidence
+        );
+        let mut sent = 0;
+        while rx.try_recv().is_ok() {
+            sent += 1;
+        }
+        assert_eq!(sent, 2, "a tap is a down and an up");
+        let Outcome::Ok(Reply::Input(_)) = hu
+            .handle(Command::Swipe {
+                x1: 0,
+                y1: 0,
+                x2: 100,
+                y2: 0,
+                duration_ms: 100,
+            })
+            .await
+        else {
+            panic!("swipe must be accepted");
+        };
+        let mut sent = 0;
+        while rx.try_recv().is_ok() {
+            sent += 1;
+        }
+        assert!(sent >= 4, "down, several drags, up: {sent}");
+    }
+
     const SPS: [u8; 8] = [0, 0, 0, 1, 0x67, 0x42, 0, 0x1f];
     const PPS: [u8; 7] = [0, 0, 0, 1, 0x68, 0xce, 0x3c];
     const IDR: [u8; 7] = [0, 0, 0, 1, 0x65, 0xb8, 0x4f];
@@ -441,22 +707,59 @@ mod tests {
         let i = hu.lock();
         assert!(i.have_keyframe);
         assert_eq!(i.frames, 7);
-        let mut expect = SPS.to_vec();
-        expect.extend_from_slice(&PPS);
-        assert_eq!(i.config, expect);
+        assert_eq!((i.sps.as_slice(), i.pps.as_slice()), (&SPS[..], &PPS[..]));
         let mut gop = IDR.to_vec();
         gop.extend_from_slice(&P);
         assert_eq!(i.gop, gop);
     }
 
     #[test]
-    fn a_pps_is_not_added_twice() {
+    fn a_keyframe_that_arrives_behind_the_parameter_sets_in_one_buffer_is_found() {
+        // Regression: judging a buffer by its first NAL unit missed this, and screenshots failed with
+        // "no complete picture has arrived" right after a focus change.
         let hu = Shared::new();
-        let mut both = SPS.to_vec();
-        both.extend_from_slice(&PPS);
-        hu.on_frame(&both);
+        let mut all = SPS.to_vec();
+        all.extend_from_slice(&PPS);
+        all.extend_from_slice(&IDR);
+        hu.on_frame(&all);
+        let i = hu.lock();
+        assert!(i.have_keyframe);
+        assert_eq!((i.sps.as_slice(), i.pps.as_slice()), (&SPS[..], &PPS[..]));
+        assert_eq!(i.gop, IDR);
+    }
+
+    #[test]
+    fn the_head_unit_is_ready_only_when_a_decodable_picture_has_arrived() {
+        // Regression: ready used to fire on the phone's start message, about 3 s before the first
+        // picture, so a screenshot right after `autolab start` failed.
+        let hu = Shared::new();
+        hu.on_frame(&SPS);
         hu.on_frame(&PPS);
-        assert_eq!(hu.lock().config, both);
+        assert!(
+            !hu.ready.load(Ordering::SeqCst),
+            "parameter sets alone are not a picture"
+        );
+        hu.on_frame(&P);
+        assert!(!hu.ready.load(Ordering::SeqCst));
+        hu.on_frame(&IDR);
+        assert!(hu.ready.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn nal_units_are_split_at_three_and_four_byte_start_codes() {
+        let mut buf = vec![0, 0, 1, 0x67, 9];
+        buf.extend_from_slice(&[0, 0, 0, 1, 0x68, 8]);
+        buf.extend_from_slice(&[0, 0, 1, 0x65, 7, 7]);
+        let kinds: Vec<(u8, usize)> = nal_units(&buf)
+            .iter()
+            .map(|n| (n.kind, n.bytes.len()))
+            .collect();
+        assert_eq!(kinds, [(7, 5), (8, 6), (5, 6)]);
+        assert!(nal_units(&[1, 2, 3]).is_empty());
+        assert!(
+            nal_units(&[0, 0, 1]).is_empty(),
+            "a start code with no header byte"
+        );
     }
 
     #[tokio::test]

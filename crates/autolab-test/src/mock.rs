@@ -5,8 +5,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use autolab_core::{
-    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, OperationResult, Result,
-    ScreenshotResult, SessionState, Support, VideoFocusStatus,
+    Capabilities, Error, FocusState, HeadUnitBackend, HeadUnitStatus, InputResult, OpStatus,
+    OperationResult, Result, ScreenshotResult, SessionState, Support, VideoFocusStatus,
 };
 
 use crate::runner::Clock;
@@ -109,6 +109,29 @@ fn fail(f: &Failure) -> Result<()> {
 }
 
 impl HeadUnitBackend for MockBackend {
+    fn tap(&mut self, x: u32, y: u32) -> Result<InputResult> {
+        self.calls.push(format!("tap {x} {y}"));
+        Ok(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec!["mock".into()],
+        })
+    }
+
+    fn swipe(&mut self, from: (u32, u32), to: (u32, u32), d: Duration) -> Result<InputResult> {
+        self.calls.push(format!(
+            "swipe {} {} {} {} {}ms",
+            from.0,
+            from.1,
+            to.0,
+            to.1,
+            d.as_millis()
+        ));
+        Ok(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec!["mock".into()],
+        })
+    }
+
     fn capabilities(&mut self) -> Result<Capabilities> {
         self.calls.push("capabilities".into());
         Ok(self.caps.clone())

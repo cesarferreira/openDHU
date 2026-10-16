@@ -71,7 +71,8 @@ fn status_focus_and_screenshot_follow_the_phone_not_the_request() {
     let caps = b.capabilities().unwrap();
     assert_eq!(caps.backend, "native");
     assert_eq!(caps.video_focus, Support::Supported);
-    assert_eq!(caps.touch_input, Support::Unverified);
+    assert_eq!(caps.touch_input, Support::Supported);
+    assert_eq!(caps.audio_focus, Support::Unverified);
     b.stop().unwrap();
 }
 

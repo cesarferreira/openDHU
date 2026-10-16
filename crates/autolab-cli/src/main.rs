@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use autolab_core::{Error, FocusState, OpStatus, Result, SessionState};
 use autolab_daemon::api::{
-    BackendKind, OperationResponse, ScreenshotResponse, SessionStatus, StartRequest,
+    BackendKind, InputResponse, OperationResponse, ScreenshotResponse, SessionStatus, StartRequest,
 };
 use autolab_daemon::{ServeOptions, runtime};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -70,6 +70,18 @@ enum Command {
         /// Output file, must end in .png (same as the positional argument)
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
+    },
+    /// Touch a pixel of the projected screen (0,0 is the top left of a screenshot)
+    Tap { x: u32, y: u32 },
+    /// Drag from one pixel to another
+    Swipe {
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        /// How long the drag takes, 50 to 10000
+        #[arg(long, default_value_t = 300)]
+        duration_ms: u64,
     },
     /// Run YAML tests against the running session
     Test {
@@ -219,6 +231,26 @@ fn run(cli: Cli) -> Result<u8> {
             print_screenshot(&daemon_ctl::connect()?.screenshot(&abs)?, json);
             Ok(0)
         }
+        Command::Tap { x, y } => {
+            let r = daemon_ctl::connect()?.tap(x, y)?;
+            print_input(&r, json);
+            Ok(status_exit_code(r.result.status))
+        }
+        Command::Swipe {
+            x1,
+            y1,
+            x2,
+            y2,
+            duration_ms,
+        } => {
+            let r = daemon_ctl::connect()?.swipe(
+                (x1, y1),
+                (x2, y2),
+                std::time::Duration::from_millis(duration_ms),
+            )?;
+            print_input(&r, json);
+            Ok(status_exit_code(r.result.status))
+        }
         Command::Test {
             paths,
             report,
@@ -362,6 +394,20 @@ fn print_focus(resp: &OperationResponse, json: bool) {
                 eprintln!("  {l}");
             }
         }
+    }
+}
+
+fn print_input(resp: &InputResponse, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(resp).expect("serializes")
+        );
+        return;
+    }
+    println!("Touch sent (the phone does not acknowledge touch)");
+    for l in &resp.result.evidence {
+        println!("  {l}");
     }
 }
 
