@@ -30,7 +30,7 @@ Or open this directory in Android Studio, sync, and run `app` on a phone/emulato
 
 Install openDHU and its native head unit/GUI with `make install` from the repository root. Install
 `adb`, `ffmpeg`, and `tesseract` with English OCR data. Configure openDHU's development head-unit
-[credentials](../../README.md#custom-native-head-unit-certificate) outside the repository.
+[credentials](../../docs/native-backend.md#debugging-knobs) outside the repository.
 
 Use a dedicated Google Play phone AVD named **medium_phone**, with a system image matching your
 host architecture. Set up Android Auto once: install/update it, complete its consent/permission
