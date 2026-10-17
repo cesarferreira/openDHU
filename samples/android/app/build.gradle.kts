@@ -1,10 +1,10 @@
 plugins { id("com.android.application") }
 
 android {
-    namespace = "dev.autolab.demo"
+    namespace = "dev.opendhu.demo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "dev.autolab.demo"
+        applicationId = "dev.opendhu.demo"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

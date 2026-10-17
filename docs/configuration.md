@@ -1,15 +1,15 @@
 # Configuration
 
-AutoLab works without a config file. Add one to stop repeating flags.
+openDHU works without a config file. Add one to stop repeating flags.
 
 The file is TOML. Only the CLI reads it. The daemon never does: the CLI sends the daemon explicit,
 absolute values in each request.
 
 ## Where the file lives
 
-1. `$AUTOLAB_CONFIG`, if set. This file must exist, or the command fails with exit code 2.
-2. `$XDG_CONFIG_HOME/autolab/config.toml`, if `XDG_CONFIG_HOME` is an absolute path.
-3. `~/.config/autolab/config.toml`.
+1. `$OPENDHU_CONFIG`, if set. This file must exist, or the command fails with exit code 2.
+2. `$XDG_CONFIG_HOME/opendhu/config.toml`, if `XDG_CONFIG_HOME` is an absolute path.
+3. `~/.config/opendhu/config.toml`.
 
 A missing file at the default location is fine. `aa doctor` shows which file was loaded, or that none was.
 
@@ -17,7 +17,7 @@ A missing file at the default location is fine. `aa doctor` shows which file was
 
 Highest first: command-line flag, environment variable, config file, built-in default.
 
-- `AUTOLAB_DHU_PATH` outranks `dhu.path`. `--dhu-path` outranks both.
+- `OPENDHU_DHU_PATH` outranks `dhu.path`. `--dhu-path` outranks both.
 - `aa start` defaults to native. `--dhu` selects Google's DHU; `--backend native|dhu` is also supported.
   Either command-line choice overrides `session.backend`; `--dhu` and `--backend` cannot be combined.
 - A list flag (`--reverse`, `--report`) **replaces** the file's list. It does not add to it.

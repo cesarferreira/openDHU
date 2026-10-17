@@ -1,20 +1,20 @@
 # Desktop window (`aa gui`)
 
-`autolab-gui` is a native window for the AutoLab daemon. It is a client of the HTTP API in [api.md](api.md),
+`opendhu-gui` is a native window for the openDHU daemon. It is a client of the HTTP API in [api.md](api.md),
 like the CLI. It adds no new power and needs no security change: it reads `daemon.json` for the port and the
 token, and sends no `Origin` header.
 
 ```bash
 aa gui                          # after make install
-cargo run -p autolab-gui          # from a checkout
-cargo install --path crates/autolab-gui --locked
+cargo run -p opendhu-gui          # from a checkout
+cargo install --path crates/opendhu-gui --locked
 ```
 
-`aa gui` finds `autolab-gui` next to the CLI or on `PATH`.
+`aa gui` finds `opendhu-gui` next to the CLI or on `PATH`.
 
 The window works with or without a session. If no daemon runs, it says so and offers **Start session**, with a
-choice of head unit (AutoLab native by default, or Google DHU). That button runs `aa start --backend native` or `aa start --dhu` for the selected head unit, so the daemon start-up and your [config file](configuration.md) behave exactly as in
-the terminal. `aa` must sit next to `autolab-gui` or be on `PATH`.
+choice of head unit (openDHU native by default, or Google DHU). That button runs `aa start --backend native` or `aa start --dhu` for the selected head unit, so the daemon start-up and your [config file](configuration.md) behave exactly as in
+the terminal. `aa` must sit next to `opendhu-gui` or be on `PATH`.
 
 ## What it shows
 
@@ -26,7 +26,7 @@ the terminal. `aa` must sit next to `autolab-gui` or be on `PATH`.
   stream. The DHU draws its own window, so there is no live view for it.
 - **Audio**: tick **Play the phone's audio** (off by default) to hear what the phone plays, through `ffplay`. A line under
   the picture shows how many seconds of sound have arrived on each channel.
-- **Video focus**: what AutoLab requested, what the head unit reports, and the phone-side value. With the DHU that
+- **Video focus**: what openDHU requested, what the head unit reports, and the phone-side value. With the DHU that
   is always `unknown`. With the native backend it is the phone's own word. **Focus on** and **Focus off** send the command.
 - **Screenshot**: saves a PNG to the path you type (absolute, ends in `.png`, no spaces) and previews it. On the
   native backend, **clicking the preview taps the phone at that spot**. It is a real touch on the real phone.
@@ -49,5 +49,5 @@ session is running). Errors from the daemon appear in the bar at the bottom, in 
 
 ## Checking how it looks
 
-Set `AUTOLAB_GUI_SNAPSHOT=/path/to/out.png` and the window saves an image of itself after about 2.5 s and quits.
-It captures only the AutoLab window, never the rest of the desktop.
+Set `OPENDHU_GUI_SNAPSHOT=/path/to/out.png` and the window saves an image of itself after about 2.5 s and quits.
+It captures only the openDHU window, never the rest of the desktop.

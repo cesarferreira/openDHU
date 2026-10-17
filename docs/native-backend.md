@@ -1,11 +1,11 @@
 # Native backend (default)
 
-AutoLab uses its own Android Auto head unit by default, so Google's DHU is not needed.
+openDHU uses its own Android Auto head unit by default, so Google's DHU is not needed.
 Use `aa start --dhu` to select Google's DHU, or set `session.backend` in the config file.
 The explicit `--backend native` and `--backend dhu` options are also supported.
 
 ```bash
-cargo build -p autolab-native-hu     # builds next to `aa`
+cargo build -p opendhu-native-hu     # builds next to `aa`
 brew install ffmpeg                  # decodes the phone's video into screenshots
 aa start
 ```
@@ -23,14 +23,14 @@ Everything else works the same: `focus`, `screenshot`, `status`, `test`, the HTT
 | Video focus | the DHU takes the command (`accepted`) | the head unit tells the phone, then waits for the phone's own start or stop message (`observed`, or `timed_out` after 4 s) |
 | `observed` | always `unknown` | the phone's own word: `on` after its video start message, `off` after its stop message |
 | Screenshot | the DHU writes a PNG | the last picture is decoded from the phone's H.264 video with `ffmpeg` |
-| Needs | Google's DHU | `autolab-native-hu`, `ffmpeg` |
+| Needs | Google's DHU | `opendhu-native-hu`, `ffmpeg` |
 
 Tests that need the phone's word use `backend: native` and assert `observed`
 ([examples/native-phone-confirms.yaml](../examples/native-phone-confirms.yaml)).
 
 ## How it works
 
-`autolab-native` (a library) drives `autolab-native-hu` (a child process) with JSON lines on stdin and stdout.
+`opendhu-native` (a library) drives `opendhu-native-hu` (a child process) with JSON lines on stdin and stdout.
 The child speaks the Android Auto protocol over USB, using a vendored copy of the open-source
 [`android-auto`](https://github.com/uglyoldbob/android-auto) crate. It runs as a separate process for the same
 reasons the DHU does: the crate panics on messages it does not handle, and the child exits when the daemon closes
@@ -60,7 +60,7 @@ phone's audio** to hear it through this computer (`ffplay`, which comes with `ff
 `GET /v1/audio/{channel}` serves the same PCM ([api.md](api.md)).
 
 The crate we link never acknowledged the audio buffers it received, so the phone stalled after about ten of them. The
-vendored copy now acknowledges each one (`vendor/android-auto/AUTOLAB-PATCHES.md`).
+vendored copy now acknowledges each one (`vendor/android-auto/OPENDHU-PATCHES.md`).
 
 ## Touch
 
@@ -84,20 +84,20 @@ Touches are refused while the phone is not projecting, and outside the 800×480 
 Pixel 6, Android 17, Android Auto 18.0.164204, macOS arm64, USB: start, six focus changes each confirmed by the
 phone, status, screenshots (800×480), refusal to screenshot while the phone is not projecting, `--reverse` tunnels
 (checked with `adb reverse --list`), the YAML runner with `observed` assertions, clean stop. The test is
-`real_native_backend_reports_what_the_phone_did` in `crates/autolab-cli/tests/hardware.rs`.
+`real_native_backend_reports_what_the_phone_did` in `crates/opendhu-cli/tests/hardware.rs`.
 
 ## Debugging knobs
 
-- `AUTOLAB_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
+- `OPENDHU_NATIVE_LOG=1` makes the head unit log the protocol crate's messages to stderr (the daemon's log).
 - With custom credentials, the native backend advertises Google's developer DHU make/model identity so
-  Android Auto can include debug Car App Library apps. `AUTOLAB_NATIVE_IDENTITY=autolab` opts out;
-  `AUTOLAB_NATIVE_IDENTITY=dhu` forces the DHU identity even with bundled credentials. The daemon must inherit
+  Android Auto can include debug Car App Library apps. `OPENDHU_NATIVE_IDENTITY=opendhu` opts out;
+  `OPENDHU_NATIVE_IDENTITY=dhu` forces the DHU identity even with bundled credentials. The daemon must inherit
   this setting. The legacy protocol's `head_unit_name` field is actually the vehicle make: it must be
   `Google`, not `Desktop Head Unit`. Both vehicle and head-unit models must be `Desktop Head Unit`.
-- The native backend automatically reads `~/.config/autolab/credentials/head-unit-cert.pem` and
-  `~/.config/autolab/credentials/head-unit-key.pem`. Both absent means the bundled certificate; an incomplete,
+- The native backend automatically reads `~/.config/opendhu/credentials/head-unit-cert.pem` and
+  `~/.config/opendhu/credentials/head-unit-key.pem`. Both absent means the bundled certificate; an incomplete,
   unreadable, or invalid pair fails startup. Keep the key outside this repository (`chmod 600`).
-- `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY` override those paths. Set both or neither, in the environment
+- `OPENDHU_NATIVE_CERT` and `OPENDHU_NATIVE_KEY` override those paths. Set both or neither, in the environment
   of the daemon that starts the head unit. Restart the session after changing files, or the daemon after
   changing these variables. `aa status` and the GUI show `custom` when your pair is loaded.
 
@@ -114,7 +114,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 - **Screenshots and the live view need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
   screenshot fails and says so.
 - **USB or forwarded TCP.** Emulator head-unit servers can use loopback TCP (see below). Wireless Bluetooth pairing is not wired up.
-- **Resolution** defaults to 800×480 (480p). `AUTOLAB_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
+- **Resolution** defaults to 800×480 (480p). `OPENDHU_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
   daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;
   an unrecognised value falls back to 480p with a warning in the head unit's log.
 - **Fragile by nature.** This is an unofficial implementation of an undocumented protocol. A phone-side Android
@@ -124,7 +124,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 ## Vendored code and licences
 
 `vendor/android-auto` (LGPL-3.0-or-later) and `vendor/rustls-webpki` (ISC) are copies of third-party code with small
-patches, listed in each directory's `AUTOLAB-PATCHES.md`. They are linked into `autolab-native-hu` only; the
+patches, listed in each directory's `OPENDHU-PATCHES.md`. They are linked into `opendhu-native-hu` only; the
 `aa` binary does not contain them. Keep `vendor/android-auto` rebuildable and its licence files in place.
 
 `vendor/android-auto/src/cert.rs` contains the head-unit client certificate and private key that the upstream crate

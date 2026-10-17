@@ -1,11 +1,11 @@
-# AutoLab Android demo
+# openDHU Android demo
 
 A small, offline Kotlin app with a phone screen and a real Android Auto app. Browse three places,
 read their details, save a favorite, and clear it. The phone and car share ordinary app preferences,
 so favorites survive process restarts. No server, account, location permission, API key, or test-only
 app interface is needed.
 
-The sample lives in its own Gradle project. It does not depend on AutoLab's Rust crates or another
+The sample lives in its own Gradle project. It does not depend on openDHU's Rust crates or another
 Android repository. Normal Rust builds and tests do not need the Android SDK.
 
 ## Build
@@ -23,19 +23,19 @@ make sample-check
 ```
 
 Or open this directory in Android Studio, sync, and run `app` on a phone/emulator. The APK is
-`app/build/outputs/apk/debug/app-debug.apk`; its package is `dev.autolab.demo` and launcher label is
-**AutoLab Demo**. The phone screen lets you choose the same favorite as the car screen.
+`app/build/outputs/apk/debug/app-debug.apk`; its package is `dev.opendhu.demo` and launcher label is
+**openDHU Demo**. The phone screen lets you choose the same favorite as the car screen.
 
 ## Try Android Auto
 
-Install AutoLab and its native head unit/GUI with `make install` from the repository root. Install
-`adb`, `ffmpeg`, and `tesseract` with English OCR data. Configure AutoLab's development head-unit
+Install openDHU and its native head unit/GUI with `make install` from the repository root. Install
+`adb`, `ffmpeg`, and `tesseract` with English OCR data. Configure openDHU's development head-unit
 [credentials](../../README.md#custom-native-head-unit-certificate) outside the repository.
 
 Use a dedicated Google Play phone AVD named **medium_phone**, with a system image matching your
 host architecture. Set up Android Auto once: install/update it, complete its consent/permission
 screens, and enable its developer settings and development app testing. Use an English phone/host
-locale for the included text selectors. AutoLab restarts the head-unit server during suite setup.
+locale for the included text selectors. openDHU restarts the head-unit server during suite setup.
 A plain Android emulator without Android Auto provisioning cannot run these E2E tests.
 
 To provision the AVD, boot it visibly:
@@ -50,7 +50,7 @@ different AVD name, change `environment.emulator` in `e2e/suite.yaml`. The suite
 only this sample package and preserves its data.
 
 For a physical phone, install the APK with `adb -s SERIAL install -r PATH_TO_APK`, complete the same
-Android Auto development setup, then use `aa start` and `aa gui`. Open **AutoLab
+Android Auto development setup, then use `aa start` and `aa gui`. Open **openDHU
 Demo** from Android Auto's app launcher. The managed emulator suite below specifically targets an AVD.
 
 ## E2E tests
@@ -65,7 +65,7 @@ aa test sample --filter favorite-persistence  # Run just the restart journey
 aa test sample --headless --no-interactive    # Hide the head unit and disable spinners
 ```
 
-`AUTOLAB_BIN="$HOME/.cargo/bin/aa" make sample-test` selects AutoLab explicitly when Apple's
+`OPENDHU_BIN="$HOME/.cargo/bin/aa" make sample-test` selects openDHU explicitly when Apple's
 `/usr/bin/aa` wins on PATH. Pass test options through `SAMPLE_TEST_ARGS`, for example:
 
 ```bash
@@ -93,7 +93,7 @@ head-unit viewer. Initial Android Auto consent and host eligibility remain setup
 
 ## Code
 
-- `app/src/main/java/dev/autolab/demo/MainActivity.kt`: companion phone screen.
+- `app/src/main/java/dev/opendhu/demo/MainActivity.kt`: companion phone screen.
 - `DemoCarAppService.kt`: Android Auto entry point and host validation.
 - `CarScreens.kt`: home, place list and destination screens using Car App Library templates.
 - `FavoriteStore.kt`: shared catalog and persisted favorite.

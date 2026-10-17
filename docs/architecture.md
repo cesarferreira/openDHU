@@ -12,16 +12,16 @@ daemon is the only process that talks to the DHU.
 
 | Crate | Job |
 |---|---|
-| `autolab-core` | The `HeadUnitBackend` trait, shared types (`HeadUnitStatus`, `OperationResult`, `Capabilities`), error type and exit codes. No I/O. |
-| `autolab-dhu` | The DHU backend: finds the executable, starts it, writes console commands, parses its output, wraps `adb`. |
-| `autolab-native` | The native backend: drives `autolab-native-hu` over JSON lines. No Android Auto code. |
-| `autolab-native-hu` | AutoLab's own head unit (a child process). Links the vendored `android-auto` crate. |
-| `autolab-test` | YAML test schema, runner, JSON and JUnit reports, artifacts layout. The runner uses only the backend trait, so tests use a mock backend. |
-| `autolab-daemon` | The HTTP server, auth, session state machine, event stream, tunnel keeper, and a small client. |
-| `autolab-gui` | The `autolab-gui` window (egui). A client of the daemon API only; see [gui.md](gui.md). |
-| `autolab-cli` | The `aa` binary: argument parsing, config file, daemon start-up, output. |
+| `opendhu-core` | The `HeadUnitBackend` trait, shared types (`HeadUnitStatus`, `OperationResult`, `Capabilities`), error type and exit codes. No I/O. |
+| `opendhu-dhu` | The DHU backend: finds the executable, starts it, writes console commands, parses its output, wraps `adb`. |
+| `opendhu-native` | The native backend: drives `opendhu-native-hu` over JSON lines. No Android Auto code. |
+| `opendhu-native-hu` | openDHU's own head unit (a child process). Links the vendored `android-auto` crate. |
+| `opendhu-test` | YAML test schema, runner, JSON and JUnit reports, artifacts layout. The runner uses only the backend trait, so tests use a mock backend. |
+| `opendhu-daemon` | The HTTP server, auth, session state machine, event stream, tunnel keeper, and a small client. |
+| `opendhu-gui` | The `opendhu-gui` window (egui). A client of the daemon API only; see [gui.md](gui.md). |
+| `opendhu-cli` | The `aa` binary: argument parsing, config file, daemon start-up, output. |
 
-The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `autolab-native`, which starts `autolab-native-hu` as a child; the child links `autolab-native` only for the shared protocol types. Nothing above the trait changed.
+The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `opendhu-native`, which starts `opendhu-native-hu` as a child; the child links `opendhu-native` only for the shared protocol types. Nothing above the trait changed.
 
 ## A request, step by step
 
@@ -38,7 +38,7 @@ The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test
 
 ## State and files
 
-- **Runtime directory** (`$AUTOLAB_RUNTIME_DIR`, or `$TMPDIR/autolab-$USER`): mode 0700. It holds `daemon.json`
+- **Runtime directory** (`$OPENDHU_RUNTIME_DIR`, or `$TMPDIR/opendhu-$USER`): mode 0700. It holds `daemon.json`
   (mode 0600, with the bearer token) and `daemon.log` for an auto-started daemon.
 - **Session phases**: `idle → starting → running → stopping → idle`. `status` answers in every phase.
 - **No orphans**: the DHU quits when the daemon closes its stdin, so even a `SIGKILL` of the daemon leaves no DHU.
@@ -46,5 +46,5 @@ The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test
 ## What is real and what is not
 
 `supported` in `/v1/capabilities` means verified on real hardware (video focus, screenshots). `unverified` means
-the DHU has the command but AutoLab has not tried it. `observed` (phone-side confirmation) is always `unknown`.
+the DHU has the command but openDHU has not tried it. `observed` (phone-side confirmation) is always `unknown`.
 See [feasibility.md](feasibility.md) for evidence and [api.md](api.md) for the wire format.

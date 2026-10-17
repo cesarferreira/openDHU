@@ -1,0 +1,11 @@
+[package]
+name = "opendhu-dhu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Google Desktop Head Unit backend for openDHU"
+
+[dependencies]
+opendhu-core = { path = "../opendhu-core" }

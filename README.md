@@ -1,6 +1,12 @@
-# AutoLab
+# openDHU
 
-Programmable control of Android Auto, for testing apps that run in a car. AutoLab starts a head unit session with a
+Previously AutoLab. The command remains `aa`; helper binaries are `opendhu-native-hu` and
+`opendhu-gui`. Environment variables now use the `OPENDHU_` prefix, and project suite aliases
+live in `opendhu.yaml`. The default config and credentials live under `~/.config/opendhu/`;
+existing `~/.config/autolab/config.toml` and `~/.config/autolab/credentials/` are read as fallbacks
+when their new counterparts are absent.
+
+Programmable control of Android Auto, for testing apps that run in a car. openDHU starts a head unit session with a
 real phone over USB, then lets you press things from a terminal, a YAML test, an HTTP API or a desktop window: take
 or release video focus, touch the screen, take screenshots, watch the display live, and record the sound.
 
@@ -22,19 +28,19 @@ DHU is not needed.
 | **YAML tests** | Runs scripted tests with assertions, HTML, JSON and JUnit reports, Ctrl+C-safe cleanup | `aa test file.yaml` | yes | yes |
 | **HTTP API** | Everything above over a local, authenticated API, with a live event stream | `aa daemon`, [docs/api.md](docs/api.md) | yes | yes |
 | **Desktop window** | Session, live view, focus, screenshots, events, audio | `aa gui` | partly | yes |
-| **Config file** | Defaults for backend, serial, ports, paths and reports | `~/.config/autolab/config.toml` | yes | yes |
+| **Config file** | Defaults for backend, serial, ports, paths and reports | `~/.config/opendhu/config.toml` | yes | yes |
 | **Doctor** | Read-only check of your setup (DHU, adb, ffmpeg, device) | `aa doctor` | yes | yes |
 
 **DHU or native?** The DHU takes a command and tells you it took it; it never hears back from the phone. The native
-backend is AutoLab's own head unit: it sends the same messages, but it also reads the phone's reply, so
+backend is openDHU's own head unit: it sends the same messages, but it also reads the phone's reply, so
 `Phone confirmed: off` means the phone itself stopped projecting. The native backend is newer and less tested.
 
 | | DHU backend | Native backend |
 |---|---|---|
-| Needs | Google's DHU from the Android SDK | `autolab-native-hu`, `ffmpeg` |
+| Needs | Google's DHU from the Android SDK | `opendhu-native-hu`, `ffmpeg` |
 | `observed` (phone-side confirmation) | always `unknown` | the phone's own word |
 | Screenshot | written by the DHU | decoded from the phone's video |
-| Window | the DHU's own | AutoLab's live view |
+| Window | the DHU's own | openDHU's live view |
 | Touch, audio, live video | no | yes |
 
 `aa start` uses native by default. Use `aa start --dhu` for Google's DHU. The existing
@@ -47,13 +53,13 @@ Details: [docs/native-backend.md](docs/native-backend.md).
 
 - macOS (Linux is untested), Rust 1.87+
 - A phone with Android Auto, connected by USB, unlocked, and authorized for adb
-- **DHU backend:** the DHU from the Android SDK Manager (`extras;google;auto`). AutoLab never bundles it.
+- **DHU backend:** the DHU from the Android SDK Manager (`extras;google;auto`). openDHU never bundles it.
 - **Native backend:** `ffmpeg` (for screenshots, the live view and audio playback; `brew install ffmpeg`)
 
 ## Install
 
 ```bash
-make install        # aa, autolab-native-hu and autolab-gui into ~/.cargo/bin
+make install        # aa, opendhu-native-hu and opendhu-gui into ~/.cargo/bin
 aa doctor      # checks the DHU, adb, ffmpeg, the native head unit and your phone
 ```
 
@@ -102,22 +108,22 @@ to `aa test sample` to run without the head-unit window or spinners. Reports go 
 The native backend automatically loads your PEM client certificate and matching private key from:
 
 ```text
-~/.config/autolab/credentials/head-unit-cert.pem
-~/.config/autolab/credentials/head-unit-key.pem
+~/.config/opendhu/credentials/head-unit-cert.pem
+~/.config/opendhu/credentials/head-unit-key.pem
 ```
 
 Keep the private key outside the repository and restrict its permissions:
 
 ```bash
-chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
+chmod 600 ~/.config/opendhu/credentials/head-unit-key.pem
 aa start
 ```
 
-With custom credentials, AutoLab also advertises the developer DHU identity so debug Android Auto apps can
-appear. Set `AUTOLAB_NATIVE_IDENTITY=autolab` to opt out.
+With custom credentials, openDHU also advertises the developer DHU identity so debug Android Auto apps can
+appear. Set `OPENDHU_NATIVE_IDENTITY=opendhu` to opt out.
 
-If neither file exists, AutoLab uses its bundled certificate. If only one exists or either is unreadable or
-invalid, startup fails. To override the standard paths, set both `AUTOLAB_NATIVE_CERT` and `AUTOLAB_NATIVE_KEY`
+If neither file exists, openDHU uses its bundled certificate. If only one exists or either is unreadable or
+invalid, startup fails. To override the standard paths, set both `OPENDHU_NATIVE_CERT` and `OPENDHU_NATIVE_KEY`
 before starting the daemon. Restart the session after changing files; restart the daemon after changing its
 environment. `aa status` shows `Certificate: custom` or `Certificate: built-in` for the native backend;
 `--json` includes `certificateSource`. Older head units report `unknown` (`null` in JSON).
@@ -125,7 +131,7 @@ See [Native backend](docs/native-backend.md) for details.
 
 ### Higher resolution
 
-The native backend projects at 800×480 (480p) by default. Set `AUTOLAB_NATIVE_RESOLUTION=720p` or `=1080p`
+The native backend projects at 800×480 (480p) by default. Set `OPENDHU_NATIVE_RESOLUTION=720p` or `=1080p`
 before starting the daemon to ask the phone for a bigger screen instead; restart the session after changing
 it. `aa status` shows the active size (`Screen: 1280x720`); `--json` includes `screenWidth`/`screenHeight`.
 Touches, screenshots and the live view all follow whatever the running session reports.
@@ -205,10 +211,10 @@ phone, but had no visible effect on a Pixel 6, so they are marked experimental.
 
 ## Known limitations
 
-- **AutoLab can only control a session that it started.** A DHU launched from another terminal takes commands only on
+- **openDHU can only control a session that it started.** A DHU launched from another terminal takes commands only on
   its own stdin.
 - Starting a session re-enumerates the phone over USB, which drops `adb reverse` tunnels. `--reverse PORT` restores the
-  ones you ask for, and AutoLab re-applies them if the phone drops them later.
+  ones you ask for, and openDHU re-applies them if the phone drops them later.
 - Unplugging the phone ends the session (observed once). Plug it back in and run `aa start` again.
 - Native sessions support USB or forwarded loopback TCP. One head unit can hold a phone at a time: stop any DHU before using the native backend, and the other
   way round. With several phones attached, the native backend refuses to guess.
@@ -220,24 +226,44 @@ phone, but had no visible effect on a Pixel 6, so they are marked experimental.
 
 ```bash
 make                  # lint, vendor check, build, all tests, parse every example (no hardware)
+make docker-test      # same checks in Docker, plus real OCR and sample YAML validation
 make hw-dhu           # real phone + Google DHU
-make hw-native        # real phone + AutoLab's own head unit
+make hw-native        # real phone + openDHU's own head unit
 ```
 
 The hardware targets refuse to run if a DHU or daemon is already running, so they never touch someone else's session.
+
+`make docker-test` requires a running Docker engine and Docker Compose. It builds the Linux test
+image with pinned Rust, Python (for terminal tests), FFmpeg and English Tesseract, then runs every
+workspace unit/integration/doc test, formatting, Clippy, vendor checks, example validation, the real
+OCR and long-GOP video regressions, and Android sample YAML validation. Everything runs headlessly: no display, USB,
+phone, Android SDK or host credentials are needed. The GUI crate is compiled and its tests run
+without opening a window. Cargo downloads and Linux build output are cached in Docker volumes;
+source is copied into the image, so rebuilding includes local edits without modifying host files.
+
+Real-phone tests (`make hw-*`) and Android sample Gradle/emulator tests (`make sample-check`,
+`make sample-test`) remain separate. The sample's Android Auto journeys need a provisioned Google
+Play AVD; headless mode alone does not supply one. See [the sample guide](samples/android/README.md).
+To run a focused test with the same container environment:
+
+```bash
+docker compose run --build --rm tests cargo test --locked -p opendhu-test
+```
+
+`docker compose down --volumes` removes the test caches when you want a clean rebuild.
 
 ## Repository
 
 | Crate | Job |
 |---|---|
-| `autolab-core` | The backend trait, shared types, exit codes |
-| `autolab-dhu` | The DHU backend |
-| `autolab-native` | The native backend (drives `autolab-native-hu`) |
-| `autolab-native-hu` | AutoLab's own head unit, run as a child process |
-| `autolab-daemon` | The HTTP API, session state, events |
-| `autolab-test` | The YAML runner and reports |
-| `autolab-cli` | The `aa` command |
-| `autolab-gui` | The `autolab-gui` window |
+| `opendhu-core` | The backend trait, shared types, exit codes |
+| `opendhu-dhu` | The DHU backend |
+| `opendhu-native` | The native backend (drives `opendhu-native-hu`) |
+| `opendhu-native-hu` | openDHU's own head unit, run as a child process |
+| `opendhu-daemon` | The HTTP API, session state, events |
+| `opendhu-test` | The YAML runner and reports |
+| `opendhu-cli` | The `aa` command |
+| `opendhu-gui` | The `opendhu-gui` window |
 | `vendor/` | Patched copies of the `android-auto` crate (LGPL) and `rustls-webpki`, used by the native head unit only |
 
 ## Docs
@@ -251,9 +277,9 @@ The hardware targets refuse to run if a DHU or daemon is already running, so the
 | [docs/configuration.md](docs/configuration.md) | The config file |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together |
 | [docs/feasibility.md](docs/feasibility.md) | What was verified on a real phone, with evidence |
-| [docs/vision.md](docs/vision.md) | Why AutoLab exists, and what it's for |
+| [docs/vision.md](docs/vision.md) | Why openDHU exists, and what it's for |
 
 ## Licence
 
-Apache-2.0. `vendor/android-auto` is LGPL-3.0-or-later and `vendor/rustls-webpki` is ISC; see the `AUTOLAB-PATCHES.md`
-in each. AutoLab is a test tool, not a certified car head unit.
+Apache-2.0. `vendor/android-auto` is LGPL-3.0-or-later and `vendor/rustls-webpki` is ISC; see the `OPENDHU-PATCHES.md`
+in each. openDHU is a test tool, not a certified car head unit.

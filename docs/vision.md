@@ -1,6 +1,6 @@
 # Vision
 
-AutoLab's purpose is to replace the manual, DHU-driven workflow of testing Android Auto apps with a fully
+openDHU's purpose is to replace the manual, DHU-driven workflow of testing Android Auto apps with a fully
 scriptable one: start a head unit from a terminal, drive it like Espresso drives an Android app, and get the same
 controls from a CLI, a YAML test, an HTTP API or a desktop window.
 

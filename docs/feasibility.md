@@ -1,7 +1,7 @@
 # Milestone 0 — DHU feasibility
 
-Status: **viable.** AutoLab can control video focus on a real Android Auto session through a persistent
-DHU console. The one hard constraint is that AutoLab must start (and own) the DHU. It cannot attach to a
+Status: **viable.** openDHU can control video focus on a real Android Auto session through a persistent
+DHU console. The one hard constraint is that openDHU must start (and own) the DHU. It cannot attach to a
 DHU that something else started.
 
 Everything below is labelled **Observed** (seen on real hardware in this investigation), **Inferred**
@@ -35,11 +35,11 @@ desktop-head-unit [--usb=SERIAL | --adb[=HOSTPORT]] [--config=FILE.ini] [--headl
 - **Observed:** `--headless` works over USB. It attaches, answers console commands and writes screenshots.
 - **Observed (ADB transport only):** started with the default ADB transport while nothing listened on the
   phone's port 5277, the DHU printed `Failed to start Google Automotive Link.` and exited 0. Exit status alone
-  is therefore not a failure signal, and AutoLab reads the output instead. A `--usb` run with no phone
+  is therefore not a failure signal, and openDHU reads the output instead. A `--usb` run with no phone
   attached was **not tested**.
 - **Not tested:** `--adb` transport. It needs the phone's "Head Unit Server" started by hand in Android Auto
   developer settings plus `adb forward tcp:5277 tcp:5277`. Port 5277 was not listening on the phone during
-  this investigation. AutoLab does not script taps on the phone, so this path is left alone.
+  this investigation. openDHU does not script taps on the phone, so this path is left alone.
 - **Not tested:** `-I/--bridge` (wireless bridge), `-A/--aoa_audio_mode`.
 
 ## 3. The console
@@ -51,7 +51,7 @@ ready for the next one.
   `--headless` mode.
 - **Stream split matters.** The prompt and the banner go to **stdout**. Replies and log lines
   (`[I]:`, `[E]:`, `Verify returned: ok`) go to **stderr**. Reading them from two pipes loses their order,
-  and the prompt can be read before the reply. AutoLab merges both into one pipe so they arrive in write
+  and the prompt can be read before the reply. openDHU merges both into one pipe so they arrive in write
   order. This was a real bug in the first implementation. See section 9.
 - **Replies are synchronous and fast.** Every reply arrived within the same instant as the command
   (timestamps `+0.000s`), including repeated same-state commands.
@@ -106,7 +106,7 @@ The available commands are:
 
 ## 4. Video focus
 
-**Observed** on real hardware, three independent sessions plus the AutoLab CLI:
+**Observed** on real hardware, three independent sessions plus the openDHU CLI:
 
 ```
 focus video            -> [I]: Has video focus: true
@@ -118,7 +118,7 @@ focus video on         -> (prompt only)      # repeat of the current state is ac
 focus video bogus      -> [E]: Invalid state 'bogus'
 ```
 
-A 12-call sequence that mixed on, off and repeated states ran against the real DHU through the AutoLab
+A 12-call sequence that mixed on, off and repeated states ran against the real DHU through the openDHU
 CLI, and the DHU readback matched the requested state every time.
 
 ### What is "accepted" and what is "observed"
@@ -145,7 +145,7 @@ second (the second figure includes the CLI's own startup).
 
 These are internal Android Auto log tags from version 18.0.164204. They are **not a stable API**. They can
 change with any Android Auto update, and they need adb. They are still the only phone-side signal found.
-AutoLab reports `observed: unknown` until a phone-side check is built on them. Do not treat the DHU
+openDHU reports `observed: unknown` until a phone-side check is built on them. Do not treat the DHU
 readback as proof that the phone changed state.
 
 ## 5. Screenshots
@@ -159,9 +159,9 @@ readback as proof that the phone changed state.
   No file is written. A screenshot step must therefore run while video focus is on.
 - **Observed:** the resolution follows the DHU config: 1280×720 with `default_720p.ini`, 800×480 with the
   built-in default.
-- **Not known:** how the DHU parses a path that contains spaces. AutoLab rejects such paths instead of guessing.
+- **Not known:** how the DHU parses a path that contains spaces. openDHU rejects such paths instead of guessing.
 - Implemented as `aa screenshot PATH` (see section 10). The DHU replies before the file is complete, so
-  AutoLab waits for the file to appear and stop growing, then reads its size from the PNG header.
+  openDHU waits for the file to appear and stop growing, then reads its size from the PNG header.
 
 ## 6. Process lifecycle
 
@@ -176,7 +176,7 @@ All **observed** on a live USB session:
 | Parent process killed with `SIGKILL` | the DHU exits too (its stdin pipe closes). No orphan. |
 
 **Inferred, not tested:** a second DHU cannot attach to the same phone while the first holds its USB
-accessory link. `aa doctor` reports a `desktop-head-unit` that AutoLab did not start, because that is
+accessory link. `aa doctor` reports a `desktop-head-unit` that openDHU did not start, because that is
 the likeliest cause of a failed `aa start`.
 
 Because a closed stdin ends the DHU, the daemon that owns the pipe cannot leave an orphan behind, even if
@@ -189,27 +189,27 @@ exit status 0 on every path means the exit code cannot tell a crash from a clean
 stdin, stdout and stderr attached to the user's terminal (`/dev/ttys051`). It opened no listening port and
 no control socket.
 
-A DHU has exactly one command channel: its own stdin. AutoLab cannot write to another process's stdin.
+A DHU has exactly one command channel: its own stdin. openDHU cannot write to another process's stdin.
 The only way in would be pushing keystrokes into the user's terminal, which is fragile, depends on the
 terminal, and is global desktop-style input injection that the PRD forbids.
 
-**Consequence.** "Existing session" means a session AutoLab started. `aa start` launches (if none is
-running) the AutoLab daemon, which owns the DHU's pipes and serves the loopback HTTP API described in
+**Consequence.** "Existing session" means a session openDHU started. `aa start` launches (if none is
+running) the openDHU daemon, which owns the DHU's pipes and serves the loopback HTTP API described in
 [api.md](api.md). `aa focus video on|off`, `status`, `stop` and every other command are clients of that
 API. (The first version used a Unix socket owned by a supervisor process; the PRD requires the CLI and GUI to
 share one API, so that socket is gone.)
 
 Options for teams that already launch the DHU from their own script (not implemented, not tested):
 
-1. Run the DHU through AutoLab. This is what the PoC does.
-2. Change the launcher to read the DHU's stdin from a named pipe that both the user's terminal and AutoLab
+1. Run the DHU through openDHU. This is what the PoC does.
+2. Change the launcher to read the DHU's stdin from a named pipe that both the user's terminal and openDHU
    can write to. The existing script passes the terminal's stdin through with `<&0`.
 
 ## 7a. Side effect: USB re-enumeration and adb tunnels
 
 - **Observed:** the first logcat capture shows the phone failing to reach `127.0.0.1:10101`
   (`TcpMetricsLogger: connect … dst=[127.0.0.1]:10101 … err=111`, connection refused), and the projected
-  app showed a retry state. After the AutoLab sessions, `adb reverse --list` was empty.
+  app showed a retry state. After the openDHU sessions, `adb reverse --list` was empty.
 - **Inferred:** the accessory-mode switch re-enumerates the phone over USB, which drops `adb reverse` and
   `adb forward` tunnels. The user's own launch script says the same in a comment and re-applies
   its `adb reverse` tunnel after the switch.
@@ -264,7 +264,7 @@ One run only; a different cable, phone or timing could behave differently.
 | `focus video toggle|lock|unlock|off-transient` | In `help`. **Not exercised.** |
 
 **Connection state.** The line `Verify returned: ok` (TLS finished) proves the link to the phone is up. It does
-not prove that projection is visible. adb visibility proves even less. AutoLab uses the handshake line as its
+not prove that projection is visible. adb visibility proves even less. openDHU uses the handshake line as its
 "running" signal and says no more.
 
 ### Where the PRD's names do not match this DHU
@@ -280,7 +280,7 @@ Found by running against real hardware. The first two have regression tests. For
 selection is unit-tested; the wait itself was checked by hand, not by an automated test:
 
 1. **Discovery fell through an explicit path.** `--dhu-path /missing` quietly launched the SDK's DHU. An
-   explicit path or `AUTOLAB_DHU_PATH` that is unusable is now an error.
+   explicit path or `OPENDHU_DHU_PATH` that is unusable is now an error.
 2. **Replies lost to the prompt.** Reading stdout and stderr from separate pipes dropped the DHU's reply
    intermittently, which showed up as `backend_reported: unknown` on the real device. Fixed by using
    one shared pipe. The regression test (300 consecutive readbacks) failed on the old code in 3 of 3 runs
@@ -294,13 +294,13 @@ selection is unit-tested; the wait itself was checked by hand, not by an automat
 ## 10. What is implemented
 
 `aa start [--reverse PORT]… | stop | status | focus video on|off | screenshot | test | doctor`, with `--json` (camelCase keys), deterministic
-exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `autolab-core`. USB transport only. `doctor` is
-read-only and warns about a DHU that AutoLab does not own.
+exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `opendhu-core`. USB transport only. `doctor` is
+read-only and warns about a DHU that openDHU does not own.
 
 `aa screenshot PATH|-o PATH` validates the path (must end in `.png`, no whitespace, existing directory),
 removes any stale file, and reports the path and size of the file that was actually written.
 
-`aa test PATH…` runs YAML tests through the backend trait (`autolab-test` depends only on `autolab-core`);
+`aa test PATH…` runs YAML tests through the backend trait (`opendhu-test` depends only on `opendhu-core`);
 see [testing.md](testing.md). Verified on the phone with `examples/video-focus.yaml`, `focus-status.yaml` and
 `screenshots.yaml`, and the generated JUnit passes `xmllint`. Ctrl+C and SIGTERM stop a run cleanly (focus restored, artifacts
 written, exit 130); this was verified with real signals against the fake DHU and on the phone.
@@ -316,12 +316,12 @@ Not implemented: night mode, driving restrictions, audio and nav focus (their en
 
 - `cargo test --workspace` needs no hardware. It covers console parsing (using strings captured from the real
   DHU), discovery, adb parsing, exit codes, and the process and session lifecycle against a scripted fake DHU
-  (`crates/autolab-dhu/tests/fixtures/fake-dhu.sh`). The fake reproduces the real stream split.
-- `AUTOLAB_HW=1 cargo test -p autolab-cli --test hardware -- --ignored --nocapture` runs the real DHU against a
+  (`crates/opendhu-dhu/tests/fixtures/fake-dhu.sh`). The fake reproduces the real stream split.
+- `OPENDHU_HW=1 cargo test -p opendhu-cli --test hardware -- --ignored --nocapture` runs the real DHU against a
   connected phone. It needs the phone unlocked with Android Auto set up and nothing else holding the phone's
   USB accessory link (stop any DHU first).
 
-The fake DHU proves AutoLab's handling of the console contract. It does not prove the real DHU. Only the
+The fake DHU proves openDHU's handling of the console contract. It does not prove the real DHU. Only the
 hardware test and the observations above do.
 
 ## 12. Not done in Milestone 0
@@ -336,7 +336,7 @@ hardware test and the observations above do.
 | Criterion | Result |
 |---|---|
 | At least one focus operation demonstrated | Yes, video focus on and off on a real Pixel 6, with phone-side evidence. |
-| Backend control mechanism understood | Yes: persistent stdin console, owned by AutoLab. |
+| Backend control mechanism understood | Yes: persistent stdin console, owned by openDHU. |
 | Supported capabilities recorded | Yes, section 8. |
 | No unsupported functionality assumed | Unverified items are marked as such. |
 

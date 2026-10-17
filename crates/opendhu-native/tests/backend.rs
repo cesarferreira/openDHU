@@ -1,0 +1,295 @@
+//! `NativeBackend` against a scripted fake head unit. Real-phone behaviour is covered by the
+//! hardware test in opendhu-cli.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use opendhu_core::{Error, FocusState, HeadUnitBackend, OpStatus, Support};
+use opendhu_native::{NativeBackend, NativeLaunch};
+
+fn fake() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/fake-native-hu.sh"
+    ))
+}
+
+fn launch(mode: &str, ready: Duration) -> Result<NativeBackend, Error> {
+    // The mode reaches the child through the environment it inherits.
+    // SAFETY: each test sets its own variable name before spawning and nothing else reads it.
+    let launch = NativeLaunch {
+        program: fake(),
+        serial: Some("FAKE0001".into()),
+        tcp: None,
+    };
+    unsafe { std::env::set_var("FAKE_NATIVE_MODE", mode) };
+    let r = NativeBackend::launch_with_ready_timeout(&launch, &[] as &[&str], ready);
+    unsafe { std::env::remove_var("FAKE_NATIVE_MODE") };
+    r
+}
+
+/// The tests change one process-wide variable, so they take turns.
+static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn start(mode: &str) -> NativeBackend {
+    launch(mode, Duration::from_secs(10)).expect("fake head unit starts")
+}
+
+#[test]
+fn status_focus_and_screenshot_follow_the_phone_not_the_request() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = start("");
+    let st = b.status().unwrap();
+    assert_eq!(st.backend, "native");
+    assert_eq!(st.backend_version.as_deref(), Some("fake 0.0"));
+    assert_eq!(st.serial.as_deref(), Some("FAKE0001"));
+    assert_eq!(st.video_focus.observed, FocusState::On);
+
+    let r = b.set_video_focus(false).unwrap();
+    assert_eq!(r.status, OpStatus::Observed);
+    assert_eq!(
+        (r.requested, r.observed),
+        (FocusState::Off, FocusState::Off)
+    );
+    assert_eq!(b.status().unwrap().video_focus.observed, FocusState::Off);
+
+    let dir = std::env::temp_dir().join(format!("al-native-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let shot = dir.join("a.png");
+    let refused = b.screenshot(&shot).unwrap_err();
+    assert!(
+        refused.to_string().contains("nothing to screenshot"),
+        "{refused}"
+    );
+    assert!(!shot.exists());
+
+    b.set_video_focus(true).unwrap();
+    let ok = b.screenshot(&shot).unwrap();
+    assert_eq!((ok.width, ok.height), (800, 480));
+    assert!(shot.is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let caps = b.capabilities().unwrap();
+    assert_eq!(caps.backend, "native");
+    assert_eq!(caps.video_focus, Support::Supported);
+    assert_eq!(caps.touch_input, Support::Supported);
+    assert_eq!(caps.key_input, Support::Unverified);
+    assert_eq!(caps.audio_focus, Support::Unverified);
+    b.stop().unwrap();
+}
+
+#[test]
+fn a_focus_change_the_phone_does_not_confirm_stays_a_timeout() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = start("no-confirm");
+    let r = b.set_video_focus(false).unwrap();
+    assert_eq!(r.status, OpStatus::TimedOut);
+    assert!(!r.status.is_success());
+    assert_eq!(
+        r.observed,
+        FocusState::On,
+        "observed stays the phone's word"
+    );
+}
+
+#[test]
+fn a_head_unit_that_never_announces_ready_is_a_timeout_and_is_cleaned_up() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let err = launch("never-ready", Duration::from_millis(400))
+        .err()
+        .expect("must time out");
+    assert!(matches!(err, Error::Timeout(_)), "{err}");
+    assert_eq!(err.exit_code(), 6);
+}
+
+#[test]
+fn early_exit_reports_the_exit_status_and_what_the_child_printed() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let early = launch("exit-early", Duration::from_secs(5)).err().unwrap();
+    assert!(matches!(early, Error::BackendUnavailable(_)), "{early}");
+    assert!(early.to_string().contains("exit status: 4"), "{early}");
+    let junk = launch("junk-then-exit", Duration::from_secs(5))
+        .err()
+        .unwrap();
+    assert!(junk.to_string().contains("usb exploded"), "{junk}");
+}
+
+#[test]
+fn a_head_unit_that_dies_mid_session_is_unavailable_never_a_hang() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = start("crash-on-focus");
+    let err = b.set_video_focus(false).unwrap_err();
+    assert!(matches!(err, Error::BackendUnavailable(_)), "{err}");
+    let status = b.exit_status().expect("exit is noticed");
+    assert!(
+        status.contains("exit") || status.contains("closed"),
+        "{status}"
+    );
+    assert!(matches!(
+        b.status().unwrap_err(),
+        Error::BackendUnavailable(_)
+    ));
+}
+
+#[test]
+fn a_missing_program_is_backend_unavailable() {
+    let err = NativeBackend::launch(&NativeLaunch {
+        program: "/no/such/opendhu-native-hu".into(),
+        serial: None,
+        tcp: None,
+    })
+    .err()
+    .unwrap();
+    assert!(matches!(err, Error::BackendUnavailable(_)), "{err}");
+}
+
+#[test]
+fn dropping_the_backend_ends_the_child() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let b = start("");
+    let pid = b.pid();
+    drop(b);
+    std::thread::sleep(Duration::from_millis(500));
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(!alive, "the child must not outlive the backend");
+}
+
+#[test]
+fn video_reaches_a_viewer_starting_with_a_burst_and_the_head_unit_stops_when_the_last_viewer_leaves()
+ {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let log = std::env::temp_dir().join(format!("al-native-video-{}.log", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    // SAFETY: tests take turns on LOCK, and nothing else reads this variable.
+    unsafe { std::env::set_var("FAKE_NATIVE_LOG", &log) };
+    let mut b = start("");
+    let rx = b.subscribe_video().unwrap();
+    assert_eq!(b.video_viewers(), 1);
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        first.as_slice(),
+        b"SPSPPSIDR",
+        "a viewer starts at the burst"
+    );
+    let next = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        next.starts_with(b"FRAME"),
+        "{:?}",
+        String::from_utf8_lossy(&next)
+    );
+
+    // A second viewer asks for the burst again and both keep getting frames.
+    let rx2 = b.subscribe_video().unwrap();
+    assert_eq!(b.video_viewers(), 2);
+    assert_eq!(
+        rx2.recv_timeout(Duration::from_secs(5)).unwrap().as_slice(),
+        b"SPSPPSIDR"
+    );
+
+    drop(rx);
+    drop(rx2);
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::read_to_string(&log).is_ok_and(|t| t.contains("stream-off"))
+    });
+    assert!(
+        stopped,
+        "the head unit must be told to stop when nobody watches"
+    );
+    assert_eq!(b.video_viewers(), 0);
+    // The protocol is still in step: normal requests keep working after the video stopped.
+    assert_eq!(b.status().unwrap().backend, "native");
+    unsafe { std::env::remove_var("FAKE_NATIVE_LOG") };
+    b.stop().unwrap();
+    let _ = std::fs::remove_file(&log);
+}
+
+#[test]
+fn buttons_are_pressed_through_the_head_unit_and_refused_while_the_phone_is_not_projecting() {
+    use opendhu_core::Key;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = start("");
+    let r = b.press_key(Key::Home, false).unwrap();
+    assert_eq!(r.status, OpStatus::Accepted);
+    b.set_video_focus(false).unwrap();
+    let refused = b.press_key(Key::Back, true).unwrap_err();
+    assert!(
+        refused.to_string().contains("nothing to touch"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn audio_reaches_a_listener_per_channel_and_the_head_unit_stops_when_the_last_one_leaves() {
+    use opendhu_core::AudioChannel;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let log = std::env::temp_dir().join(format!("al-native-audio-{}.log", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    // SAFETY: tests take turns on LOCK, and nothing else reads this variable.
+    unsafe { std::env::set_var("FAKE_NATIVE_LOG", &log) };
+    let mut b = start("");
+    let rx = b.subscribe_audio(AudioChannel::Media).unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        first.starts_with(b"AUDIO"),
+        "{:?}",
+        String::from_utf8_lossy(&first)
+    );
+    // Another channel is a separate stream: the fake sends on the channel it was asked for.
+    let speech = b.subscribe_audio(AudioChannel::Speech).unwrap();
+    assert!(
+        speech
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .starts_with(b"AUDIO")
+    );
+    drop(rx);
+    drop(speech);
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::read_to_string(&log).is_ok_and(|t| t.contains("audio-off"))
+    });
+    assert!(
+        stopped,
+        "the head unit must be told to stop when nobody listens"
+    );
+    assert_eq!(b.status().unwrap().backend, "native", "still in step");
+    unsafe { std::env::remove_var("FAKE_NATIVE_LOG") };
+    b.stop().unwrap();
+    let _ = std::fs::remove_file(&log);
+}
+
+#[test]
+fn status_preserves_the_loaded_certificate_source() {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    for (mode, expected) in [
+        ("cert-custom", Some("custom")),
+        ("cert-built-in", Some("built-in")),
+        ("", None),
+    ] {
+        let mut backend = start(mode);
+        let status = serde_json::to_value(backend.status().unwrap()).unwrap();
+        assert_eq!(status["certificateSource"].as_str(), expected);
+    }
+}
+
+#[test]
+fn tcp_endpoint_is_passed_to_the_child_for_this_session() {
+    let launch = NativeLaunch {
+        program: "/bin/sh".into(),
+        serial: None,
+        tcp: Some("127.0.0.1:15277".into()),
+    };
+    let script = r#"[ "$OPENDHU_NATIVE_TCP" = "127.0.0.1:15277" ] || exit 9
+printf '%s\n' '{"event":"ready","backend_version":"tcp-test","backend_build":"test"}'
+cat >/dev/null"#;
+    let backend =
+        NativeBackend::launch_with_ready_timeout(&launch, &["-c", script], Duration::from_secs(2))
+            .unwrap();
+    drop(backend);
+}

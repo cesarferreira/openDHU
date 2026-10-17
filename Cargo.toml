@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/autolab-core",
-    "crates/autolab-daemon",
-    "crates/autolab-dhu",
-    "crates/autolab-test",
-    "crates/autolab-cli",
-    "crates/autolab-gui",
-    "crates/autolab-native",
-    "crates/autolab-native-hu",
+    "crates/opendhu-core",
+    "crates/opendhu-daemon",
+    "crates/opendhu-dhu",
+    "crates/opendhu-test",
+    "crates/opendhu-cli",
+    "crates/opendhu-gui",
+    "crates/opendhu-native",
+    "crates/opendhu-native-hu",
 ]
 # Vendored third-party code is built as a dependency only, never linted or formatted as ours.
 exclude = ["vendor"]
@@ -19,6 +19,7 @@ edition = "2024"
 rust-version = "1.87"
 license = "Apache-2.0"
 authors = ["Cesar Ferreira"]
+repository = "https://github.com/cesarferreira/openDHU"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -34,11 +35,11 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 ureq = { version = "3", default-features = false }
 thiserror = "2"
 android-auto = { path = "vendor/android-auto" }
-eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow"] }
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow", "x11"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Stock rustls-webpki rejects the X.509 v1 root that Android Auto phones present. See
-# vendor/rustls-webpki/AUTOLAB-PATCHES.md, and check this is used with `cargo tree -i rustls-webpki`.
+# vendor/rustls-webpki/OPENDHU-PATCHES.md, and check this is used with `cargo tree -i rustls-webpki`.
 [patch.crates-io]
 rustls-webpki = { path = "vendor/rustls-webpki" }
 

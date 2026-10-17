@@ -1,0 +1,23 @@
+[package]
+name = "opendhu-native-hu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "openDHU's own Android Auto head unit, run as a child process of the daemon"
+
+[[bin]]
+name = "opendhu-native-hu"
+path = "src/main.rs"
+
+[dependencies]
+android-auto.workspace = true
+opendhu-core = { path = "../opendhu-core" }
+opendhu-native = { path = "../opendhu-native" }
+async-trait = "0.1"
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "sync", "time", "process", "fs"] }
+image.workspace = true

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">AutoLab Demo</string>
+    <string name="app_name">openDHU Demo</string>
     <string name="phone_intro">A tiny places app for your phone and Android Auto.</string>
     <string name="favorite_label">SAVED PLACE</string>
     <string name="no_favorite">No favorite saved</string>

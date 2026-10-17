@@ -1,0 +1,15 @@
+[package]
+name = "opendhu-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YAML test runner for openDHU. Depends only on the backend trait, never on a head unit."
+
+[dependencies]
+opendhu-core = { path = "../opendhu-core" }
+serde.workspace = true
+serde_json.workspace = true
+serde_norway.workspace = true
+ureq.workspace = true

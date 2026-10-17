@@ -1,0 +1,13 @@
+name: opendhu
+
+services:
+  tests:
+    build: .
+    init: true
+    volumes:
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/app/target
+
+volumes:
+  cargo-registry:
+  cargo-target:

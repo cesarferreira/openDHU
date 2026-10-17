@@ -1,0 +1,20 @@
+[package]
+name = "opendhu-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Desktop window for the openDHU daemon"
+
+[[bin]]
+name = "opendhu-gui"
+path = "src/main.rs"
+
+[dependencies]
+opendhu-core = { path = "../opendhu-core" }
+opendhu-daemon = { path = "../opendhu-daemon" }
+opendhu-native = { path = "../opendhu-native" }
+eframe.workspace = true
+image.workspace = true
+serde_json.workspace = true

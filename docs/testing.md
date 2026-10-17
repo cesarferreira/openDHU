@@ -14,7 +14,7 @@ Progress is printed immediately by default, including suite setup, test names, e
 and its result and duration. Output is flushed when redirected to a terminal or CI log. With `--json`,
 progress goes to stderr and stdout contains only the final JSON report.
 
-Native tests open AutoLab's head-unit window by default:
+Native tests open openDHU's head-unit window by default:
 
 ```bash
 aa test e2e/production.yaml
@@ -22,7 +22,7 @@ aa test e2e/production.yaml --headless  # Run without the head-unit window
 ```
 
 The viewer connects to the test session, including a suite's private session. Install it with
-`make install-gui`. Google DHU sessions use their own existing window instead. The AutoLab window
+`make install-gui`. Google DHU sessions use their own existing window instead. The openDHU window
 and its decoder close when the run ends or is interrupted; closing the window yourself does not
 stop the tests. `--show-head-unit` remains accepted for existing commands.
 The phone emulator can remain headless: `environment.headless` controls the phone's window, while
@@ -48,7 +48,7 @@ Redirected output falls back to ordinary live logs. `--json` disables animation 
 keeping the final JSON on stdout and plain progress on stderr. Use `--headless` for CI runners
 without a display or installed GUI; this is independent of progress formatting.
 
-Register convenient names in a project `autolab.yaml` without duplicating suite setup:
+Register convenient names in a project `opendhu.yaml` without duplicating suite setup:
 
 ```yaml
 suites:
@@ -62,7 +62,7 @@ aa test robotaxi --filter persistence --interactive
 aa test storybook --filter route --validate
 ```
 
-A name resolves in the nearest `autolab.yaml` in the current directory or its ancestors. Target paths
+A name resolves in the nearest `opendhu.yaml` in the current directory or its ancestors. Target paths
 are relative to that file. Existing file/directory arguments take precedence over names. Run one named
 suite at a time. YAML still defines each suite's environment, services and test files.
 `--filter` selects test names or filenames by case-insensitive substring. All YAML is validated first;
@@ -113,7 +113,7 @@ all rejected with exit code 2. YAML files are read with `serde_norway`, a mainta
 state: running               # the DHU finished its handshake with the phone
 backend: dhu
 videoFocus:
-  requested: off             # what AutoLab last asked for
+  requested: off             # what openDHU last asked for
   backendReported: off       # the DHU's own readback
   observed: on               # the phone's own word: native backend only (see below)
 ```
@@ -187,7 +187,7 @@ screenshot gallery. It works offline without scripts or external resources. Keep
 together when sharing it so relative evidence links work. `--report` is repeatable and selects the exact
 formats to write, for example `--report html --report junit`.
 
-`metadata.json` holds only values that were observed: AutoLab version, start time, duration, and the backend's
+`metadata.json` holds only values that were observed: openDHU version, start time, duration, and the backend's
 name, version, build and device serial. `deviceModel`, `androidVersion`, `androidAutoVersion` and `display`
 are `null` because the backend interface cannot read them today.
 
@@ -229,7 +229,7 @@ Google Play phone AVD with Android Auto installed, developer mode enabled, and i
 consent accepted. `adb`, `ffmpeg`, and `tesseract` with English data must be on PATH. Set `ANDROID_HOME`
 or `ANDROID_SDK_ROOT` to locate the Android SDK emulator, or put `emulator` on PATH.
 
-AutoLab reuses a matching running AVD or starts the SDK emulator with `-no-window` and
+openDHU reuses a matching running AVD or starts the SDK emulator with `-no-window` and
 `-no-snapshot`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
 Auto's head-unit server through its Settings UI if needed, allocates a device-scoped ADB forward,
 and starts a private daemon. This does not replace an existing physical-phone session. Cleanup
@@ -308,7 +308,7 @@ tests: [production/*.yaml]
 
 Commands are argument arrays, run relative to the suite directory; optional `cwd` is also relative
 to that directory. Service stdout/stderr goes to `<name>.log`. Services receive
-`AUTOLAB_ARTIFACTS_DIR` so fixture code can create run-specific state there. AutoLab waits for each
+`OPENDHU_ARTIFACTS_DIR` so fixture code can create run-specific state there. openDHU waits for each
 loopback `readyPort`, fails if the port is occupied or leased by another suite, and stops owned
 process groups on completion, startup failure or interruption. Service readiness should be exposed
 only after dependencies are initialized; tests still assert actual backend responses.
@@ -338,7 +338,7 @@ Backend steps use a loopback fixture API, while the app uses its normal producti
   text: aut
   timeout: 30s
 - action: ui.tap
-  text: AutoLab Driver
+  text: openDHU Driver
   timeout: 15s
 - action: http.request
   method: GET
@@ -347,7 +347,7 @@ Backend steps use a loopback fixture API, while the app uses its normal producti
   timeout: 15s
 - action: app.restart
 - action: ui.expect
-  text: AutoLab Driver
+  text: openDHU Driver
   timeout: 30s
 ```
 

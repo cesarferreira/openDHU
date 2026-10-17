@@ -1,6 +1,6 @@
 # HTTP API (v1)
 
-The AutoLab daemon owns the head unit session and serves this API on `127.0.0.1`. The CLI uses exactly this
+The openDHU daemon owns the head unit session and serves this API on `127.0.0.1`. The CLI uses exactly this
 API, and so should anything else (a GUI, a CI script). There is no other way to reach the session.
 
 This is a pre-1.0 API. The `/v1` prefix reserves room for a breaking change later; until then, small changes
@@ -19,8 +19,8 @@ should not assume 8765: read `daemon.json`.
 
 ## Finding and authenticating to the daemon
 
-The daemon writes `daemon.json` into the runtime directory, `$AUTOLAB_RUNTIME_DIR` if set, otherwise
-`$TMPDIR/autolab-$USER`. The directory must be a real directory with mode 0700, and the file has mode 0600:
+The daemon writes `daemon.json` into the runtime directory, `$OPENDHU_RUNTIME_DIR` if set, otherwise
+`$TMPDIR/opendhu-$USER`. The directory must be a real directory with mode 0700, and the file has mode 0600:
 
 ```json
 { "port": 8765, "pid": 41022, "token": "3f…(64 hex chars)", "version": "0.1.0" }
@@ -31,7 +31,7 @@ Every request must carry `Authorization: Bearer <token>` and a `Host` of `127.0.
 start and is never logged.
 
 ```bash
-DIR="${TMPDIR:-/tmp}/autolab-$USER"; DIR="${DIR%/}"
+DIR="${TMPDIR:-/tmp}/opendhu-$USER"; DIR="${DIR%/}"
 PORT=$(python3 -c "import json;print(json.load(open('$DIR/daemon.json'))['port'])")
 TOKEN=$(python3 -c "import json;print(json.load(open('$DIR/daemon.json'))['token'])")
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/v1/status
@@ -125,13 +125,13 @@ Request bodies are JSON and reject unknown fields. Keys are camelCase.
 during a slow start. `phase` is the daemon's lifecycle (`starting`, `running`, `stopping`). `state` is the
 backend link: `running` means the DHU finished its handshake with the phone, not that projection is visible.
 
-`videoFocus.requested` is what AutoLab last asked for. `backendReported` is the DHU's own readback.
+`videoFocus.requested` is what openDHU last asked for. `backendReported` is the DHU's own readback.
 `observed` is a phone-side confirmation. With the DHU it is **always `unknown`**: the DHU gives no such signal. With the
 native backend it is what the phone itself last reported (`on` after its video start message, `off` after its stop
 message). Unknown values are explicit and are never guessed.
 
 Each entry in `tunnels` is checked live against `adb reverse --list` (`active`, `missing`, or `unknown` if adb
-did not answer), and `reapplied` counts how often AutoLab had to put it back.
+did not answer), and `reapplied` counts how often openDHU had to put it back.
 
 ### `POST /v1/session/start`
 
@@ -142,11 +142,11 @@ did not answer), and `reapplied` counts how often AutoLab had to put it back.
 
 The CLI defaults to native and sends its backend choice explicitly.
 
-Every field is optional. `backend` is `dhu` (Google's DHU, the HTTP API default) or `native` (AutoLab's own head unit, see
+Every field is optional. `backend` is `dhu` (Google's DHU, the HTTP API default) or `native` (openDHU's own head unit, see
 [native-backend.md](native-backend.md)). `dhuPath`, `config` and `headless` belong to the DHU; sending them with
 `native` is a `400 invalid_args`. Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
 appear), and several devices is an error rather than a guess. Without `dhuPath`, the DHU is found through
-`AUTOLAB_DHU_PATH` and the Android SDK; an explicit path that does not exist is an error, never a silent fallback.
+`OPENDHU_DHU_PATH` and the Android SDK; an explicit path that does not exist is an error, never a silent fallback.
 `reverse` lists ports to keep reachable on the phone with `adb reverse tcp:PORT tcp:PORT`. A tunnel counts only
 once `adb reverse --list` shows it; otherwise the whole start fails and the DHU is stopped. Relative paths are
 resolved against the daemon's working directory, so send absolute ones (the CLI does).
@@ -190,7 +190,7 @@ DHU refuses screenshots while video focus is off, which comes back as an error c
 ```
 
 `supported` was verified on real hardware. `unverified` means the backend may offer it (the DHU console has the
-command) but AutoLab has not exercised it, so the matching endpoint returns `501`. `unsupported` means the
+command) but openDHU has not exercised it, so the matching endpoint returns `501`. `unsupported` means the
 backend has no way to do it. Requires a running session, because it asks the backend.
 
 ### Live video: `GET /v1/video`
@@ -255,13 +255,13 @@ keepalive comment is sent every 15 s. A subscriber that falls too far behind get
 | `session.starting` / `session.started` / `session.start_failed` | session lifecycle; failure carries `message` |
 | `session.stopping` / `session.stopped` | a requested stop |
 | `session.ended` | the DHU died on its own; `reason` says how |
-| `focus.video.requested` | **AutoLab issued the command** (`operationId`, `enabled`) |
+| `focus.video.requested` | **openDHU issued the command** (`operationId`, `enabled`) |
 | `focus.video.accepted` / `focus.video.failed` | **what the backend answered** (`requested`, `backendReported`, `observed`, `evidence`). `accepted` includes a native-backend change the phone confirmed; a `timed_out` one is `failed` |
 | `screenshot.requested` / `screenshot.saved` / `screenshot.failed` | same split for screenshots |
 | `input.requested` / `input.accepted` / `input.failed` | touch, same split (`operationId`, `kind`, `at`, `evidence`) |
 | `tunnel.reapplied` | a dropped `adb reverse` tunnel was put back (`port`) |
 
-`requested` events are commands AutoLab issued; `accepted` and `failed` events report the backend's answer. No
+`requested` events are commands openDHU issued; `accepted` and `failed` events report the backend's answer. No
 event is named `confirmed` or `observed`: the `observed` field inside an event carries what the phone said, and is
 `unknown` with the DHU.
 
@@ -271,7 +271,7 @@ sees the final `session.stopped`.
 ## Concurrency and lifecycle
 
 - **One session**, one backend. Commands are serialized on the DHU console, so concurrent clients cannot interleave
-  on it. Twenty parallel focus requests all succeed and leave AutoLab's idea of the state equal to the DHU's.
+  on it. Twenty parallel focus requests all succeed and leave openDHU's idea of the state equal to the DHU's.
 - **Two clients starting at once:** exactly one gets `201`, the other `409`.
 - **A daemon started by `aa start`** exits when its session ends (`stop`, a failed start, or the DHU dying).
   **A daemon you started with `aa daemon`** stays up and can host another session.
