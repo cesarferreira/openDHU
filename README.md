@@ -66,7 +66,8 @@ aa screenshot out.png          # needs video focus on
 aa tap 400 240                 # native: touch a pixel of a screenshot
 aa swipe 300 200 100 200 --duration-ms 400
 aa audio out.wav --seconds 10  # native: record what the phone plays
-aa test examples/native-phone-confirms.yaml
+aa test examples/native-phone-confirms.yaml  # head-unit window and terminal spinners by default
+aa test examples/native-phone-confirms.yaml --headless --no-interactive
 aa test --validate e2e/suite.yaml  # validate a headless emulator suite before device setup
 aa status --json
 aa stop
@@ -121,7 +122,7 @@ Touches, screenshots and the live view all follow whatever the running session r
 | `aa swipe X1 Y1 X2 Y2 [--duration-ms N]` | Drag, 50 to 10000 ms (native) |
 | `aa key NAME [--long]` | Press a car button: `home back up down left right enter search play_pause next previous call end_call` (experimental) |
 | `aa audio OUT.wav [--channel media\|system\|speech] [--seconds N]` | Record phone audio and print how much arrived and how loud (native) |
-| `aa test FILES… [--report json\|junit] [--artifacts-dir D] [--skip-unsupported]` | Run YAML tests against the running session |
+| `aa test FILES… [--headless] [--no-interactive] [--report json\|junit] [--artifacts-dir D] [--skip-unsupported]` | Run YAML tests; native head-unit window and terminal spinners are enabled by default |
 | `aa doctor` | Check the environment without touching a session |
 | `aa daemon [--port N]` | Run the API daemon in the foreground (it stays up) |
 
@@ -129,6 +130,11 @@ Exit codes: 0 success, 1 general error, 2 invalid arguments, 3 backend unavailab
 5 unsupported, 6 timeout, 7 assertion failure, 8 session conflict, 130 interrupted.
 
 ## YAML tests
+
+`aa test` opens the native head-unit window and animates terminal progress by default. Use `--headless`
+to hide the window, `--no-interactive` to disable spinners, or both for CI. Redirected logs stay plain;
+`--json` keeps machine-readable output on stdout. `--validate` starts no session or window.
+The suite's `environment.headless` setting separately controls the phone emulator's window.
 
 ```yaml
 name: The phone confirms video focus changes
