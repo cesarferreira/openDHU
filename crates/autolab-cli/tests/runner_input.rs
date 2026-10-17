@@ -32,6 +32,7 @@ fn yaml_runner_forwards_tap_swipe_and_key_to_native_session() {
     let output = sandbox.autolab(&[
         "test",
         test.to_str().unwrap(),
+        "--headless",
         "--artifacts-dir",
         artifacts.to_str().unwrap(),
         "--report",
@@ -58,6 +59,7 @@ fn yaml_runner_forwards_tap_swipe_and_key_to_native_session() {
     let refused = sandbox.autolab(&[
         "test",
         test.to_str().unwrap(),
+        "--headless",
         "--artifacts-dir",
         artifacts.to_str().unwrap(),
     ]);

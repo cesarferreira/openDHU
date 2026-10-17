@@ -70,7 +70,7 @@ fn missing_gui_explains_how_to_install_it() {
 }
 
 #[test]
-fn test_viewer_uses_the_session_runtime_and_is_closed_after_the_run() {
+fn test_viewer_opens_by_default_uses_the_session_runtime_and_is_closed_after_the_run() {
     let s = Sandbox::new();
     let native = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -98,7 +98,6 @@ fn test_viewer_uses_the_session_runtime_and_is_closed_after_the_run() {
         .args([
             "test",
             file.to_str().unwrap(),
-            "--show-head-unit",
             "--artifacts-dir",
             s.scratch("art").to_str().unwrap(),
         ])
@@ -125,4 +124,61 @@ fn test_viewer_uses_the_session_runtime_and_is_closed_after_the_run() {
         "native",
         "standalone tests must leave the user's session running"
     );
+}
+
+#[test]
+fn headless_test_does_not_require_or_start_a_viewer() {
+    let s = Sandbox::new();
+    let native = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../autolab-native/tests/fixtures/fake-native-hu.sh"
+    );
+    let start = s.autolab_env(
+        &["start", "--backend", "native", "--serial", "FAKE0001"],
+        &[("AUTOLAB_NATIVE_HU", native)],
+    );
+    assert_eq!(code(&start), 0, "{}", text(&start));
+    let cli = isolated_cli(&s);
+    let file = s.scratch("headless.yaml");
+    let art = s.scratch("art");
+    std::fs::write(
+        &file,
+        "name: Headless test\nsteps: [{action: wait, duration: 10ms}]\n",
+    )
+    .unwrap();
+    let output = Command::new(cli)
+        .args([
+            "test",
+            file.to_str().unwrap(),
+            "--headless",
+            "--artifacts-dir",
+            art.to_str().unwrap(),
+        ])
+        .env("AUTOLAB_RUNTIME_DIR", &s.dir)
+        .env_remove("AUTOLAB_CONFIG")
+        .env("XDG_CONFIG_HOME", s.dir.join("no-xdg"))
+        .env("PATH", s.scratch("no-gui"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert!(!art.join("head-unit-viewer.log").exists());
+    assert!(text(&output).contains("1 passed"), "{}", text(&output));
+}
+
+#[test]
+fn contradictory_test_presentation_flags_are_rejected_before_startup() {
+    let s = Sandbox::new();
+    for flags in [
+        ["--headless", "--show-head-unit"],
+        ["--interactive", "--no-interactive"],
+    ] {
+        let output = s.autolab(&["test", "missing.yaml", flags[0], flags[1]]);
+        assert_eq!(code(&output), 2, "{}", text(&output));
+        assert!(
+            text(&output).contains("cannot be used with"),
+            "{}",
+            text(&output)
+        );
+    }
+    assert!(!s.dir.exists());
 }

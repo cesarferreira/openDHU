@@ -14,18 +14,20 @@ Progress is printed immediately by default, including suite setup, test names, e
 and its result and duration. Output is flushed when redirected to a terminal or CI log. With `--json`,
 progress goes to stderr and stdout contains only the final JSON report.
 
-To watch the projected head unit while tests run:
+Native tests open AutoLab's head-unit window by default:
 
 ```bash
-aa test e2e/production.yaml --show-head-unit
+aa test e2e/production.yaml
+aa test e2e/production.yaml --headless  # Run without the head-unit window
 ```
 
-`--show-head-unit` opens AutoLab's GUI connected to that test session, including a suite's private
-session. Install it with `make install-gui`. The native backend is required. The window and its decoder
-close when the run ends or is interrupted; closing the window yourself does not stop the tests.
+The viewer connects to the test session, including a suite's private session. Install it with
+`make install-gui`. Google DHU sessions use their own existing window instead. The AutoLab window
+and its decoder close when the run ends or is interrupted; closing the window yourself does not
+stop the tests. `--show-head-unit` remains accepted for existing commands.
 The phone emulator can remain headless: `environment.headless` controls the phone's window, while
-this flag shows the head unit. `--validate` opens no window. Viewer diagnostics go to
-`head-unit-viewer.log` in the artifacts directory.
+`aa test --headless` hides the head-unit viewer. `--validate` opens no window. Viewer diagnostics go
+to `head-unit-viewer.log` in the artifacts directory.
 
 ## Terminal progress and named suites
 
@@ -33,13 +35,18 @@ Terminal output colors current work cyan, passes green, failures/errors red and 
 `NO_COLOR` disables colors; redirected output and `TERM=dumb` stay plain.
 
 ```bash
-aa test e2e/production.yaml --interactive
-aa test e2e/production.yaml --interactive --show-head-unit
+aa test e2e/production.yaml                              # Window and animated terminal progress
+aa test e2e/production.yaml --no-interactive             # Window and ordinary live progress
+aa test e2e/production.yaml --headless --no-interactive  # No window or animated spinners
 ```
 
-`--interactive` animates the current setup stage or step on one line, with elapsed time, and replaces
-it with the result when finished. It falls back to ordinary live logs when stdout is redirected.
-`--json` disables animation and styling, keeping the final JSON on stdout and plain progress on stderr.
+Interactive progress is enabled by default in a terminal: the current setup stage or step animates
+on one line with elapsed time, and is replaced by its result when finished. `--no-interactive`
+disables the animation while retaining live logs and terminal colors. `--interactive` remains
+accepted for existing commands. Opposite flags cannot be combined.
+Redirected output falls back to ordinary live logs. `--json` disables animation and styling,
+keeping the final JSON on stdout and plain progress on stderr. Use `--headless` for CI runners
+without a display or installed GUI; this is independent of progress formatting.
 
 Register convenient names in a project `autolab.yaml` without duplicating suite setup:
 

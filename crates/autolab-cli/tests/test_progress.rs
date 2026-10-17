@@ -136,17 +136,24 @@ fn terminal_results_are_colored_but_no_color_and_redirected_logs_stay_plain() {
         "passes need green terminal styling: {}",
         text(&terminal)
     );
-    for output in [terminal_run(&s, &args, true), s.autolab(&args)] {
-        assert_eq!(code(&output), 0, "{}", text(&output));
+    let monochrome = terminal_run(&s, &args, true);
+    assert_eq!(code(&monochrome), 0, "{}", text(&monochrome));
+    for color in ["\x1b[32m", "\x1b[36m", "\x1b[0m"] {
         assert!(
-            !output.stdout.contains(&0x1b),
-            "plain mode leaked ANSI escapes"
+            !text(&monochrome).contains(color),
+            "NO_COLOR leaked styling"
         );
     }
+    let redirected = s.autolab(&args);
+    assert_eq!(code(&redirected), 0, "{}", text(&redirected));
+    assert!(
+        !redirected.stdout.contains(&0x1b),
+        "redirected logs leaked ANSI escapes"
+    );
 }
 
 #[test]
-fn interactive_animates_a_wait_then_leaves_its_result_and_preserves_json() {
+fn interactive_defaults_animate_a_wait_then_leave_its_result_and_preserve_json() {
     let s = Sandbox::new();
     assert_eq!(code(&s.start_fake()), 0);
     let file = s.scratch("spinner.yaml");
@@ -159,7 +166,6 @@ fn interactive_animates_a_wait_then_leaves_its_result_and_preserves_json() {
     let args = [
         "test",
         file.to_str().unwrap(),
-        "--interactive",
         "--artifacts-dir",
         art.to_str().unwrap(),
     ];
@@ -174,6 +180,15 @@ fn interactive_animates_a_wait_then_leaves_its_result_and_preserves_json() {
         shown.contains("wait (500ms)") && shown.contains("PASS") && shown.contains("1 passed"),
         "{shown}"
     );
+    let mut static_args = args.to_vec();
+    static_args.push("--no-interactive");
+    let static_output = terminal_run(&s, &static_args, true);
+    assert_eq!(code(&static_output), 0, "{}", text(&static_output));
+    assert!(
+        !text(&static_output).contains("\x1b[2K"),
+        "spinner must be disabled"
+    );
+    assert!(text(&static_output).contains("RUN 1. wait"));
     let plain = s.autolab(&args);
     assert_eq!(code(&plain), 0, "{}", text(&plain));
     assert!(

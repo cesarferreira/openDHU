@@ -231,12 +231,8 @@ pub fn run(mut opts: Options) -> Result<u8> {
             cancel
         }
     };
-    let _viewer = if opts.show_head_unit {
-        if head.backend != "native" {
-            return Err(Error::Unsupported(
-                "--show-head-unit requires the native backend".into(),
-            ));
-        }
+    // Google's DHU owns its own window; the AutoLab viewer is for native sessions only.
+    let _viewer = if opts.show_head_unit && head.backend == "native" {
         progress(&output, "Opening the head-unit viewer...");
         Some(crate::viewer::Viewer::start(
             opts.runtime_dir.as_deref(),

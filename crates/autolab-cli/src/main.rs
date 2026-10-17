@@ -136,12 +136,18 @@ enum Command {
         /// Validate suite and test files without starting a device or session
         #[arg(long)]
         validate: bool,
-        /// Show the test session in an AutoLab head-unit window (requires autolab-gui)
-        #[arg(long)]
+        /// Show the native head-unit window (enabled by default; requires autolab-gui)
+        #[arg(long, conflicts_with = "headless")]
         show_head_unit: bool,
-        /// Animate the current setup stage or step in a terminal
+        /// Hide the head-unit window while running tests
         #[arg(long)]
+        headless: bool,
+        /// Animate terminal progress (enabled by default)
+        #[arg(long, conflicts_with = "no_interactive")]
         interactive: bool,
+        /// Print ordinary live progress without animated spinners
+        #[arg(long)]
+        no_interactive: bool,
         /// Run tests whose name or filename contains this text (case-insensitive)
         #[arg(long)]
         filter: Option<String>,
@@ -348,7 +354,9 @@ fn run(cli: Cli) -> Result<u8> {
             skip_unsupported,
             validate,
             show_head_unit,
+            headless,
             interactive,
+            no_interactive,
             filter,
         } => {
             let cfg = load()?;
@@ -361,8 +369,11 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
-                show_head_unit,
-                output: std::sync::Arc::new(test_output::Output::new(json, interactive)),
+                show_head_unit: show_head_unit || !headless,
+                output: std::sync::Arc::new(test_output::Output::new(
+                    json,
+                    interactive || !no_interactive,
+                )),
                 filter,
                 validate,
                 cancel: None,
