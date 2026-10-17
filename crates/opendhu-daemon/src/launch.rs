@@ -91,7 +91,7 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
     if req.native_tcp.is_none()
         && let Ok(adb) = adb_path()
         && let Ok(devices) = adb::list_devices(&adb)
-        && devices.iter().filter(|d| d.state == "device").count() > 1
+        && devices.iter().filter(|d| d.usb).count() > 1
     {
         return Err(Error::InvalidArgs(
             "several phones are attached; the native backend cannot choose between them, so unplug the others"
@@ -218,6 +218,7 @@ mod tests {
             serial: serial.into(),
             state: state.into(),
             model: None,
+            usb: true,
         }
     }
 

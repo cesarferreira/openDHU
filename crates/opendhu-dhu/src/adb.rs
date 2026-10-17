@@ -10,6 +10,7 @@ pub struct AdbDevice {
     pub serial: String,
     pub state: String,
     pub model: Option<String>,
+    pub usb: bool,
 }
 
 /// Parse `adb devices -l` output.
@@ -21,6 +22,7 @@ pub fn parse_devices(out: &str) -> Vec<AdbDevice> {
             let mut it = l.split_whitespace();
             let serial = it.next()?.to_string();
             let state = it.next()?.to_string();
+            let usb = it.clone().any(|t| t.starts_with("usb:"));
             let model = it
                 .find_map(|t| t.strip_prefix("model:"))
                 .map(str::to_string);
@@ -28,6 +30,7 @@ pub fn parse_devices(out: &str) -> Vec<AdbDevice> {
                 serial,
                 state,
                 model,
+                usb,
             })
         })
         .collect()
@@ -164,7 +167,8 @@ mod tests {
             vec![AdbDevice {
                 serial: "1A141FDF600AF2".into(),
                 state: "device".into(),
-                model: Some("Pixel_6".into())
+                model: Some("Pixel_6".into()),
+                usb: true,
             }]
         );
     }

@@ -97,9 +97,10 @@ make sample-build     # Build the sample APK (Android SDK + JDK 17+)
 make sample-check     # Android unit tests, lint and E2E YAML validation
 make sample-test      # Build and run on the provisioned medium_phone AVD
 aa test sample        # Rerun without rebuilding; head unit and spinners enabled by default
+aa test sample --usb  # Use the single authorized USB phone instead of the configured AVD
 ```
 
-See the sample guide for one-time Android Auto emulator provisioning. Add `--headless --no-interactive`
+See the sample guide for one-time Android Auto provisioning on an emulator or USB phone. Add `--headless --no-interactive`
 to `aa test sample` to run without the head-unit window or spinners. Reports go to
 `samples/android/build/test-results/run-*/`; open `results.html` for results, steps, logs and screenshots.
 
@@ -226,32 +227,15 @@ phone, but had no visible effect on a Pixel 6, so they are marked experimental.
 
 ```bash
 make                  # lint, vendor check, build, all tests, parse every example (no hardware)
-make docker-test      # same checks in Docker, plus real OCR and sample YAML validation
 make hw-dhu           # real phone + Google DHU
 make hw-native        # real phone + openDHU's own head unit
 ```
 
 The hardware targets refuse to run if a DHU or daemon is already running, so they never touch someone else's session.
 
-`make docker-test` requires a running Docker engine and Docker Compose. It builds the Linux test
-image with pinned Rust, Python (for terminal tests), FFmpeg and English Tesseract, then runs every
-workspace unit/integration/doc test, formatting, Clippy, vendor checks, example validation, the real
-OCR and long-GOP video regressions, and Android sample YAML validation. Everything runs headlessly: no display, USB,
-phone, Android SDK or host credentials are needed. The GUI crate is compiled and its tests run
-without opening a window. Cargo downloads and Linux build output are cached in Docker volumes;
-source is copied into the image, so rebuilding includes local edits without modifying host files.
-
 Real-phone tests (`make hw-*`) and Android sample Gradle/emulator tests (`make sample-check`,
 `make sample-test`) remain separate. The sample's Android Auto journeys need a provisioned Google
-Play AVD; headless mode alone does not supply one. See [the sample guide](samples/android/README.md).
-To run a focused test with the same container environment:
-
-```bash
-docker compose run --build --rm tests cargo test --locked -p opendhu-test
-```
-
-`docker compose down --volumes` removes the test caches when you want a clean rebuild.
-
+Play AVD or an authorized, provisioned USB phone (`aa test sample --usb`); headless mode alone does not supply one. See [the sample guide](samples/android/README.md).
 ## Repository
 
 | Crate | Job |

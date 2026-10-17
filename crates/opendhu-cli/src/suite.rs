@@ -1,4 +1,4 @@
-//! Own one isolated emulator projection session while executing ordinary YAML tests.
+//! Own one isolated phone or emulator projection session while executing ordinary YAML tests.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
@@ -227,6 +227,35 @@ fn find_emulator(adb: &Path, name: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+fn find_usb_phone(adb: &Path) -> Result<String> {
+    let output = device::command(adb, &["devices", "-l"], Duration::from_secs(20))?;
+    let devices = opendhu_dhu::adb::parse_devices(&output);
+    let phones: Vec<_> = devices.iter().filter(|device| device.usb).collect();
+    match phones.as_slice() {
+        [] => Err(Error::DeviceDisconnected(
+            "no USB phone found; connect a phone, enable USB debugging and authorize this computer"
+                .into(),
+        )),
+        [phone] if phone.state == "device" => Ok(phone.serial.clone()),
+        [phone] if phone.state == "unauthorized" => Err(Error::DeviceDisconnected(format!(
+            "USB phone {} is unauthorized; unlock it and accept the USB debugging prompt",
+            phone.serial,
+        ))),
+        [phone] => Err(Error::DeviceDisconnected(format!(
+            "USB phone {} is {}; reconnect it and check `adb devices -l`",
+            phone.serial, phone.state,
+        ))),
+        _ => Err(Error::InvalidArgs(format!(
+            "multiple USB phones attached ({}); unplug the others before using --usb",
+            phones
+                .iter()
+                .map(|phone| phone.serial.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ))),
+    }
+}
+
 fn suite_cli(exe: &Path, runtime: &Path, args: &[&str], cancel: Option<&AtomicBool>) -> Result<()> {
     let mut child = Command::new(exe)
         .args(args)
@@ -279,8 +308,40 @@ struct Lease {
     artifacts: PathBuf,
 }
 impl Lease {
+    fn acquire_reverses(
+        &mut self,
+        serial: &str,
+        ports: &[ReversePort],
+        output: &crate::test_output::Output,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        for port in ports {
+            check_cancel(cancel)?;
+            test_cmd::progress(
+                output,
+                format!(
+                    "Forwarding device port {} to host {}...",
+                    port.device, port.host
+                ),
+            );
+            self.reverses.push(crate::reverse::ReverseLease::acquire(
+                &self.adb,
+                serial,
+                port.device,
+                port.host,
+            )?);
+        }
+        Ok(())
+    }
+
     fn cleanup(&mut self) -> Result<()> {
         let mut errors = Vec::new();
+        // Leaving USB accessory mode disconnects ADB, so remove tunnels before stopping projection.
+        for mut reverse in self.reverses.drain(..).rev() {
+            if let Err(e) = reverse.cleanup() {
+                errors.push(e.message().to_string());
+            }
+        }
         if self.runtime.exists() {
             // A failed start can leave a daemon without a session; terminate only this private PID.
             let _ = suite_cli(&self.exe, &self.runtime, &["stop"], None);
@@ -305,11 +366,6 @@ impl Lease {
             let _ = child.wait();
         }
         if let Some(serial) = &self.serial {
-            for mut reverse in self.reverses.drain(..).rev() {
-                if let Err(e) = reverse.cleanup() {
-                    errors.push(e.message().to_string());
-                }
-            }
             if let Some(port) = self.forward.take()
                 && let Err(e) = device::adb(&self.adb, serial, &["forward", "--remove", &port])
             {
@@ -430,22 +486,38 @@ fn run_prepared(
     };
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
     test_cmd::progress(&output, format!("Artifacts: {}", artifacts.display()));
-    let lock_dir = std::env::temp_dir().join("opendhu-emulator-locks");
+    let adb = PathBuf::from("adb");
+    let usb_serial = if opts.usb {
+        test_cmd::progress(&output, "Finding a USB phone...");
+        Some(find_usb_phone(&adb)?)
+    } else {
+        None
+    };
+    let lock_dir = std::env::temp_dir().join(if opts.usb {
+        "opendhu-usb-locks"
+    } else {
+        "opendhu-emulator-locks"
+    });
+    let device_name = usb_serial.as_deref().unwrap_or(&suite.environment.emulator);
+    // USB has one global lease because the native USB transport cannot select among phones.
+    let lock_name = if opts.usb {
+        "phone"
+    } else {
+        &suite.environment.emulator
+    };
     std::fs::create_dir_all(&lock_dir).map_err(|e| Error::Other(e.to_string()))?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(lock_dir.join(format!("{}.lock", suite.environment.emulator)))
+        .open(lock_dir.join(format!("{lock_name}.lock")))
         .map_err(|e| Error::Other(e.to_string()))?;
     lock.try_lock_exclusive().map_err(|_| {
         Error::SessionConflict(format!(
-            "emulator {} is already leased by another suite",
-            suite.environment.emulator
+            "device {device_name} is already leased by another suite"
         ))
     })?;
-    let adb = PathBuf::from("adb");
     let mut lease = Lease {
         exe: std::env::current_exe().map_err(|e| Error::Other(e.to_string()))?,
         runtime: std::env::temp_dir().join(format!("opendhu-suite-{}-{nonce}", std::process::id())),
@@ -479,84 +551,91 @@ fn run_prepared(
             .wait_ready(spec, &cancel)?;
         test_cmd::progress(&output, format!("Service {} ready", spec.name));
     }
-    test_cmd::progress(
-        &output,
-        format!("Finding emulator {}...", suite.environment.emulator),
-    );
-    let serial = match find_emulator(&lease.adb, &suite.environment.emulator)? {
-        Some(serial) => {
-            test_cmd::progress(&output, format!("Reusing emulator {serial}"));
-            serial
-        }
-        None => {
-            test_cmd::progress(
-                &output,
-                format!(
-                    "Booting emulator {}{} (up to 180s)...",
-                    suite.environment.emulator,
-                    if suite.environment.headless {
-                        " headlessly"
-                    } else {
-                        ""
-                    }
-                ),
-            );
-            let emulator = std::env::var_os("ANDROID_HOME")
-                .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
-                .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
-                .filter(|path| path.is_file())
-                .unwrap_or_else(|| PathBuf::from("emulator"));
-            let file = std::fs::File::create(artifacts.join("emulator.log"))
-                .map_err(|e| Error::Other(e.to_string()))?;
-            let mut command = Command::new(emulator);
-            command.args(["-avd", &suite.environment.emulator, "-no-snapshot"]);
-            if suite.environment.headless {
-                command.arg("-no-window");
+    let serial = if let Some(serial) = usb_serial {
+        test_cmd::progress(&output, format!("Using USB phone {serial}"));
+        serial
+    } else {
+        test_cmd::progress(
+            &output,
+            format!("Finding emulator {}...", suite.environment.emulator),
+        );
+        match find_emulator(&lease.adb, &suite.environment.emulator)? {
+            Some(serial) => {
+                test_cmd::progress(&output, format!("Reusing emulator {serial}"));
+                serial
             }
-            lease.emulator_child = Some(
-                command
-                    .stdin(Stdio::null())
-                    .stdout(file.try_clone().map_err(|e| Error::Other(e.to_string()))?)
-                    .stderr(file)
-                    .spawn()
-                    .map_err(|e| {
-                        Error::BackendUnavailable(format!("cannot start Android SDK emulator: {e}"))
-                    })?,
-            );
-            let deadline = Instant::now() + Duration::from_secs(180);
-            loop {
-                check_cancel(&cancel)?;
-                if let Some(serial) = find_emulator(&lease.adb, &suite.environment.emulator)? {
-                    lease.serial = Some(serial.clone());
+            None => {
+                test_cmd::progress(
+                    &output,
+                    format!(
+                        "Booting emulator {}{} (up to 180s)...",
+                        suite.environment.emulator,
+                        if suite.environment.headless {
+                            " headlessly"
+                        } else {
+                            ""
+                        }
+                    ),
+                );
+                let emulator = std::env::var_os("ANDROID_HOME")
+                    .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
+                    .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
+                    .filter(|path| path.is_file())
+                    .unwrap_or_else(|| PathBuf::from("emulator"));
+                let file = std::fs::File::create(artifacts.join("emulator.log"))
+                    .map_err(|e| Error::Other(e.to_string()))?;
+                let mut command = Command::new(emulator);
+                command.args(["-avd", &suite.environment.emulator, "-no-snapshot"]);
+                if suite.environment.headless {
+                    command.arg("-no-window");
+                }
+                lease.emulator_child = Some(
+                    command
+                        .stdin(Stdio::null())
+                        .stdout(file.try_clone().map_err(|e| Error::Other(e.to_string()))?)
+                        .stderr(file)
+                        .spawn()
+                        .map_err(|e| {
+                            Error::BackendUnavailable(format!(
+                                "cannot start Android SDK emulator: {e}"
+                            ))
+                        })?,
+                );
+                let deadline = Instant::now() + Duration::from_secs(180);
+                loop {
                     check_cancel(&cancel)?;
-                    if device::adb(
-                        &lease.adb,
-                        &serial,
-                        &["shell", "getprop", "sys.boot_completed"],
-                    )
-                    .is_ok_and(|value| value.trim() == "1")
-                    {
-                        break serial;
+                    if let Some(serial) = find_emulator(&lease.adb, &suite.environment.emulator)? {
+                        lease.serial = Some(serial.clone());
+                        check_cancel(&cancel)?;
+                        if device::adb(
+                            &lease.adb,
+                            &serial,
+                            &["shell", "getprop", "sys.boot_completed"],
+                        )
+                        .is_ok_and(|value| value.trim() == "1")
+                        {
+                            break serial;
+                        }
                     }
+                    if Instant::now() >= deadline {
+                        return Err(Error::Timeout(
+                            "emulator did not boot within 180s; see emulator.log".into(),
+                        ));
+                    }
+                    if lease
+                        .emulator_child
+                        .as_mut()
+                        .unwrap()
+                        .try_wait()
+                        .map_err(|e| Error::Other(e.to_string()))?
+                        .is_some()
+                    {
+                        return Err(Error::BackendUnavailable(
+                            "emulator exited during startup; see emulator.log".into(),
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
                 }
-                if Instant::now() >= deadline {
-                    return Err(Error::Timeout(
-                        "emulator did not boot within 180s; see emulator.log".into(),
-                    ));
-                }
-                if lease
-                    .emulator_child
-                    .as_mut()
-                    .unwrap()
-                    .try_wait()
-                    .map_err(|e| Error::Other(e.to_string()))?
-                    .is_some()
-                {
-                    return Err(Error::BackendUnavailable(
-                        "emulator exited during startup; see emulator.log".into(),
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(500));
             }
         }
     };
@@ -591,21 +670,8 @@ fn run_prepared(
             ],
         )?;
     }
-    for port in &suite.environment.reverse_ports {
-        check_cancel(&cancel)?;
-        test_cmd::progress(
-            &output,
-            format!(
-                "Forwarding device port {} to host {}...",
-                port.device, port.host
-            ),
-        );
-        lease.reverses.push(crate::reverse::ReverseLease::acquire(
-            &lease.adb,
-            &serial,
-            port.device,
-            port.host,
-        )?);
+    if !opts.usb {
+        lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
     if let Some(activity) = &suite.environment.launch_activity {
         let component = format!("{}/{activity}", suite.environment.package);
@@ -616,15 +682,52 @@ fn run_prepared(
             &["shell", "am", "start", "-W", "-n", &component],
         )?;
     }
-    test_cmd::progress(&output, "Restarting the Android Auto head-unit server...");
-    device::restart_head_unit_server(&lease.adb, &serial)?;
-    check_cancel(&cancel)?;
-    let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;
-    let port: u16 = port
-        .trim()
-        .parse()
-        .map_err(|_| Error::Other("adb did not return its allocated forwarding port".into()))?;
-    lease.forward = Some(format!("tcp:{port}"));
+    let endpoint = if opts.usb {
+        None
+    } else {
+        test_cmd::progress(&output, "Restarting the Android Auto head-unit server...");
+        device::restart_head_unit_server(&lease.adb, &serial)?;
+        check_cancel(&cancel)?;
+        let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;
+        let port: u16 = port
+            .trim()
+            .parse()
+            .map_err(|_| Error::Other("adb did not return its allocated forwarding port".into()))?;
+        lease.forward = Some(format!("tcp:{port}"));
+        Some(format!("127.0.0.1:{port}"))
+    };
+    test_cmd::progress(
+        &output,
+        "Starting the native head unit and waiting for projection...",
+    );
+    let mut start_args = vec!["start", "--backend", "native", "--serial", &serial];
+    if let Some(endpoint) = &endpoint {
+        start_args.extend(["--native-tcp", endpoint]);
+    }
+    suite_cli(&lease.exe, &lease.runtime, &start_args, Some(&cancel))?;
+    if opts.usb {
+        test_cmd::progress(&output, "Waiting for USB phone to return to ADB...");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            check_cancel(&cancel)?;
+            if device::command(
+                &lease.adb,
+                &["-s", &serial, "get-state"],
+                Duration::from_secs(2),
+            )
+            .is_ok_and(|state| state.trim() == "device")
+            {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::DeviceDisconnected(format!(
+                    "USB phone {serial} did not return to ADB within 30s after projection started",
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
+    }
     let log = std::fs::File::create(artifacts.join("logcat.txt"))
         .map_err(|e| Error::Other(e.to_string()))?;
     lease.logcat = Some(
@@ -636,25 +739,6 @@ fn run_prepared(
             .spawn()
             .map_err(|e| Error::Other(e.to_string()))?,
     );
-    let endpoint = format!("127.0.0.1:{port}");
-    test_cmd::progress(
-        &output,
-        "Starting the native head unit and waiting for projection...",
-    );
-    suite_cli(
-        &lease.exe,
-        &lease.runtime,
-        &[
-            "start",
-            "--backend",
-            "native",
-            "--serial",
-            &serial,
-            "--native-tcp",
-            &endpoint,
-        ],
-        Some(&cancel),
-    )?;
     test_cmd::progress(&output, "Requesting video focus...");
     suite_cli(
         &lease.exe,
@@ -662,14 +746,18 @@ fn run_prepared(
         &["focus", "video", "on"],
         Some(&cancel),
     )?;
-    let metadata = serde_json::json!({"emulator": suite.environment.emulator, "serial": serial,
-        "package": suite.environment.package, "apk": suite.environment.apk, "transport":"tcp"});
+    let metadata = serde_json::json!({
+        "emulator": if opts.usb { None } else { Some(&suite.environment.emulator) },
+        "serial": serial, "package": suite.environment.package, "apk": suite.environment.apk,
+        "transport": if opts.usb { "usb" } else { "tcp" },
+    });
     std::fs::write(
         artifacts.join("suite.json"),
         serde_json::to_vec_pretty(&metadata).unwrap(),
     )
     .map_err(|e| Error::Other(e.to_string()))?;
     opts.cancel = Some(Arc::clone(&cancel));
+    opts.usb = false; // Device setup is complete; ordinary tests use the leased session.
     opts.paths = tests;
     opts.runtime_dir = Some(lease.runtime.clone());
     opts.app = Some(Application {

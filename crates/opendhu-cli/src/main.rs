@@ -136,6 +136,9 @@ enum Command {
         /// Skip, instead of fail, tests whose required capabilities the backend lacks
         #[arg(long)]
         skip_unsupported: bool,
+        /// Run a managed suite on the single connected USB phone instead of its emulator
+        #[arg(long)]
+        usb: bool,
         /// Validate suite and test files without starting a device or session
         #[arg(long)]
         validate: bool,
@@ -360,6 +363,7 @@ fn run(cli: Cli) -> Result<u8> {
             report,
             artifacts_dir,
             skip_unsupported,
+            usb,
             validate,
             show_head_unit,
             headless,
@@ -383,6 +387,7 @@ fn run(cli: Cli) -> Result<u8> {
                     interactive || !no_interactive,
                 )),
                 filter,
+                usb,
                 validate,
                 cancel: None,
                 app: None,

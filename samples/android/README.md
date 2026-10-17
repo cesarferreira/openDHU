@@ -49,9 +49,23 @@ otherwise it boots it without a phone window and stops only the emulator it star
 different AVD name, change `environment.emulator` in `e2e/suite.yaml`. The suite installs and stops
 only this sample package and preserves its data.
 
-For a physical phone, install the APK with `adb -s SERIAL install -r PATH_TO_APK`, complete the same
-Android Auto development setup, then use `aa start` and `aa gui`. Open **openDHU
-Demo** from Android Auto's app launcher. The managed emulator suite below specifically targets an AVD.
+For a physical phone, enable USB debugging, connect it by USB, unlock it, and accept the computer's
+authorization prompt. Complete the same Android Auto development setup and configure the development
+head-unit credentials above. Then run from the repository root:
+
+```bash
+make sample-test SAMPLE_TEST_ARGS="--usb"   # Build, install on the USB phone, and run the suite
+aa test sample --usb                      # Rerun the already-built APK
+```
+
+`--usb` overrides `environment.emulator` for this run. Exactly one USB phone must be connected and
+authorized; emulators and wireless ADB devices are ignored. The suite installs the APK with existing
+app data preserved, applies its permissions and services, projects through native USB, and writes the
+same reports. It cleans up its own session, logs and tunnels; it never boots or shuts down an emulator.
+The phone's initial Android Auto consent screens may need to be accepted manually.
+
+To explore manually instead, install the APK with `adb -s SERIAL install -r PATH_TO_APK`, then use
+`aa start --serial SERIAL` and `aa gui`. Open **openDHU Demo** from Android Auto's app launcher.
 
 ## E2E tests
 

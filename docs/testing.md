@@ -236,6 +236,23 @@ and starts a private daemon. This does not replace an existing physical-phone se
 removes the forward and private daemon; it stops only an emulator that the suite itself started.
 The AVD's user data is preserved: this is not a fresh device image or a production backend test.
 
+Pass `--usb` to use a physical phone instead of `environment.emulator`:
+
+```bash
+aa test e2e/suite.yaml --usb
+aa test sample --usb
+```
+
+Connect exactly one USB phone, enable USB debugging, authorize the computer, and provision Android
+Auto development mode and the native head-unit credentials. The runner ignores emulators and
+wireless ADB devices; missing, unauthorized, offline or multiple USB phones produce an error.
+The same APK installation, permissions, services, tests and reports apply. USB projection bypasses
+the emulator's head-unit server restart and TCP forward. The runner waits for ADB to return after
+USB accessory negotiation, then sets up reverse tunnels and captures logcat. Cleanup removes owned
+tunnels before stopping projection, and never starts or shuts down an emulator. `--validate --usb`
+only validates the files and needs no connected phone.
+
+
 Each test force-stops the configured application to reset its navigation stack. It does not erase
 app data or grant permissions. Provisioning is a prerequisite, including English host/device UI.
 

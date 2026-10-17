@@ -32,6 +32,7 @@ pub struct Options {
     pub filter: Option<String>,
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
+    pub usb: bool,
     pub show_head_unit: bool,
     pub cancel: Option<Arc<AtomicBool>>,
     pub app: Option<crate::suite::Application>,
@@ -196,6 +197,11 @@ pub fn run(mut opts: Options) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     if opts.paths.len() == 1 && crate::suite::is_suite(&opts.paths[0])? {
         return crate::suite::run(opts);
+    }
+    if opts.usb {
+        return Err(Error::InvalidArgs(
+            "--usb requires a managed suite (for example `aa test sample --usb`)".into(),
+        ));
     }
     let files = collect(&opts.paths)?;
     let tests = crate::test_selection::filter(parse_all(&files)?, opts.filter.as_deref())?; // before touching the session

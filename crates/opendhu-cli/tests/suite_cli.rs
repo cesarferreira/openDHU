@@ -83,3 +83,248 @@ fn validates_managed_services_and_device_setup_without_running_commands() {
     assert_eq!(code(&output), 2);
     assert!(text(&output).contains("port"));
 }
+
+struct UsbSuite {
+    sandbox: Sandbox,
+    suite: std::path::PathBuf,
+    artifacts: std::path::PathBuf,
+    env: Vec<(String, String)>,
+}
+
+impl UsbSuite {
+    fn new(devices: &str) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let sandbox = Sandbox::new();
+        let dir = sandbox.scratch("usb-suite");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let suite = dir.join("suite.yaml");
+        std::fs::write(&suite, "version: 1\nenvironment:\n  emulator: unavailable_avd\n  apk: app.apk\n  package: test.app\n  appLabel: Test\n  launchActivity: test.app.MainActivity\ntests: [test.yaml]\n").unwrap();
+        std::fs::write(dir.join("app.apk"), "fake APK").unwrap();
+        std::fs::write(
+            dir.join("test.yaml"),
+            "name: USB journey\nbackend: native\nsteps: [{action: wait, duration: 1ms}]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("devices"), devices).unwrap();
+        for (name, script) in [
+            (
+                "adb",
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> "$USB_FIXTURE/calls"
+if [ "$1" = devices ]; then cat "$USB_FIXTURE/devices"; exit 0; fi
+[ "$1" = -s ] && [ "$2" = PHONE ] || exit 9
+shift 2
+if [ "$1" = reverse ]; then
+  [ -f "$USB_FIXTURE/native-pid" ] && kill -0 "$(cat "$USB_FIXTURE/native-pid")" 2>/dev/null || {
+    echo 'ADB disconnected after USB projection stopped' >&2; exit 9
+  }
+fi
+case "$*" in
+  'install -r -t '*|'shell am start -W -n test.app/test.app.MainActivity'|'shell am force-stop test.app') ;;
+  'get-state')
+    if [ "$USB_DELAY_ADB" = 1 ] && [ ! -f "$USB_FIXTURE/adb-returned" ]; then
+      touch "$USB_FIXTURE/adb-returned"
+      echo 'error: device offline' >&2; exit 1
+    fi
+    echo device;;
+  'reverse --list') [ ! -f "$USB_FIXTURE/reverse" ] || cat "$USB_FIXTURE/reverse";;
+  'reverse --no-rebind tcp:10101 tcp:19101')
+    [ -f "$USB_FIXTURE/native" ] || { echo 'reverse created before USB projection' >&2; exit 9; }
+    echo 'UsbFfs tcp:10101 tcp:19101' > "$USB_FIXTURE/reverse";;
+  'reverse --remove tcp:10101') rm "$USB_FIXTURE/reverse";;
+  'logcat -T 1') [ -f "$USB_FIXTURE/native" ] || exit 9; echo 'capturing PHONE'; exec sleep 60;;
+  *) echo "unexpected adb call: $*" >&2; exit 9;;
+esac
+"#,
+            ),
+            ("tesseract", "#!/bin/sh\nexit 0\n"),
+            (
+                "emulator",
+                "#!/bin/sh\necho emulator >> \"$USB_FIXTURE/calls\"\nexit 9\n",
+            ),
+            (
+                "native-hu",
+                r#"#!/bin/sh
+printf 'tcp=%s\n' "${OPENDHU_NATIVE_TCP-unset}" >> "$USB_FIXTURE/native"
+printf '%s\n' "$OPENDHU_RUNTIME_DIR" > "$USB_FIXTURE/runtime"
+echo $$ > "$USB_FIXTURE/native-pid"
+exec "$USB_FAKE_NATIVE"
+"#,
+            ),
+        ] {
+            let path = bin.join(name);
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let env = vec![
+            ("USB_FIXTURE".into(), dir.display().to_string()),
+            (
+                "USB_FAKE_NATIVE".into(),
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../opendhu-native/tests/fixtures/fake-native-hu.sh"
+                )
+                .into(),
+            ),
+            (
+                "OPENDHU_NATIVE_HU".into(),
+                bin.join("native-hu").display().to_string(),
+            ),
+            ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
+            (
+                "ANDROID_HOME".into(),
+                dir.join("missing-sdk").display().to_string(),
+            ),
+        ];
+        Self {
+            artifacts: dir.join("artifacts"),
+            sandbox,
+            suite,
+            env,
+        }
+    }
+
+    fn run(&self, extra: &[&str]) -> std::process::Output {
+        let mut args = vec![
+            "test",
+            self.suite.to_str().unwrap(),
+            "--usb",
+            "--headless",
+            "--no-interactive",
+            "--artifacts-dir",
+            self.artifacts.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra);
+        // Successful USB fixtures share the native transport's global lease.
+        static USB_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = USB_TEST.lock().unwrap();
+        self.sandbox.opendhu_with(&args, &self.env)
+    }
+}
+
+#[test]
+fn usb_overrides_emulator_runs_suite_and_cleans_up_only_its_session() {
+    let mut s = UsbSuite::new(
+        "List of devices attached\nemulator-5554 device model:AVD\nPHONE device usb:1 model:Pixel\n192.168.1.2:5555 device model:Wireless\n",
+    );
+    s.env.push(("USB_DELAY_ADB".into(), "1".into()));
+    let output = s.run(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.artifacts.join("suite.json")).unwrap()).unwrap();
+    assert_eq!(metadata["serial"], "PHONE");
+    assert_eq!(metadata["transport"], "usb");
+    assert!(metadata["emulator"].is_null());
+    assert!(s.artifacts.join("results.json").is_file());
+    assert!(
+        std::fs::read_to_string(s.artifacts.join("logcat.txt"))
+            .unwrap()
+            .contains("capturing PHONE")
+    );
+    let dir = s.suite.parent().unwrap();
+    let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
+    assert!(calls.contains("-s PHONE install -r -t"), "{calls}");
+    assert!(calls.matches("-s PHONE get-state").count() >= 2, "{calls}");
+    assert!(
+        calls.contains("-s PHONE shell am force-stop test.app"),
+        "{calls}"
+    );
+    let runtime = std::fs::read_to_string(dir.join("runtime")).unwrap();
+    assert!(!std::path::Path::new(runtime.trim()).exists());
+    let pid = std::fs::read_to_string(dir.join("native-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+    for forbidden in ["emu ", "emulator", "forward", "gearhead"] {
+        assert!(!calls.contains(forbidden), "{calls}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.join("native")).unwrap(),
+        "tcp=unset\n"
+    );
+}
+
+#[test]
+fn usb_reports_missing_unauthorized_offline_and_multiple_phones_before_installing() {
+    for (devices, expected) in [
+        ("emulator-5554 device\n192.168.1.2:5555 device\n", "no USB"),
+        ("PHONE unauthorized usb:1\n", "USB debugging"),
+        ("PHONE offline usb:1\n", "offline"),
+        ("PHONE device usb:1\nOTHER device usb:2\n", "multiple USB"),
+        (
+            "PHONE device usb:1\nOTHER unauthorized usb:2\n",
+            "multiple USB",
+        ),
+    ] {
+        let s = UsbSuite::new(&format!("List of devices attached\n{devices}"));
+        let output = s.run(&[]);
+        assert_ne!(code(&output), 0, "{}", text(&output));
+        assert!(text(&output).contains(expected), "{}", text(&output));
+        let calls = std::fs::read_to_string(s.suite.parent().unwrap().join("calls")).unwrap();
+        assert_eq!(calls, "devices -l\n");
+    }
+}
+
+#[test]
+fn usb_validation_does_not_require_a_phone_or_tools() {
+    let s = UsbSuite::new("List of devices attached\n");
+    let output = s.run(&["--validate"]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert!(!s.suite.parent().unwrap().join("calls").exists());
+}
+
+#[test]
+fn usb_acquires_reverse_ports_after_projection_and_removes_them_at_cleanup() {
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    let suite = std::fs::read_to_string(&s.suite).unwrap().replace(
+        "  appLabel: Test\n",
+        "  appLabel: Test\n  reversePorts: [{device: 10101, host: 19101}]\n",
+    );
+    std::fs::write(&s.suite, suite).unwrap();
+    let output = s.run(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let dir = s.suite.parent().unwrap();
+    assert!(!dir.join("reverse").exists());
+    let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
+    assert!(
+        calls.contains("-s PHONE reverse --no-rebind tcp:10101 tcp:19101"),
+        "{calls}"
+    );
+    assert!(
+        calls.contains("-s PHONE reverse --remove tcp:10101"),
+        "{calls}"
+    );
+}
+
+#[test]
+fn usb_rejects_ordinary_test_files_instead_of_silently_using_an_existing_session() {
+    let s = UsbSuite::new("List of devices attached\n");
+    let output = s.sandbox.opendhu(&[
+        "test",
+        s.suite
+            .parent()
+            .unwrap()
+            .join("test.yaml")
+            .to_str()
+            .unwrap(),
+        "--usb",
+    ]);
+    assert_eq!(code(&output), 2, "{}", text(&output));
+    assert!(
+        text(&output).contains("--usb requires a managed suite"),
+        "{}",
+        text(&output)
+    );
+}
+
+#[test]
+fn usb_start_failure_cleans_up_the_private_runtime() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("FAKE_NATIVE_MODE".into(), "exit-early".into()));
+    let output = s.run(&[]);
+    assert_ne!(code(&output), 0, "{}", text(&output));
+    let dir = s.suite.parent().unwrap();
+    let runtime = std::fs::read_to_string(dir.join("runtime")).unwrap();
+    assert!(!std::path::Path::new(runtime.trim()).exists());
+    let pid = std::fs::read_to_string(dir.join("native-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+}

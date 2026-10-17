@@ -6,7 +6,7 @@
 
 .PHONY: help all build build-release install install-release install-cli install-native install-gui \
         clean test check fmt lint run daemon gui doctor stop demo vendor-check validate-examples \
-        hw hw-dhu hw-native docker-test
+        hw hw-dhu hw-native
 
 BIN := ~/.cargo/target/debug
 OPENDHU_BIN ?= aa
@@ -23,7 +23,6 @@ help:
 	@echo "    build               debug build of every crate"
 	@echo "    build-release       release build"
 	@echo "    test                cargo test --workspace (uses fake head units; no hardware)"
-	@echo "    docker-test         full headless Rust checks + real OCR + YAML validation in Docker"
 	@echo "    check               cargo check + clippy -D warnings"
 	@echo "    fmt                 format the code"
 	@echo "    lint                formatting check + clippy -D warnings"
@@ -64,9 +63,6 @@ build-release:
 
 test:
 	cargo test --workspace
-
-docker-test:
-	docker compose run --build --rm tests
 
 check:
 	cargo check --workspace
