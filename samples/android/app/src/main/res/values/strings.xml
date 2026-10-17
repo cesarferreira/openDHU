@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">AutoLab Demo</string>
+    <string name="phone_intro">A tiny places app for your phone and Android Auto.</string>
+    <string name="favorite_label">SAVED PLACE</string>
+    <string name="no_favorite">No favorite saved</string>
+    <string name="choose_place">Choose a place</string>
+    <string name="phone_help">Save a place here or in Android Auto. Both screens share the same favorite, even after restarting the app.</string>
+    <string name="browse_places">Browse places</string>
+    <string name="places_title">Places</string>
+    <string name="saved_place">Saved place: %1$s</string>
+    <string name="save_favorite">Save favorite</string>
+    <string name="reset_favorite">Reset favorite</string>
+    <string name="back_to_places">Back to places</string>
+</resources>

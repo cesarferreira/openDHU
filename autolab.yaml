@@ -1,0 +1,2 @@
+suites:
+  sample: samples/android/e2e/suite.yaml

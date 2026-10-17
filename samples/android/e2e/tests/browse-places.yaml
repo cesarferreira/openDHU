@@ -1,0 +1,34 @@
+name: Browse places and return from destination details
+backend: native
+requirements: [touchInput, screenshots]
+steps:
+  - action: app.open
+  - action: ui.tap
+    text: Browse places
+    timeout: 30s
+  - action: ui.expect
+    text: Riverside Park
+    timeout: 30s
+  - action: ui.tap
+    text: Harbour Cafe
+    timeout: 20s
+  - action: ui.expect
+    text: Coffee by the water
+    timeout: 20s
+  - action: ui.expect
+    text: Save favorite
+    timeout: 10s
+  - action: ui.tap
+    text: Back to places
+    timeout: 20s
+  - action: ui.expect
+    text: Riverside Park
+    timeout: 20s
+  - action: ui.tap
+    text: Riverside Park
+    timeout: 20s
+  - action: ui.expect
+    text: Walk beside the river
+    timeout: 20s
+  - action: screenshot
+    path: screenshots/place-details.png

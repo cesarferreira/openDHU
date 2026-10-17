@@ -1,0 +1,41 @@
+name: Favorite selected in Android Auto survives an app restart
+backend: native
+requirements: [touchInput, screenshots]
+steps:
+  - action: app.open
+  - action: ui.tap
+    text: Reset favorite
+    timeout: 20s
+  - action: ui.expect
+    text: No favorite saved
+    timeout: 20s
+  - action: ui.tap
+    text: Browse places
+    timeout: 20s
+  - action: ui.expect
+    text: Riverside Park
+    timeout: 20s
+  - action: ui.tap
+    text: Harbour Cafe
+    timeout: 20s
+  - action: ui.expect
+    text: Coffee by the water
+    timeout: 20s
+  - action: ui.tap
+    text: Save favorite
+    timeout: 10s
+  - action: ui.expect
+    text: "Saved place: Harbour Cafe"
+    timeout: 20s
+  - action: app.restart
+  - action: ui.expect
+    text: "Saved place: Harbour Cafe"
+    timeout: 30s
+  - action: ui.tap
+    text: "Saved place: Harbour Cafe"
+    timeout: 20s
+  - action: ui.expect
+    text: Coffee by the water
+    timeout: 20s
+  - action: screenshot
+    path: screenshots/favorite-restored.png

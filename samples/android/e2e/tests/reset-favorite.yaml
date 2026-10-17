@@ -1,0 +1,35 @@
+name: Reset removes a saved favorite and stays cleared after restart
+backend: native
+requirements: [touchInput, screenshots]
+steps:
+  - action: app.open
+  - action: ui.tap
+    text: Browse places
+    timeout: 30s
+  - action: ui.expect
+    text: Riverside Park
+    timeout: 30s
+  - action: ui.tap
+    text: Central Library
+    timeout: 20s
+  - action: ui.expect
+    text: Books and a quiet corner
+    timeout: 20s
+  - action: ui.tap
+    text: Save favorite
+    timeout: 10s
+  - action: ui.expect
+    text: "Saved place: Central Library"
+    timeout: 20s
+  - action: ui.tap
+    text: Reset favorite
+    timeout: 10s
+  - action: ui.expect
+    text: No favorite saved
+    timeout: 20s
+  - action: app.restart
+  - action: ui.expect
+    text: No favorite saved
+    timeout: 30s
+  - action: screenshot
+    path: screenshots/favorite-cleared.png

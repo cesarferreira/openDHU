@@ -9,6 +9,8 @@
         hw hw-dhu hw-native
 
 BIN := ~/.cargo/target/debug
+AUTOLAB_BIN ?= aa
+SAMPLE_TEST_ARGS ?=
 
 # Default target: everything that needs no hardware.
 all: lint vendor-check build test validate-examples
@@ -26,6 +28,12 @@ help:
 	@echo "    lint                formatting check + clippy -D warnings"
 	@echo "    vendor-check        the patched rustls-webpki is the one in use"
 	@echo "    validate-examples   every examples/*.yaml parses (no session needed)"
+	@echo
+	@echo "  Android sample (requires Android SDK and JDK 17+)"
+	@echo "    sample-build        build the phone + Android Auto demo APK"
+	@echo "    sample-check        run Android unit tests, lint and YAML validation"
+	@echo "    sample-test         build and run the three Android Auto E2E journeys"
+	@echo "    sample-validate     validate sample YAML without an SDK or emulator"
 	@echo
 	@echo "  Install"
 	@echo "    install             aa, autolab-native-hu and autolab-gui (debug)"
@@ -140,3 +148,18 @@ hw-native:
 	AUTOLAB_HW=1 cargo test -p autolab-cli --test hardware real_native -- --ignored --nocapture
 
 hw: hw-dhu hw-native
+
+# The sample is standalone; ordinary Rust build/test targets never require an Android SDK.
+.PHONY: sample-build sample-check sample-test sample-validate
+sample-build:
+	cd samples/android && ./gradlew :app:assembleDebug
+
+sample-check:
+	cd samples/android && ./gradlew :app:testDebugUnitTest :app:lintDebug
+	$(MAKE) sample-validate
+
+sample-test: sample-build
+	$(AUTOLAB_BIN) test sample $(SAMPLE_TEST_ARGS)
+
+sample-validate:
+	$(AUTOLAB_BIN) test sample --validate

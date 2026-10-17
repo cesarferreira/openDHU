@@ -1,0 +1,10 @@
+version: 1
+environment:
+  emulator: medium_phone
+  headless: true
+  apk: ../app/build/outputs/apk/debug/app-debug.apk
+  package: dev.autolab.demo
+  appLabel: AutoLab Demo
+  launchActivity: dev.autolab.demo.MainActivity
+tests:
+  - tests/*.yaml

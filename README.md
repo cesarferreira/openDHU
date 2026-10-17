@@ -75,6 +75,22 @@ aa stop
 
 Every command takes `--json` for machine-readable output.
 
+### Try the included Android app
+
+The [Android sample](samples/android/README.md) includes a companion phone screen, an Android Auto
+places browser, and three E2E journeys covering navigation, favorite persistence and reset. It runs
+offline without API keys or backend services.
+
+```bash
+make sample-build     # Build the sample APK (Android SDK + JDK 17+)
+make sample-check     # Android unit tests, lint and E2E YAML validation
+make sample-test      # Build and run on the provisioned medium_phone AVD
+aa test sample        # Rerun without rebuilding; head unit and spinners enabled by default
+```
+
+See the sample guide for one-time Android Auto emulator provisioning. Add `--headless --no-interactive`
+to `aa test sample` to run without the head-unit window or spinners.
+
 ### Custom native head-unit certificate
 
 The native backend automatically loads your PEM client certificate and matching private key from:
