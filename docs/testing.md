@@ -57,14 +57,33 @@ suites:
 ```
 
 ```bash
+aa test --list                           # List registered suite names and paths
+aa test robotaxi --list                   # List tests without starting a device
 aa test robotaxi
 aa test robotaxi --filter persistence --interactive
 aa test storybook --filter route --validate
+aa test all                              # Run every registered suite in name order
+aa test all --usb                        # Use one USB phone for each managed suite
+aa test all --filter persistence --validate --json
 ```
 
 A name resolves in the nearest `opendhu.yaml` in the current directory or its ancestors. Target paths
-are relative to that file. Existing file/directory arguments take precedence over names. Run one named
-suite at a time. YAML still defines each suite's environment, services and test files.
+are relative to that file. Existing file/directory arguments take precedence over names. YAML still
+defines each suite's environment, services and test files. If no registry is found, pass a YAML path
+directly or create `opendhu.yaml` with the mapping above.
+
+`--list` never starts devices, services, or a viewer. Without targets it prints suite names and paths;
+with a target (including `all`) it prints test names and files, applying `--filter` when provided.
+`aa test --list --filter TEXT` lists matching tests across all registered suites. `--json` returns
+the same information as one JSON object.
+
+`all` validates every selected suite's YAML before setup, then runs suites sequentially in name order.
+With `--filter`, suites without matching tests are skipped; no matches anywhere is an argument error.
+Each suite gets its own directory under `build/test-results/all-<timestamp>/`, or under the directory
+given by `--artifacts-dir`. A failed suite does not prevent later suites from running; the command
+returns the first nonzero exit code. Ctrl+C cleans up the active suite, skips the rest, and exits 130.
+With `--json`, progress stays on stderr and stdout contains one summary of suite outcomes and report
+locations. `all --validate` validates the selected YAML without requiring APKs or devices.
 `--filter` selects test names or filenames by case-insensitive substring. All YAML is validated first;
 a filter matching nothing exits with an argument error before starting services, devices or a viewer.
 

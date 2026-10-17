@@ -76,6 +76,9 @@ aa test sample                          # Use the configured emulator
 aa test sample --usb                    # Use one authorized USB phone instead
 aa test sample --filter persistence     # Run matching tests
 aa test sample --headless --no-interactive
+aa test --list                          # List registered suites
+aa test sample --list                   # List tests in a suite
+aa test all --usb                       # Run every registered suite on the USB phone
 ```
 
 OCR tests require Tesseract with English language data. Provision Android Auto on the phone or

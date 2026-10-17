@@ -50,6 +50,7 @@ fn yes() -> bool {
     true
 }
 
+#[derive(Clone)]
 pub struct Application {
     pub label: String,
     adb: PathBuf,
@@ -398,6 +399,14 @@ impl Drop for Lease {
     }
 }
 
+pub(crate) fn inspect(
+    path: &Path,
+    filter: Option<&str>,
+) -> Result<Vec<(String, opendhu_test::TestFile)>> {
+    let (_, tests) = load(path)?;
+    crate::test_selection::matching(test_cmd::parse_all(&tests)?, filter)
+}
+
 pub fn run(mut opts: test_cmd::Options) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     let (suite, tests) = load(&opts.paths[0])?;
@@ -422,8 +431,14 @@ pub fn run(mut opts: test_cmd::Options) -> Result<u8> {
         &output,
         format!("Suite: {} ({} tests)", opts.paths[0].display(), tests.len()),
     );
-    let cancel = Arc::new(AtomicBool::new(false));
-    test_cmd::install_interrupt_handler(&cancel)?;
+    let cancel = match &opts.cancel {
+        Some(cancel) => Arc::clone(cancel),
+        None => {
+            let cancel = Arc::new(AtomicBool::new(false));
+            test_cmd::install_interrupt_handler(&cancel)?;
+            cancel
+        }
+    };
     let result = run_prepared(opts, suite, tests, Arc::clone(&cancel));
     if cancel.load(Ordering::SeqCst) {
         Ok(130)

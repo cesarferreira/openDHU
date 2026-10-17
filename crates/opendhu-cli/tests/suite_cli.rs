@@ -2,6 +2,8 @@
 mod common;
 use common::*;
 
+static USB_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn validates_suite_relative_globs_and_ui_actions_without_a_device_or_apk() {
     let s = Sandbox::new();
@@ -197,9 +199,39 @@ exec "$USB_FAKE_NATIVE"
         ];
         args.extend_from_slice(extra);
         // Successful USB fixtures share the native transport's global lease.
-        static USB_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = USB_TEST.lock().unwrap();
         self.sandbox.opendhu_with(&args, &self.env)
+    }
+    fn register_all(&self) {
+        let root = self.suite.parent().unwrap();
+        std::fs::copy(&self.suite, root.join("second.yaml")).unwrap();
+        std::fs::write(
+            root.join("opendhu.yaml"),
+            "suites: {first: suite.yaml, second: second.yaml}\n",
+        )
+        .unwrap();
+    }
+
+    fn all_command(&self, extra: &[&str]) -> std::process::Command {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_aa"));
+        cmd.current_dir(self.suite.parent().unwrap())
+            .args([
+                "test",
+                "all",
+                "--usb",
+                "--headless",
+                "--no-interactive",
+                "--artifacts-dir",
+                self.artifacts.to_str().unwrap(),
+            ])
+            .args(extra)
+            .env("OPENDHU_RUNTIME_DIR", &self.sandbox.dir)
+            .env("XDG_CONFIG_HOME", self.sandbox.dir.join("no-xdg"))
+            .env_remove("OPENDHU_CONFIG");
+        for (key, value) in &self.env {
+            cmd.env(key, value);
+        }
+        cmd
     }
 }
 
@@ -327,4 +359,104 @@ fn usb_start_failure_cleans_up_the_private_runtime() {
     assert!(!std::path::Path::new(runtime.trim()).exists());
     let pid = std::fs::read_to_string(dir.join("native-pid")).unwrap();
     assert!(!alive(pid.trim().parse().unwrap()));
+}
+
+#[test]
+fn all_usb_runs_suites_sequentially_with_separate_reports_and_one_json_summary() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.register_all();
+    let output = s.all_command(&["--json"]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["exitCode"], 0);
+    assert_eq!(value["suites"][0]["name"], "first");
+    assert_eq!(value["suites"][1]["name"], "second");
+    for name in ["first", "second"] {
+        let dir = s.artifacts.join(name);
+        assert!(dir.join("results.json").exists());
+        assert!(dir.join("results.html").exists());
+        assert!(dir.join("suite.json").exists());
+    }
+    let root = s.suite.parent().unwrap();
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert_eq!(calls.matches("install -r -t").count(), 2, "{calls}");
+    let runtime = std::fs::read_to_string(root.join("runtime")).unwrap();
+    assert!(!std::path::Path::new(runtime.trim()).exists());
+    let pid = std::fs::read_to_string(root.join("native-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+}
+
+#[test]
+fn all_usb_continues_after_a_failed_suite_and_returns_failure() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    std::fs::write(root.join("failed.yaml"), "name: Wrong focus\nbackend: native\nsteps: [{action: assert.status, expect: {videoFocus: {observed: off}}}]\n").unwrap();
+    let suite = std::fs::read_to_string(&s.suite)
+        .unwrap()
+        .replace("tests: [test.yaml]", "tests: [failed.yaml]");
+    std::fs::write(&s.suite, suite).unwrap();
+    let output = s.all_command(&["--json"]).output().unwrap();
+    assert_eq!(code(&output), 7, "{}", text(&output));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["exitCode"], 7);
+    assert_eq!(value["suites"][0]["exitCode"], 7);
+    assert_eq!(value["suites"][1]["exitCode"], 0);
+    assert!(s.artifacts.join("second/results.json").is_file());
+}
+
+#[test]
+fn all_usb_validates_later_suites_before_starting_any_device() {
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    std::fs::write(
+        root.join("second.yaml"),
+        "version: 2\nenvironment: {}\ntests: []\n",
+    )
+    .unwrap();
+    let output = s.all_command(&[]).output().unwrap();
+    assert_eq!(code(&output), 2, "{}", text(&output));
+    assert!(!root.join("calls").exists());
+    assert!(!s.artifacts.exists());
+}
+
+#[test]
+fn interrupting_all_usb_cleans_up_and_skips_remaining_suites() {
+    use std::process::Stdio;
+    use std::time::Duration;
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    std::fs::write(
+        root.join("test.yaml"),
+        "name: Long wait\nbackend: native\nsteps: [{action: wait, duration: 60s}]\n",
+    )
+    .unwrap();
+    let child = s
+        .all_command(&["--json"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let ready = wait_until(Duration::from_secs(15), || {
+        s.artifacts.join("first/suite.json").exists()
+    });
+    let signal = if ready { "-INT" } else { "-KILL" };
+    std::process::Command::new("kill")
+        .args([signal, &child.id().to_string()])
+        .status()
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(ready, "suite must start: {}", text(&output));
+    assert_eq!(code(&output), 130, "{}", text(&output));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["interrupted"], true);
+    assert_eq!(value["suites"].as_array().unwrap().len(), 1);
+    assert!(!s.artifacts.join("second").exists());
+    let runtime = std::fs::read_to_string(root.join("runtime")).unwrap();
+    assert!(!std::path::Path::new(runtime.trim()).exists());
 }

@@ -125,8 +125,11 @@ enum Command {
     /// Run YAML suites or tests, including named project suites
     Test {
         /// Test files, directories, or suite names registered in the project opendhu.yaml
-        #[arg(required = true)]
+        #[arg(required_unless_present = "list")]
         paths: Vec<PathBuf>,
+        /// List registered suites, or tests within the selected paths, without starting devices
+        #[arg(long)]
+        list: bool,
         /// Report to write into the artifacts directory (repeatable; default: json and html)
         #[arg(long, value_enum)]
         report: Vec<test_cmd::ReportFormat>,
@@ -360,6 +363,7 @@ fn run(cli: Cli) -> Result<u8> {
         }
         Command::Test {
             paths,
+            list,
             report,
             artifacts_dir,
             skip_unsupported,
@@ -374,6 +378,8 @@ fn run(cli: Cli) -> Result<u8> {
             let cfg = load()?;
             test_cmd::run(test_cmd::Options {
                 paths,
+                list,
+                batch: false,
                 report: if report.is_empty() {
                     cfg.report.clone()
                 } else {

@@ -27,8 +27,11 @@ pub enum ReportFormat {
     Html,
 }
 
+#[derive(Clone)]
 pub struct Options {
     pub paths: Vec<PathBuf>,
+    pub list: bool,
+    pub batch: bool,
     pub filter: Option<String>,
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
@@ -193,6 +196,12 @@ pub(crate) fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
 }
 
 pub fn run(mut opts: Options) -> Result<u8> {
+    if opts.list {
+        return list_tests(&opts);
+    }
+    if crate::test_selection::is_all(&opts.paths) {
+        return run_all(opts);
+    }
     opts.paths = crate::test_selection::resolve(opts.paths)?;
     let output = Arc::clone(&opts.output);
     if opts.paths.len() == 1 && crate::suite::is_suite(&opts.paths[0])? {
@@ -361,9 +370,9 @@ pub fn run(mut opts: Options) -> Result<u8> {
         }
     }
 
-    if opts.json {
+    if opts.json && !opts.batch {
         println!("{}", opendhu_test::report::to_json(&report));
-    } else {
+    } else if !opts.json {
         println!(
             "{} test{}: {} passed, {} failed, {} errors, {} skipped",
             summary.tests,
@@ -392,6 +401,168 @@ pub fn run(mut opts: Options) -> Result<u8> {
         {
             eprintln!("\n{}", step_log(t).trim_end());
         }
+    }
+    Ok(exit_code)
+}
+
+fn list_tests(opts: &Options) -> Result<u8> {
+    if opts.paths.is_empty() && opts.filter.is_none() {
+        let suites = crate::test_selection::registered()?;
+        if opts.json {
+            println!("{}", serde_json::json!({"suites": suites}));
+        } else if suites.is_empty() {
+            println!("No suites registered in opendhu.yaml");
+        } else {
+            for suite in suites {
+                println!("{}\t{}", suite.name, suite.path.display());
+            }
+        }
+        return Ok(0);
+    }
+    let paths = if opts.paths.is_empty() || crate::test_selection::is_all(&opts.paths) {
+        crate::test_selection::registered()?
+            .into_iter()
+            .map(|suite| suite.path)
+            .collect()
+    } else {
+        crate::test_selection::resolve(opts.paths.clone())?
+    };
+    let mut tests = Vec::new();
+    for path in paths {
+        if crate::suite::is_suite(&path)? {
+            tests.extend(crate::suite::inspect(&path, None)?);
+        } else {
+            tests.extend(parse_all(&collect(&[path])?)?);
+        }
+    }
+    let tests = crate::test_selection::filter(tests, opts.filter.as_deref())?;
+    if opts.json {
+        let tests: Vec<_> = tests
+            .iter()
+            .map(|(file, test)| serde_json::json!({"file": file, "name": test.name}))
+            .collect();
+        println!("{}", serde_json::json!({"tests": tests}));
+    } else {
+        for (file, test) in tests {
+            println!("{}\t{file}", test.name);
+        }
+    }
+    Ok(0)
+}
+
+fn run_all(opts: Options) -> Result<u8> {
+    let suites = crate::test_selection::registered()?;
+    if suites.is_empty() {
+        return Err(Error::InvalidArgs(
+            "no suites registered in opendhu.yaml".into(),
+        ));
+    }
+    // Validate every suite before installing apps or acquiring a device.
+    let mut selected = Vec::new();
+    for suite in suites {
+        let managed = crate::suite::is_suite(&suite.path)?;
+        let tests = if managed {
+            crate::suite::inspect(&suite.path, opts.filter.as_deref())?
+        } else {
+            crate::test_selection::matching(
+                parse_all(&collect(std::slice::from_ref(&suite.path))?)?,
+                opts.filter.as_deref(),
+            )?
+        };
+        if tests.is_empty() {
+            continue;
+        }
+        if opts.usb && !managed {
+            return Err(Error::InvalidArgs(format!(
+                "--usb requires a managed suite: {}",
+                suite.path.display(),
+            )));
+        }
+        selected.push((suite, tests.len()));
+    }
+    if selected.is_empty() {
+        return Err(Error::InvalidArgs(match &opts.filter {
+            Some(query) => format!("--filter {query:?} matched no tests in any registered suite"),
+            None => "no tests found in registered suites".into(),
+        }));
+    }
+    if opts.validate {
+        let total: usize = selected.iter().map(|(_, count)| count).sum();
+        if opts.json {
+            let suites: Vec<_> = selected.iter().map(|(s, count)| serde_json::json!({"name": s.name, "path": s.path, "tests": count})).collect();
+            println!(
+                "{}",
+                serde_json::json!({"valid": true, "suites": suites, "tests": total})
+            );
+        } else {
+            println!("Validated {} suites and {total} test files", selected.len());
+        }
+        return Ok(0);
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    install_interrupt_handler(&cancel)?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let artifacts = opts
+        .artifacts_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("build/test-results").join(format!("all-{nonce}")));
+    let mut results = Vec::new();
+    let mut exit_code = 0;
+    for (suite, count) in selected {
+        if cancel.load(Ordering::SeqCst) {
+            break;
+        }
+        progress(&opts.output, format!("Running suite {}...", suite.name));
+        let mut child = opts.clone();
+        child.paths = vec![suite.path.clone()];
+        child.batch = true;
+        child.cancel = Some(Arc::clone(&cancel));
+        let dir = artifacts.join(&suite.name);
+        child.artifacts_dir = Some(dir.clone());
+        let (code, error) = match run(child) {
+            Ok(code) => (code, None),
+            Err(error) => {
+                progress(
+                    &opts.output,
+                    format!("Suite {} failed: {error}", suite.name),
+                );
+                (error.exit_code(), Some(error.to_string()))
+            }
+        };
+        if exit_code == 0 {
+            exit_code = code;
+        }
+        results.push(serde_json::json!({"name": suite.name, "path": suite.path, "tests": count, "exitCode": code, "error": error, "artifacts": dir}));
+        if code == INTERRUPTED {
+            break;
+        }
+    }
+    let interrupted = cancel.load(Ordering::SeqCst);
+    if interrupted {
+        exit_code = INTERRUPTED;
+    }
+    if opts.json {
+        println!(
+            "{}",
+            serde_json::json!({"suites": results, "exitCode": exit_code, "interrupted": interrupted})
+        );
+    } else {
+        let failed = results
+            .iter()
+            .filter(|result| result["exitCode"] != 0)
+            .count();
+        println!(
+            "{} suites: {} passed, {failed} failed",
+            results.len(),
+            results.len() - failed
+        );
+        if interrupted {
+            println!("Interrupted; remaining suites were not run.");
+        }
+        println!("Artifacts: {}", artifacts.display());
     }
     Ok(exit_code)
 }
