@@ -3,7 +3,7 @@
 ```bash
 aa start --reverse 10101          # a session must be running (the runner never starts one)
 aa test examples/video-focus.yaml
-aa test tests/ --report junit --report json --artifacts-dir ./test-results
+aa test tests/ --report junit --report json --report html --artifacts-dir ./build/test-results
 ```
 
 `aa test` takes files or directories (searched recursively for `.yaml` / `.yml`, in sorted order).
@@ -168,18 +168,24 @@ on test order.
 ## Artifacts
 
 ```text
-test-results/
-  results.json        # with --report json (the default)
+build/test-results/
+  results.html        # browser report (default), or --report html
+  results.json        # with --report json (also default)
   results.xml         # with --report junit (validated with xmllint)
   metadata.json       # always
   logs/01-<test>.log  # one per test
   screenshots/...     # whatever the tests captured
 ```
 
-`results.json` and `results.xml` are the only files cleaned up: if you request one format, an old report in the other
-format is deleted so CI cannot read it by mistake. `logs/` and `screenshots/` accumulate across runs, so use a fresh
+`results.html`, `results.json` and `results.xml` are the only files cleaned up: reports in unrequested
+formats are deleted so CI cannot read it by mistake. `logs/` and `screenshots/` accumulate across runs, so use a fresh
 `--artifacts-dir` per run if you need them to match one run exactly. `--json` prints the report to stdout instead of
 the human output.
+
+Open `results.html` in a browser for status counts, durations, expandable test steps, log links and a
+screenshot gallery. It works offline without scripts or external resources. Keep the artifact folder
+together when sharing it so relative evidence links work. `--report` is repeatable and selects the exact
+formats to write, for example `--report html --report junit`.
 
 `metadata.json` holds only values that were observed: AutoLab version, start time, duration, and the backend's
 name, version, build and device serial. `deviceModel`, `androidVersion`, `androidAutoVersion` and `display`
@@ -202,11 +208,12 @@ without an emulator, APK, or running daemon:
 
 ```bash
 aa test --validate e2e/suite.yaml
-aa test e2e/suite.yaml --artifacts-dir test-results/run-001
+aa test e2e/suite.yaml --artifacts-dir build/test-results/run-001
 ```
 
 ```yaml
 version: 1
+artifactsDir: ../build/test-results  # optional; relative to this YAML, with a run-* folder per run
 environment:
   emulator: medium_phone
   headless: true
@@ -265,8 +272,13 @@ legible text and should not be used to assert map pixels, clocks, or animation t
 Each suite restarts Android Auto on its dedicated AVD before starting the head-unit server, to
 discard projection threads restored by Quick Boot.
 
-Suites default to fresh `test-results/run-*` directories and both JSON and JUnit reports. They also
-save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screenshots, scaled images, OCR TSVs and
+Suites default to fresh `build/test-results/run-*` directories and HTML, JSON and JUnit reports.
+Set top-level `artifactsDir: ../build/test-results` in a suite YAML to choose its base directory
+relative to that YAML file. Each run gets a fresh `run-*` subdirectory there. An explicit
+`--artifacts-dir` (or configured `test.artifacts_dir`) overrides this with the exact directory supplied.
+The included Android sample uses this setting to keep reports in `samples/android/build/test-results/`.
+
+Suites also save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screenshots, scaled images, OCR TSVs and
 OCR diagnostics. The private daemon authentication file is removed rather than archived. Inspect
 these artifacts for setup and assertion failures; screenshots alone do not make a test pass.
 

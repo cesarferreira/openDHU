@@ -37,8 +37,8 @@ serial = "1A141FDF600AF2"
 reverse = [10101]        # same as `aa start --reverse 10101`
 
 [test]
-artifacts_dir = "test-results"
-report = ["json", "junit"]
+artifacts_dir = "build/test-results"
+report = ["json", "junit", "html"]
 skip_unsupported = false
 
 [daemon]

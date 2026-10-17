@@ -124,10 +124,10 @@ enum Command {
         /// Test files, directories, or suite names registered in the project autolab.yaml
         #[arg(required = true)]
         paths: Vec<PathBuf>,
-        /// Report to write into the artifacts directory (repeatable; default: json)
+        /// Report to write into the artifacts directory (repeatable; default: json and html)
         #[arg(long, value_enum)]
         report: Vec<test_cmd::ReportFormat>,
-        /// Where reports, logs and screenshots go [default: ./test-results]
+        /// Where reports, logs and screenshots go [default: ./build/test-results]
         #[arg(long)]
         artifacts_dir: Option<PathBuf>,
         /// Skip, instead of fail, tests whose required capabilities the backend lacks

@@ -37,6 +37,8 @@ fn the_prd_example_passes_and_produces_the_documented_artifacts() {
         "junit",
         "--report",
         "json",
+        "--report",
+        "html",
     ]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     let t = text(&o);
@@ -53,6 +55,7 @@ fn the_prd_example_passes_and_produces_the_documented_artifacts() {
     for f in [
         "results.json",
         "results.xml",
+        "results.html",
         "metadata.json",
         "screenshots/restored.png",
     ] {
@@ -252,7 +255,11 @@ fn an_old_report_in_another_format_is_not_left_behind() {
     };
     assert_eq!(code(&run("junit")), 0);
     assert!(art.join("results.xml").is_file());
+    assert_eq!(code(&run("html")), 0);
+    assert!(art.join("results.html").is_file());
+    assert!(!art.join("results.xml").exists());
     assert_eq!(code(&run("json")), 0);
+    assert!(!art.join("results.html").exists(), "stale HTML report");
     assert!(art.join("results.json").is_file());
     assert!(
         !art.join("results.xml").exists(),
@@ -413,4 +420,29 @@ fn a_second_ctrl_c_exits_immediately_even_if_cleanup_is_stuck() {
         wait_exit(&mut child, Duration::from_secs(3)).expect("second Ctrl+C must exit at once");
     assert!(second.elapsed() < Duration::from_secs(2));
     assert_eq!(status.code(), Some(130));
+}
+
+#[test]
+fn default_reports_live_under_build_and_include_html() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let cwd = s.scratch("cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_aa"))
+        .args([
+            "test",
+            &example("focus-status.yaml"),
+            "--headless",
+            "--no-interactive",
+        ])
+        .current_dir(&cwd)
+        .env("AUTOLAB_RUNTIME_DIR", &s.dir)
+        .env("XDG_CONFIG_HOME", s.dir.join("no-xdg"))
+        .env_remove("AUTOLAB_CONFIG")
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(cwd.join("build/test-results/results.json").is_file());
+    assert!(cwd.join("build/test-results/results.html").is_file());
+    assert!(!cwd.join("test-results").exists());
 }

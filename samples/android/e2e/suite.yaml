@@ -1,4 +1,5 @@
 version: 1
+artifactsDir: ../build/test-results
 environment:
   emulator: medium_phone
   headless: true

@@ -24,6 +24,7 @@ use crate::session_backend::DaemonBackend;
 pub enum ReportFormat {
     Json,
     Junit,
+    Html,
 }
 
 pub struct Options {
@@ -109,7 +110,7 @@ pub(crate) fn parse_all(files: &[PathBuf]) -> Result<Vec<(String, TestFile)>> {
 fn artifacts_dir(opt: Option<PathBuf>, needs_screenshots: bool) -> Result<PathBuf> {
     let cwd = std::env::current_dir()
         .map_err(|e| Error::Other(format!("cannot read current directory: {e}")))?;
-    let dir = opt.unwrap_or_else(|| PathBuf::from("test-results"));
+    let dir = opt.unwrap_or_else(|| PathBuf::from("build/test-results"));
     let dir = if dir.is_absolute() {
         dir
     } else {
@@ -330,13 +331,14 @@ pub fn run(mut opts: Options) -> Result<u8> {
     };
 
     let formats: Vec<Format> = if opts.report.is_empty() {
-        vec![Format::Json]
+        vec![Format::Json, Format::Html]
     } else {
         opts.report
             .iter()
             .map(|f| match f {
                 ReportFormat::Json => Format::Json,
                 ReportFormat::Junit => Format::Junit,
+                ReportFormat::Html => Format::Html,
             })
             .collect()
     };
@@ -346,6 +348,7 @@ pub fn run(mut opts: Options) -> Result<u8> {
     for (fmt, name) in [
         (Format::Json, "results.json"),
         (Format::Junit, "results.xml"),
+        (Format::Html, "results.html"),
     ] {
         if !formats.contains(&fmt) {
             let _ = std::fs::remove_file(dir.join(name));

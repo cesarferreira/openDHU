@@ -16,6 +16,8 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Suite {
     version: u32,
+    #[serde(default, rename = "artifactsDir")]
+    artifacts_dir: Option<PathBuf>,
     environment: Environment,
     tests: Vec<String>,
     #[serde(default)]
@@ -165,6 +167,16 @@ fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     let base = path.parent().unwrap_or(Path::new("."));
     if !suite.environment.apk.is_absolute() {
         suite.environment.apk = base.join(&suite.environment.apk);
+    }
+    if let Some(dir) = &mut suite.artifacts_dir {
+        if dir.as_os_str().is_empty() {
+            return Err(Error::InvalidArgs(
+                "suite artifactsDir must not be empty".into(),
+            ));
+        }
+        if !dir.is_absolute() {
+            *dir = base.join(&*dir);
+        }
     }
     let mut tests = Vec::new();
     for pattern in &suite.tests {
@@ -372,6 +384,14 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     }
 }
 
+fn artifact_path(explicit: Option<PathBuf>, suite_base: Option<PathBuf>, nonce: u128) -> PathBuf {
+    explicit.unwrap_or_else(|| {
+        suite_base
+            .unwrap_or_else(|| PathBuf::from("build/test-results"))
+            .join(format!("run-{nonce}"))
+    })
+}
+
 fn run_prepared(
     mut opts: test_cmd::Options,
     suite: Suite,
@@ -398,10 +418,11 @@ fn run_prepared(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let artifacts = opts
-        .artifacts_dir
-        .take()
-        .unwrap_or_else(|| PathBuf::from(format!("test-results/run-{nonce}")));
+    let artifacts = artifact_path(
+        opts.artifacts_dir.take(),
+        suite.artifacts_dir.clone(),
+        nonce,
+    );
     let artifacts = if artifacts.is_absolute() {
         artifacts
     } else {
@@ -659,7 +680,11 @@ fn run_prepared(
     });
     opts.artifacts_dir = Some(artifacts);
     if opts.report.is_empty() {
-        opts.report = vec![test_cmd::ReportFormat::Json, test_cmd::ReportFormat::Junit];
+        opts.report = vec![
+            test_cmd::ReportFormat::Json,
+            test_cmd::ReportFormat::Junit,
+            test_cmd::ReportFormat::Html,
+        ];
     }
     let result = test_cmd::run(opts);
     test_cmd::progress(
@@ -692,5 +717,26 @@ mod tests {
             assert!(load(&path).is_err());
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn suite_artifacts_are_relative_to_yaml_and_cli_override_is_exact() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/android/e2e/suite.yaml");
+        let (suite, _) = load(&path).unwrap();
+        let base = path.parent().unwrap().join("../build/test-results");
+        assert_eq!(suite.artifacts_dir, Some(base.clone()));
+        assert_eq!(
+            artifact_path(None, suite.artifacts_dir.clone(), 42),
+            base.join("run-42")
+        );
+        assert_eq!(
+            artifact_path(Some("custom".into()), suite.artifacts_dir, 42),
+            PathBuf::from("custom")
+        );
+        assert_eq!(
+            artifact_path(None, None, 42),
+            PathBuf::from("build/test-results/run-42")
+        );
     }
 }

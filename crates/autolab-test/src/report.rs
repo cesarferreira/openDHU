@@ -1,4 +1,4 @@
-//! JSON and JUnit reports plus the artifacts directory layout from PRD section 12.6.
+//! JSON, JUnit and HTML reports plus the artifacts directory layout from PRD section 12.6.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ use crate::model::{Outcome, StepResult, TestResult};
 pub enum Format {
     Json,
     Junit,
+    Html,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -228,6 +229,125 @@ pub fn to_junit(report: &RunReport) -> String {
     x
 }
 
+/// A portable report with no network resources or scripts. Evidence paths stay relative to it.
+pub fn to_html(report: &RunReport, dir: &Path) -> String {
+    fn status(outcome: Outcome) -> &'static str {
+        match outcome {
+            Outcome::Passed => "passed",
+            Outcome::Failed => "failed",
+            Outcome::Error => "error",
+            Outcome::Skipped => "skipped",
+        }
+    }
+    fn url(path: &str) -> String {
+        let mut encoded = String::new();
+        for byte in path.bytes() {
+            if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+                encoded.push(byte as char);
+            } else {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+        encoded
+    }
+    fn screenshots(base: &Path, dir: &Path, found: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                screenshots(base, &path, found);
+            } else if kind.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+            {
+                if let Ok(relative) = path.strip_prefix(base) {
+                    found.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let m = &report.metadata;
+    let s = &m.summary;
+    let mut html = String::from(include_str!("report_header.html"));
+    let _ = write!(
+        html,
+        "<header><p class=\"eyebrow\">AutoLab · Test report</p><h1>{}</h1><p>{} · {}s · AutoLab {}</p></header>",
+        if report.interrupted {
+            "Interrupted"
+        } else if report.exit_code == 0 {
+            "Passed"
+        } else {
+            "Failed"
+        },
+        xml_escape(&m.started_at),
+        secs(m.duration_ms),
+        xml_escape(&m.autolab_version)
+    );
+    let _ = write!(
+        html,
+        "<section class=\"counts\" aria-label=\"Summary\"><strong>{} tests</strong><span class=\"passed\">{} passed</span><span class=\"failed\">{} failed</span><span class=\"error\">{} errors</span><span class=\"skipped\">{} skipped</span></section>",
+        s.tests, s.passed, s.failed, s.errors, s.skipped
+    );
+    if let Some(backend) = &m.backend {
+        let _ = write!(html, "<p>Backend: {}</p>", xml_escape(&backend.name));
+    }
+    for (index, test) in report.tests.iter().enumerate() {
+        let state = status(test.outcome);
+        let _ = write!(
+            html,
+            "<details{}><summary><span class=\"badge {state}\">{state}</span> {} <small>{}s</small></summary><div class=\"body\"><p class=\"source\">{}</p><a href=\"logs/{:02}-{}.log\">Test log</a>",
+            if test.passed() { "" } else { " open" },
+            xml_escape(&test.name),
+            secs(test.duration_ms),
+            xml_escape(&test.file),
+            index + 1,
+            slug(&test.name)
+        );
+        if let Some(message) = &test.message {
+            let _ = write!(html, "<p class=\"{state}\">{}</p>", xml_escape(message));
+        }
+        html.push_str("<div class=\"table\"><table><thead><tr><th>Step</th><th>Result</th><th>Duration</th><th>Details</th></tr></thead><tbody>");
+        for step in &test.steps {
+            let state = status(step.outcome);
+            let _ = write!(
+                html,
+                "<tr><td>{}</td><td class=\"{state}\">{state}</td><td>{}s</td><td class=\"detail\">{}</td></tr>",
+                xml_escape(&label(step)),
+                secs(step.duration_ms),
+                xml_escape(&step.detail)
+            );
+        }
+        html.push_str("</tbody></table></div></div></details>");
+    }
+    let mut images = Vec::new();
+    screenshots(dir, dir, &mut images);
+    images.sort();
+    if !images.is_empty() {
+        let _ = write!(
+            html,
+            "<details><summary>Screenshots ({})</summary><div class=\"gallery\">",
+            images.len()
+        );
+        for path in images {
+            let href = url(&path);
+            let caption = xml_escape(&path);
+            let _ = write!(
+                html,
+                "<figure><a href=\"{href}\"><img loading=\"lazy\" src=\"{href}\" alt=\"{caption}\"></a><figcaption>{caption}</figcaption></figure>"
+            );
+        }
+        html.push_str("</div></details>");
+    }
+    html.push_str("<footer><a href=\"metadata.json\">Run metadata</a> · Keep this file with its artifact folder to preserve evidence links.</footer></main></body></html>\n");
+    html
+}
+
 fn slug(name: &str) -> String {
     let mut out = String::new();
     for c in name.chars() {
@@ -269,6 +389,7 @@ pub fn write_artifacts(
         match f {
             Format::Json => put("results.json".into(), to_json(report))?,
             Format::Junit => put("results.xml".into(), to_junit(report))?,
+            Format::Html => put("results.html".into(), to_html(report, dir))?,
         }
     }
     for (i, t) in report.tests.iter().enumerate() {
@@ -461,6 +582,38 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&only_json);
+    }
+
+    #[test]
+    fn html_report_escapes_content_and_links_portable_evidence() {
+        let dir = std::env::temp_dir().join(format!("al-report-html-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("screenshots")).unwrap();
+        std::fs::write(dir.join("screenshots/screen#1.png"), b"png").unwrap();
+        let mut r = report(vec![test(
+            "<script>alert(1)</script>",
+            Outcome::Failed,
+            7,
+            vec![step(
+                1,
+                "ui.expect",
+                Outcome::Failed,
+                "Expected <Home> & more",
+                Some(7),
+            )],
+        )]);
+        r.interrupted = true;
+        let written = write_artifacts(&dir, &r, &[Format::Html]).unwrap();
+        assert!(written.contains(&dir.join("results.html")));
+        let html = std::fs::read_to_string(dir.join("results.html")).unwrap();
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("Expected &lt;Home&gt; &amp; more"));
+        assert!(html.contains("1 failed") && html.contains("Interrupted"));
+        assert!(html.contains("href=\"logs/01-script-alert-1-script.log\""));
+        assert!(html.contains("screenshots/screen%231.png"));
+        assert!(!html.contains(&dir.display().to_string()));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

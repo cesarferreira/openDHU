@@ -19,7 +19,7 @@ DHU is not needed.
 | **Audio** | Records what the phone plays (media, navigation prompts, assistant) to a WAV, or plays it | `aa audio out.wav`; window checkbox | DHU plays its own | yes |
 | **Car buttons** | Presses Home, Back, arrows, Enter, media keys | `aa key home` | no | experimental, no visible effect yet |
 | **Tunnels** | Puts back `adb reverse` tunnels that the phone drops when the session starts or mid-session | `aa start --reverse 10101` | yes | yes |
-| **YAML tests** | Runs scripted tests with assertions, JSON and JUnit reports, Ctrl+C-safe cleanup | `aa test file.yaml` | yes | yes |
+| **YAML tests** | Runs scripted tests with assertions, HTML, JSON and JUnit reports, Ctrl+C-safe cleanup | `aa test file.yaml` | yes | yes |
 | **HTTP API** | Everything above over a local, authenticated API, with a live event stream | `aa daemon`, [docs/api.md](docs/api.md) | yes | yes |
 | **Desktop window** | Session, live view, focus, screenshots, events, audio | `aa gui` | partly | yes |
 | **Config file** | Defaults for backend, serial, ports, paths and reports | `~/.config/autolab/config.toml` | yes | yes |
@@ -89,7 +89,8 @@ aa test sample        # Rerun without rebuilding; head unit and spinners enabled
 ```
 
 See the sample guide for one-time Android Auto emulator provisioning. Add `--headless --no-interactive`
-to `aa test sample` to run without the head-unit window or spinners.
+to `aa test sample` to run without the head-unit window or spinners. Reports go to
+`samples/android/build/test-results/run-*/`; open `results.html` for results, steps, logs and screenshots.
 
 ### Custom native head-unit certificate
 
@@ -138,7 +139,7 @@ Touches, screenshots and the live view all follow whatever the running session r
 | `aa swipe X1 Y1 X2 Y2 [--duration-ms N]` | Drag, 50 to 10000 ms (native) |
 | `aa key NAME [--long]` | Press a car button: `home back up down left right enter search play_pause next previous call end_call` (experimental) |
 | `aa audio OUT.wav [--channel media\|system\|speech] [--seconds N]` | Record phone audio and print how much arrived and how loud (native) |
-| `aa test FILES… [--headless] [--no-interactive] [--report json\|junit] [--artifacts-dir D] [--skip-unsupported]` | Run YAML tests; native head-unit window and terminal spinners are enabled by default |
+| `aa test FILES… [--headless] [--no-interactive] [--report json\|junit\|html] [--artifacts-dir D] [--skip-unsupported]` | Run YAML tests; native head-unit window and terminal spinners are enabled by default |
 | `aa doctor` | Check the environment without touching a session |
 | `aa daemon [--port N]` | Run the API daemon in the foreground (it stays up) |
 
@@ -168,7 +169,7 @@ steps:
 ```
 
 Steps: `focus.video`, `wait`, `waitFor`, `assert.status`, `screenshot`, `tap`, `swipe`, `key`. Reports are written to
-`test-results/` as JSON and optionally JUnit. A passing `tap`, `swipe` or `key` step means it was **sent**: the phone
+`build/test-results/` as HTML and JSON, with optional JUnit. A passing `tap`, `swipe` or `key` step means it was **sent**: the phone
 never acknowledges touch. More in [docs/testing.md](docs/testing.md) and `examples/`.
 
 ## HTTP API

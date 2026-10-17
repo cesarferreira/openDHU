@@ -209,12 +209,15 @@ mod tests {
     #[test]
     fn full_file_parses() {
         let c = p(
-            "[dhu]\nheadless = true\n[session]\nserial = \"ABC\"\nreverse = [10101, 8080]\n[test]\nreport = [\"json\", \"junit\"]\nskip_unsupported = true\n[daemon]\nport = 9000",
+            "[dhu]\nheadless = true\n[session]\nserial = \"ABC\"\nreverse = [10101, 8080]\n[test]\nreport = [\"json\", \"junit\", \"html\"]\nskip_unsupported = true\n[daemon]\nport = 9000",
         );
         assert!(c.headless && c.skip_unsupported);
         assert_eq!(c.serial.as_deref(), Some("ABC"));
         assert_eq!(c.reverse, vec![10101, 8080]);
-        assert_eq!(c.report, vec![ReportFormat::Json, ReportFormat::Junit]);
+        assert_eq!(
+            c.report,
+            vec![ReportFormat::Json, ReportFormat::Junit, ReportFormat::Html]
+        );
         assert_eq!(c.port, Some(9000));
     }
 
@@ -233,7 +236,7 @@ mod tests {
             "[session]\nreverse = \"10101\"",
             "[session]\nreverse = [0]",
             "[session]\nreverse = [70000]",
-            "[test]\nreport = [\"html\"]",
+            "[test]\nreport = [\"csv\"]",
         ] {
             assert!(parse(bad, Path::new("/c.toml")).is_err(), "{bad}");
         }
