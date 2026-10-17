@@ -35,7 +35,7 @@ impl Form {
         Self {
             serial: String::new(),
             reverse: String::new(),
-            native: false,
+            native: true,
             headless: false,
             live: true,
             long_press: false,
@@ -814,6 +814,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = State::new(); // no daemon: the Start card is shown
         let mut form = Form::new();
+        form.native = false; // Exercise switching from Google DHU to native.
         let (tx, _rx) = mpsc::channel();
         let raw = |events: Vec<egui::Event>| egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

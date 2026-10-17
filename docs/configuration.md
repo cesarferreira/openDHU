@@ -18,6 +18,8 @@ A missing file at the default location is fine. `aa doctor` shows which file was
 Highest first: command-line flag, environment variable, config file, built-in default.
 
 - `AUTOLAB_DHU_PATH` outranks `dhu.path`. `--dhu-path` outranks both.
+- `aa start` defaults to native. `--dhu` selects Google's DHU; `--backend native|dhu` is also supported.
+  Either command-line choice overrides `session.backend`; `--dhu` and `--backend` cannot be combined.
 - A list flag (`--reverse`, `--report`) **replaces** the file's list. It does not add to it.
 - A switch flag (`--headless`, `--skip-unsupported`) can turn a setting on. It cannot turn off a setting
   that the file turned on. Edit the file for that.
@@ -28,11 +30,11 @@ Highest first: command-line flag, environment variable, config file, built-in de
 ```toml
 [dhu]
 path = "/Users/me/Library/Android/sdk/extras/google/auto/desktop-head-unit"
-ini = "dhu.ini"          # the DHU's own .ini file (same as `aa start --config`)
+ini = "dhu.ini"          # the DHU's own .ini file (same as `aa start --dhu --config`)
 headless = false
 
 [session]
-backend = "dhu"          # or "native"; see native-backend.md. The `dhu.*` keys are ignored for native.
+backend = "native"       # the default; or "dhu"; see native-backend.md. The `dhu.*` keys are ignored for native.
 serial = "1A141FDF600AF2"
 reverse = [10101]        # same as `aa start --reverse 10101`
 

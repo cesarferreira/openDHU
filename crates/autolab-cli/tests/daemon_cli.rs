@@ -157,6 +157,7 @@ fn relative_paths_are_sent_to_the_daemon_as_absolute() {
     let o = Command::new(env!("CARGO_BIN_EXE_aa"))
         .args([
             "start",
+            "--dhu",
             "--dhu-path",
             &fake_dhu(),
             "--serial",

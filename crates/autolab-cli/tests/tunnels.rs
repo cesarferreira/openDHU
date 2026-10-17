@@ -5,9 +5,9 @@ mod common;
 use common::*;
 
 fn start_with(s: &Sandbox, env: &[(String, String)], extra: &[&str]) -> std::process::Output {
-    let mut args = vec!["start", "--dhu-path", "", "--serial", "FAKE0001"];
+    let mut args = vec!["start", "--dhu", "--dhu-path", "", "--serial", "FAKE0001"];
     let dhu = fake_dhu();
-    args[2] = &dhu;
+    args[3] = &dhu;
     args.extend_from_slice(extra);
     s.autolab_with(&args, env)
 }

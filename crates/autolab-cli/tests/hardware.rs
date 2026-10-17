@@ -16,7 +16,7 @@ fn real_dhu_video_focus_round_trip() {
     }
     let s = Sandbox::new();
     // An arbitrary port, so the test never disturbs a tunnel the user relies on.
-    let start = s.autolab(&["start", "--headless", "--reverse", "47123"]);
+    let start = s.autolab(&["start", "--dhu", "--headless", "--reverse", "47123"]);
     assert_eq!(code(&start), 0, "{}", text(&start));
     // Independent of AutoLab: ask adb itself.
     let list = std::process::Command::new("adb")

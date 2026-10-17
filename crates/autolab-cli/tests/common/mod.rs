@@ -53,7 +53,14 @@ impl Sandbox {
     }
 
     pub fn start_fake(&self) -> Output {
-        self.autolab(&["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"])
+        self.autolab(&[
+            "start",
+            "--dhu",
+            "--dhu-path",
+            &fake_dhu(),
+            "--serial",
+            "FAKE0001",
+        ])
     }
 
     /// Env that puts the fake adb first on PATH, with its state kept next to the sandbox.

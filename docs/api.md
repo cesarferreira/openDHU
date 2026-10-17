@@ -140,7 +140,9 @@ did not answer), and `reapplied` counts how often AutoLab had to put it back.
   "config": "/path/to/dhu.ini", "headless": true, "reverse": [10101] }
 ```
 
-Every field is optional. `backend` is `dhu` (Google's DHU, the default) or `native` (AutoLab's own head unit, see
+The CLI defaults to native and sends its backend choice explicitly.
+
+Every field is optional. `backend` is `dhu` (Google's DHU, the HTTP API default) or `native` (AutoLab's own head unit, see
 [native-backend.md](native-backend.md)). `dhuPath`, `config` and `headless` belong to the DHU; sending them with
 `native` is a `400 invalid_args`. Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
 appear), and several devices is an error rather than a guess. Without `dhuPath`, the DHU is found through

@@ -37,6 +37,10 @@ backend is AutoLab's own head unit: it sends the same messages, but it also read
 | Window | the DHU's own | AutoLab's live view |
 | Touch, audio, live video | no | yes |
 
+`aa start` uses native by default. Use `aa start --dhu` for Google's DHU. The existing
+`--backend native` and `--backend dhu` options remain supported; use either `--backend` or `--dhu`.
+A configured `session.backend` overrides the built-in default, and command-line choices override it.
+
 Details: [docs/native-backend.md](docs/native-backend.md).
 
 ## Requirements
@@ -58,7 +62,8 @@ aa doctor      # checks the DHU, adb, ffmpeg, the native head unit and your phon
 ## Quick start
 
 ```bash
-aa start --backend native      # or just `aa start` for the DHU; add --reverse 10101 for an adb tunnel
+aa start                       # native head unit by default; add --reverse 10101 for an adb tunnel
+# Or: aa start --dhu           # Google's Desktop Head Unit
 aa gui                             # the window: live view, buttons, events
 aa focus video off             # the phone stops projecting
 aa focus video on
@@ -105,7 +110,7 @@ Keep the private key outside the repository and restrict its permissions:
 
 ```bash
 chmod 600 ~/.config/autolab/credentials/head-unit-key.pem
-aa start --backend native
+aa start
 ```
 
 With custom credentials, AutoLab also advertises the developer DHU identity so debug Android Auto apps can
@@ -129,7 +134,7 @@ Touches, screenshots and the live view all follow whatever the running session r
 
 | Command | What it does |
 |---|---|
-| `aa start [--backend dhu\|native] [--serial S] [--reverse PORT]… [--dhu-path P] [--config F] [--headless]` | Start a session (starts the daemon if none runs) |
+| `aa start [--dhu] [--serial S] [--reverse PORT]… [--dhu-path P] [--config F] [--headless]` | Start a native session; `--dhu` selects Google's DHU (starts the daemon if none runs) |
 | `aa stop` | Stop the session |
 | `aa gui` | Open the desktop window |
 | `aa status` | Show the session: backend, phone, focus (requested, head unit, phone), tunnels |

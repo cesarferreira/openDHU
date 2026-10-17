@@ -316,3 +316,50 @@ fn certificate_source_is_visible_in_text_and_json_status() {
         );
     }
 }
+
+#[test]
+fn start_defaults_to_native_and_ignores_dhu_discovery_settings() {
+    let s = Sandbox::new();
+    let o = s.autolab_env(
+        &["start", "--serial", "FAKE0001"],
+        &[
+            ("AUTOLAB_NATIVE_HU", &fake_native()),
+            ("AUTOLAB_DHU_PATH", "/no/such/dhu"),
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(s.status_json()["backend"], "native");
+}
+
+#[test]
+fn dhu_flag_overrides_a_configured_native_backend() {
+    let s = Sandbox::new();
+    let dir = s.scratch("cfg");
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("config.toml");
+    std::fs::write(&cfg, "[session]\nbackend = \"native\"\n").unwrap();
+    let o = s.autolab_env(
+        &[
+            "start",
+            "--dhu",
+            "--dhu-path",
+            &fake_dhu(),
+            "--serial",
+            "FAKE0001",
+        ],
+        &[("AUTOLAB_CONFIG", cfg.to_str().unwrap())],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(s.status_json()["backend"], "dhu");
+}
+
+#[test]
+fn dhu_flag_and_backend_option_cannot_be_combined() {
+    let s = Sandbox::new();
+    for backend in ["native", "dhu"] {
+        let o = s.autolab(&["start", "--dhu", "--backend", backend]);
+        assert_eq!(code(&o), 2, "{}", text(&o));
+        assert!(text(&o).contains("cannot be used with"), "{}", text(&o));
+    }
+    assert!(!s.dir.exists(), "argument errors must not start a daemon");
+}

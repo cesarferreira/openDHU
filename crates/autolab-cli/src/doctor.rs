@@ -203,7 +203,7 @@ fn native_checks(out: &mut Vec<Check>) {
         Err(_) => check(
             Level::Info,
             "native head unit",
-            "autolab-native-hu not found (only needed for `start --backend native`)",
+            "autolab-native-hu not found (needed for the default `aa start`; use `aa start --dhu` for Google's DHU)",
         ),
     });
     out.push(

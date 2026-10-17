@@ -50,7 +50,7 @@ different AVD name, change `environment.emulator` in `e2e/suite.yaml`. The suite
 only this sample package and preserves its data.
 
 For a physical phone, install the APK with `adb -s SERIAL install -r PATH_TO_APK`, complete the same
-Android Auto development setup, then use `aa start --backend native` and `aa gui`. Open **AutoLab
+Android Auto development setup, then use `aa start` and `aa gui`. Open **AutoLab
 Demo** from Android Auto's app launcher. The managed emulator suite below specifically targets an AVD.
 
 ## E2E tests

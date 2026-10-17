@@ -39,11 +39,14 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Start a DHU session (launches Google's DHU over USB; the AutoLab daemon keeps it running)
+    /// Start an Android Auto session (native by default; the daemon keeps it running)
     Start {
-        /// Head unit to run: Google's DHU, or AutoLab's own native one [default: dhu]
+        /// Head unit to run [default: native]
         #[arg(long, value_enum)]
         backend: Option<BackendArg>,
+        /// Use Google's Desktop Head Unit instead of the native backend
+        #[arg(long, conflicts_with = "backend")]
+        dhu: bool,
         /// Path to the desktop-head-unit executable (dhu backend) [env: AUTOLAB_DHU_PATH]
         #[arg(long)]
         dhu_path: Option<PathBuf>,
@@ -230,6 +233,7 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Gui => launch_gui(),
         Command::Start {
             backend,
+            dhu,
             dhu_path,
             serial,
             native_tcp,
@@ -240,7 +244,11 @@ fn run(cli: Cli) -> Result<u8> {
             let cfg = load()?;
             let cwd = current_dir()?;
             // The daemon's working directory is not ours, so paths are resolved here.
-            let backend = config::first(backend, cfg.backend).unwrap_or(BackendArg::Dhu);
+            let backend = config::first(
+                if dhu { Some(BackendArg::Dhu) } else { backend },
+                cfg.backend,
+            )
+            .unwrap_or(BackendArg::Native);
             // `dhu.*` settings in the config file are for the DHU only: they never reach another backend.
             // A flag given on the command line still does, and the daemon then refuses it.
             let from_file = backend == BackendArg::Dhu;

@@ -1,7 +1,7 @@
 # Writing and running tests
 
 ```bash
-aa start --reverse 10101          # a session must be running (the runner never starts one)
+aa start --dhu --reverse 10101    # this example targets Google's DHU; ordinary test files need a running session
 aa test examples/video-focus.yaml
 aa test tests/ --report junit --report json --report html --artifacts-dir ./build/test-results
 ```

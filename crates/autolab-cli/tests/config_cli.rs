@@ -19,7 +19,7 @@ fn config_file_supplies_dhu_path_and_serial_so_start_needs_no_flags() {
     let cfg = write_config(
         &s,
         &format!(
-            "[dhu]\npath = \"{}\"\n[session]\nserial = \"FAKE0001\"\n",
+            "[dhu]\npath = \"{}\"\n[session]\nbackend = \"dhu\"\nserial = \"FAKE0001\"\n",
             fake_dhu()
         ),
     );
@@ -34,7 +34,7 @@ fn flag_beats_config_file() {
     let cfg = write_config(
         &s,
         &format!(
-            "[dhu]\npath = \"{}\"\n[session]\nserial = \"WRONG\"\n",
+            "[dhu]\npath = \"{}\"\n[session]\nbackend = \"dhu\"\nserial = \"WRONG\"\n",
             fake_dhu()
         ),
     );
@@ -51,7 +51,7 @@ fn env_var_beats_config_file_for_the_dhu_path() {
     let s = Sandbox::new();
     let cfg = write_config(
         &s,
-        "[dhu]\npath = \"/no/such/dhu\"\n[session]\nserial = \"FAKE0001\"\n",
+        "[dhu]\npath = \"/no/such/dhu\"\n[session]\nbackend = \"dhu\"\nserial = \"FAKE0001\"\n",
     );
     let o = s.autolab_env(
         &["start"],

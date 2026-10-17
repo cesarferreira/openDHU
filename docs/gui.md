@@ -13,7 +13,7 @@ cargo install --path crates/autolab-gui --locked
 `aa gui` finds `autolab-gui` next to the CLI or on `PATH`.
 
 The window works with or without a session. If no daemon runs, it says so and offers **Start session**, with a
-choice of head unit (Google DHU or AutoLab native). That button runs `aa start`, so the daemon start-up and your [config file](configuration.md) behave exactly as in
+choice of head unit (AutoLab native by default, or Google DHU). That button runs `aa start --backend native` or `aa start --dhu` for the selected head unit, so the daemon start-up and your [config file](configuration.md) behave exactly as in
 the terminal. `aa` must sit next to `autolab-gui` or be on `PATH`.
 
 ## What it shows

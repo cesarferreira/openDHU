@@ -391,7 +391,14 @@ fn a_second_ctrl_c_exits_immediately_even_if_cleanup_is_stuck() {
     let s = Sandbox::new();
     // `focus video on` hangs in this fake, so the cleanup that follows the first Ctrl+C blocks.
     let started = s.autolab_env(
-        &["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"],
+        &[
+            "start",
+            "--dhu",
+            "--dhu-path",
+            &fake_dhu(),
+            "--serial",
+            "FAKE0001",
+        ],
         &[("FAKE_DHU_MODE", "hang-on-focus-on")],
     );
     assert_eq!(code(&started), 0, "{}", text(&started));

@@ -247,6 +247,8 @@ fn start_with_cli(
     cmd.arg("start");
     if native {
         cmd.args(["--backend", "native"]);
+    } else {
+        cmd.arg("--dhu");
     }
     if let Some(s) = serial.filter(|s| !s.is_empty()) {
         cmd.args(["--serial", s]);

@@ -77,7 +77,14 @@ fn second_start_is_a_session_conflict() {
 fn start_reports_dhu_startup_failure_with_its_output() {
     let s = Sandbox::new();
     let o = s.autolab_env(
-        &["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"],
+        &[
+            "start",
+            "--dhu",
+            "--dhu-path",
+            &fake_dhu(),
+            "--serial",
+            "FAKE0001",
+        ],
         &[("FAKE_DHU_MODE", "fail-start")],
     );
     assert_eq!(code(&o), 3, "{}", text(&o));
@@ -98,7 +105,14 @@ fn start_reports_dhu_startup_failure_with_its_output() {
 #[test]
 fn missing_dhu_is_backend_unavailable_and_lists_tried_paths() {
     let s = Sandbox::new();
-    let o = s.autolab(&["start", "--dhu-path", "/no/such/dhu", "--serial", "X"]);
+    let o = s.autolab(&[
+        "start",
+        "--dhu",
+        "--dhu-path",
+        "/no/such/dhu",
+        "--serial",
+        "X",
+    ]);
     assert_eq!(code(&o), 3);
     assert!(text(&o).contains("/no/such/dhu"), "{}", text(&o));
 }
@@ -266,7 +280,14 @@ fn screenshot_without_a_session_is_backend_unavailable() {
 fn screenshot_the_dhu_accepts_but_never_writes_is_a_timeout() {
     let s = Sandbox::new();
     let started = s.autolab_env(
-        &["start", "--dhu-path", &fake_dhu(), "--serial", "FAKE0001"],
+        &[
+            "start",
+            "--dhu",
+            "--dhu-path",
+            &fake_dhu(),
+            "--serial",
+            "FAKE0001",
+        ],
         &[("FAKE_DHU_MODE", "screenshot-nofile")],
     );
     assert_eq!(code(&started), 0, "{}", text(&started));

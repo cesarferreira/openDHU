@@ -1,11 +1,13 @@
-# Native backend (`--backend native`)
+# Native backend (default)
 
-AutoLab can act as the Android Auto head unit itself, so Google's DHU is not needed.
+AutoLab uses its own Android Auto head unit by default, so Google's DHU is not needed.
+Use `aa start --dhu` to select Google's DHU, or set `session.backend` in the config file.
+The explicit `--backend native` and `--backend dhu` options are also supported.
 
 ```bash
 cargo build -p autolab-native-hu     # builds next to `aa`
 brew install ffmpeg                  # decodes the phone's video into screenshots
-aa start --backend native
+aa start
 ```
 
 `aa start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
@@ -138,7 +140,7 @@ To connect an emulator or a phone's Android Auto head-unit server without USB ac
 
 ```bash
 adb -s emulator-5554 forward tcp:15277 tcp:5277
-aa start --backend native --serial emulator-5554 --native-tcp 127.0.0.1:15277
+aa start --serial emulator-5554 --native-tcp 127.0.0.1:15277
 ```
 
 The server must be started in Android Auto's developer settings first. The TCP endpoint must be
