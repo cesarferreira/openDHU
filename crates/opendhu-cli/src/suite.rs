@@ -56,6 +56,7 @@ pub struct Application {
     adb: PathBuf,
     serial: String,
     package: String,
+    pub monitor: Arc<crate::crash_monitor::CrashMonitor>,
 }
 impl Application {
     pub fn reset(&self) -> Result<()> {
@@ -69,6 +70,9 @@ impl Application {
 }
 
 impl opendhu_test::runner::ApplicationControl for Application {
+    fn check_health(&self) -> Result<Option<String>> {
+        self.monitor.check()
+    }
     fn restart(&self) -> Result<()> {
         self.reset()
     }
@@ -305,7 +309,7 @@ struct Lease {
     services: Vec<crate::services::OwnedService>,
     emulator_child: Option<std::process::Child>,
     _lock: std::fs::File,
-    logcat: Option<std::process::Child>,
+    logcat: Option<Arc<crate::crash_monitor::CrashMonitor>>,
     artifacts: PathBuf,
 }
 impl Lease {
@@ -362,9 +366,8 @@ impl Lease {
             );
             let _ = std::fs::remove_dir_all(&self.runtime);
         }
-        if let Some(mut child) = self.logcat.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(monitor) = self.logcat.take() {
+            monitor.stop();
         }
         if let Some(serial) = &self.serial {
             if let Some(port) = self.forward.take()
@@ -688,15 +691,6 @@ fn run_prepared(
     if !opts.usb {
         lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
-    if let Some(activity) = &suite.environment.launch_activity {
-        let component = format!("{}/{activity}", suite.environment.package);
-        test_cmd::progress(&output, format!("Launching {component}..."));
-        device::adb(
-            &lease.adb,
-            &serial,
-            &["shell", "am", "start", "-W", "-n", &component],
-        )?;
-    }
     let endpoint = if opts.usb {
         None
     } else {
@@ -743,17 +737,22 @@ fn run_prepared(
         }
         lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
-    let log = std::fs::File::create(artifacts.join("logcat.txt"))
-        .map_err(|e| Error::Other(e.to_string()))?;
-    lease.logcat = Some(
-        Command::new(&lease.adb)
-            .args(["-s", &serial, "logcat", "-T", "1"])
-            .stdin(Stdio::null())
-            .stdout(log)
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| Error::Other(e.to_string()))?,
-    );
+    let monitor = Arc::new(crate::crash_monitor::CrashMonitor::start(
+        &lease.adb,
+        &serial,
+        &suite.environment.package,
+        &artifacts.join("logcat.txt"),
+    )?);
+    lease.logcat = Some(Arc::clone(&monitor));
+    if let Some(activity) = &suite.environment.launch_activity {
+        let component = format!("{}/{activity}", suite.environment.package);
+        test_cmd::progress(&output, format!("Launching {component}..."));
+        device::adb(
+            &lease.adb,
+            &serial,
+            &["shell", "am", "start", "-W", "-n", &component],
+        )?;
+    }
     test_cmd::progress(&output, "Requesting video focus...");
     suite_cli(
         &lease.exe,
@@ -777,6 +776,7 @@ fn run_prepared(
     opts.runtime_dir = Some(lease.runtime.clone());
     opts.app = Some(Application {
         label: suite.environment.app_label,
+        monitor,
         adb: lease.adb.clone(),
         serial,
         package: suite.environment.package,

@@ -75,6 +75,10 @@ impl Clock for SystemClock {
 
 /// Device operations scoped to the suite's selected application and phone.
 pub trait ApplicationControl {
+    /// A latched unexpected crash/ANR, or an error if health cannot be observed.
+    fn check_health(&self) -> opendhu_core::Result<Option<String>> {
+        Ok(None)
+    }
     /// Stop the application process. The runner opens it through the projected launcher afterward.
     fn restart(&self) -> opendhu_core::Result<()>;
     fn input_text(&self, text: &str) -> opendhu_core::Result<()>;
@@ -252,7 +256,13 @@ pub fn run_test_with_progress(
                 {
                     maybe_off = true;
                 }
-                exec(step, backend, cfg)
+                match application_health(cfg) {
+                    Some(end) => end,
+                    None => {
+                        let end = exec(step, backend, cfg);
+                        application_health(cfg).unwrap_or(end)
+                    }
+                }
             };
             if matches!(step, Step::FocusVideo { value } if value.0)
                 && end.outcome == Outcome::Passed
@@ -403,6 +413,14 @@ fn restore_focus(backend: &mut dyn HeadUnitBackend) -> End {
     }
 }
 
+fn application_health(cfg: &RunConfig) -> Option<End> {
+    match cfg.application?.check_health() {
+        Ok(Some(detail)) => Some(End::assertion(detail)),
+        Ok(None) => None,
+        Err(error) => Some(End::error(&error)),
+    }
+}
+
 fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     match step {
         Step::HttpRequest {
@@ -467,7 +485,14 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
         } => screen_text(text, timeout.0, true, false, until.as_deref(), backend, cfg),
         Step::FocusVideo { value } => focus_video(value.focus_state(), backend),
         Step::Wait { duration } => {
-            cfg.clock.sleep(duration.0);
+            let deadline = cfg.clock.now() + duration.0;
+            while cfg.clock.now() < deadline && !cfg.clock.cancelled() {
+                if let Some(end) = application_health(cfg) {
+                    return end;
+                }
+                cfg.clock
+                    .sleep(POLL_INTERVAL.min(deadline.saturating_sub(cfg.clock.now())));
+            }
             if cfg.clock.cancelled() {
                 return End::interrupted(format!(
                     "interrupted during a {} wait",
@@ -520,6 +545,9 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
             let deadline = cfg.clock.now() + timeout.0;
             let began = cfg.clock.now();
             loop {
+                if let Some(end) = application_health(cfg) {
+                    return end;
+                }
                 let st: HeadUnitStatus = match backend.status() {
                     Ok(st) => st,
                     Err(e) => return End::error(&e),
@@ -630,6 +658,9 @@ fn screen_text(
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while observing projected UI");
         }
+        if let Some(end) = application_health(cfg) {
+            return end;
+        }
         if let Err(e) = backend.screenshot(&image) {
             return End::error(&e);
         }
@@ -706,6 +737,9 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     // From an app the first tap opens the dashboard; a second opens its app grid.
     let deadline = cfg.clock.now() + Duration::from_secs(30);
     while cfg.clock.now() < deadline {
+        if let Some(end) = application_health(cfg) {
+            return end;
+        }
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while opening app");
         }

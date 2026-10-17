@@ -318,6 +318,18 @@ Suites also save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screensh
 OCR diagnostics. The private daemon authentication file is removed rather than archived. Inspect
 these artifacts for setup and assertion failures; screenshots alone do not make a test pass.
 
+Managed suites monitor the selected package (including its subprocesses) for fatal Java/Kotlin
+exceptions, native crashes, and ANRs. An unexpected crash fails the affected test with exit code 7,
+even if the app recovers and its UI assertions succeed. Reports include an `app.health` failure
+with the timestamp and logcat excerpt. Losing logcat access or the collector produces an error,
+never a passing health check. Each test finishes with a logcat checkpoint before its result is
+finalized, so pending records are included.
+
+The force-stop before each test and explicit `app.restart` actions are allowed; ordinary error
+logs and crashes in unrelated apps are ignored. Crash detection remains active during relaunch.
+This monitoring applies to managed suites; individual YAML files run against an existing session
+have no suite package or device context and do not receive this guarantee.
+
 ## Production-app journeys with local services
 
 A suite can own local fixture services and prepare its emulator's network and runtime permissions:

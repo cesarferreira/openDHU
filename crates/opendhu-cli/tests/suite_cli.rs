@@ -123,7 +123,12 @@ if [ "$1" = reverse ]; then
   }
 fi
 case "$*" in
-  'install -r -t '*|'shell am start -W -n test.app/test.app.MainActivity'|'shell am force-stop test.app') ;;
+  'install -r -t '*) rm -f "$USB_FIXTURE/log-pipe" "$USB_FIXTURE/monitor-ready";;
+  'shell am start -W -n test.app/test.app.MainActivity')
+    if [ -n "$USB_LAUNCH_CRASH" ] && [ -p "$USB_FIXTURE/log-pipe" ]; then
+      printf '%s\n' "$USB_LAUNCH_CRASH" > "$USB_FIXTURE/log-pipe"
+    fi;;
+  'shell am force-stop test.app') ;;
   'get-state')
     if [ "$USB_DELAY_ADB" = 1 ] && [ ! -f "$USB_FIXTURE/adb-returned" ]; then
       touch "$USB_FIXTURE/adb-returned"
@@ -135,7 +140,27 @@ case "$*" in
     [ -f "$USB_FIXTURE/native" ] || { echo 'reverse created before USB projection' >&2; exit 9; }
     echo 'UsbFfs tcp:10101 tcp:19101' > "$USB_FIXTURE/reverse";;
   'reverse --remove tcp:10101') rm "$USB_FIXTURE/reverse";;
-  'logcat -T 1') [ -f "$USB_FIXTURE/native" ] || exit 9; echo 'capturing PHONE'; exec sleep 60;;
+  'logcat -T 1'|'logcat -b main -b system -b crash -b events -v threadtime -T 1 *:V')
+    [ -f "$USB_FIXTURE/native" ] || exit 9
+    echo $$ > "$USB_FIXTURE/log-pid"
+    rm -f "$USB_FIXTURE/log-pipe" "$USB_FIXTURE/monitor-ready"
+    mkfifo "$USB_FIXTURE/log-pipe"
+    exec 3<>"$USB_FIXTURE/log-pipe"
+    echo 'capturing PHONE'
+    exec cat <&3;;
+  'shell log -t OpenDHUHealth '*)
+    n=0; while [ ! -p "$USB_FIXTURE/log-pipe" ] && [ "$n" -lt 100 ]; do sleep 0.01; n=$((n+1)); done
+    if [ "$USB_DROP_FIRST_MARKER" = 1 ] && [ ! -f "$USB_FIXTURE/marker-dropped" ]; then
+      touch "$USB_FIXTURE/marker-dropped"; exit 0
+    fi
+    if [ -f "$USB_FIXTURE/monitor-ready" ]; then
+      [ "$USB_MONITOR_STALL" != 1 ] || exit 0
+      [ -z "$USB_CRASH_LOG" ] || printf '%s\n' "$USB_CRASH_LOG" > "$USB_FIXTURE/log-pipe"
+      [ "$USB_MONITOR_EXIT" != 1 ] || { kill "$(cat "$USB_FIXTURE/log-pid")"; exit 0; }
+    fi
+    echo $$ > "$USB_FIXTURE/marker-pid"
+    printf '10-17 23:08:00.000  100  100 I OpenDHUHealth: %s\n' "$5" > "$USB_FIXTURE/log-pipe"
+    touch "$USB_FIXTURE/monitor-ready";;
   *) echo "unexpected adb call: $*" >&2; exit 9;;
 esac
 "#,
@@ -459,4 +484,90 @@ fn interrupting_all_usb_cleans_up_and_skips_remaining_suites() {
     assert!(!s.artifacts.join("second").exists());
     let runtime = std::fs::read_to_string(root.join("runtime")).unwrap();
     assert!(!std::path::Path::new(runtime.trim()).exists());
+}
+
+#[test]
+fn recovered_app_crashes_and_anrs_fail_the_suite_and_every_report() {
+    for log in [
+        "10-17 23:08:01.000  321  321 E AndroidRuntime: FATAL EXCEPTION: main\n10-17 23:08:01.001  321  321 E AndroidRuntime: Process: test.app, PID: 321\n10-17 23:08:01.002  321  321 E AndroidRuntime: java.lang.IllegalStateException: injected crash",
+        "10-17 23:08:01.000  321  321 F libc: Fatal signal 11 (SIGSEGV), code 1, fault addr 0x0 in tid 321 (test.app), pid 321 (test.app)",
+        "10-17 23:08:01.000  665  700 E ActivityManager: ANR in test.app (test.app.MainActivity)",
+    ] {
+        let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+        s.env.push(("USB_CRASH_LOG".into(), log.into()));
+        let output = s.run(&[]);
+        assert_eq!(code(&output), 7, "{}", text(&output));
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(s.artifacts.join("results.json")).unwrap())
+                .unwrap();
+        assert_eq!(report["tests"][0]["outcome"], "failed");
+        assert_eq!(report["metadata"]["summary"]["passed"], 0);
+        for name in ["results.json", "results.xml", "results.html"] {
+            let report = std::fs::read_to_string(s.artifacts.join(name)).unwrap();
+            assert!(report.contains("test.app"), "{name}");
+            assert!(report.contains("23:08:01"), "{name}");
+        }
+        assert!(text(&output).contains("app.health"), "{}", text(&output));
+    }
+}
+
+#[test]
+fn unrelated_crashes_and_intentional_force_stops_do_not_fail_the_suite() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("USB_CRASH_LOG".into(), "10-17 23:08:01.000 321 321 E AndroidRuntime: FATAL EXCEPTION: main\n10-17 23:08:01.001 321 321 E AndroidRuntime: Process: other.app, PID: 321\n10-17 23:08:01.002 665 665 I ActivityManager: Force stopping test.app appid=123 user=0\n10-17 23:08:01.003 321 321 E App: ordinary error".into()));
+    let output = s.run(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+}
+
+#[test]
+fn losing_the_crash_collector_is_an_error_in_the_report() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("USB_MONITOR_EXIT".into(), "1".into()));
+    let output = s.run(&[]);
+    assert_ne!(code(&output), 0, "{}", text(&output));
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.artifacts.join("results.json")).unwrap()).unwrap();
+    assert_eq!(report["tests"][0]["outcome"], "error");
+    assert!(
+        report["tests"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("monitor")
+    );
+}
+
+#[test]
+fn startup_checkpoint_retries_if_logcat_attaches_after_the_first_marker() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("USB_DROP_FIRST_MARKER".into(), "1".into()));
+    let output = s.run(&[]);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+}
+
+#[test]
+fn a_stalled_collector_cannot_finalize_a_passing_test() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("USB_MONITOR_STALL".into(), "1".into()));
+    let output = s.run(&[]);
+    assert_ne!(code(&output), 0, "{}", text(&output));
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.artifacts.join("results.json")).unwrap()).unwrap();
+    assert_eq!(report["tests"][0]["outcome"], "error");
+    assert!(
+        report["tests"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("barrier")
+    );
+}
+
+#[test]
+fn a_crash_during_the_configured_launch_is_not_discarded_by_test_reset() {
+    let mut s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.env.push(("USB_LAUNCH_CRASH".into(), "10-17 23:08:01.000 321 321 E AndroidRuntime: FATAL EXCEPTION: main\n10-17 23:08:01.001 321 321 E AndroidRuntime: Process: test.app, PID: 321".into()));
+    let output = s.run(&[]);
+    assert_eq!(code(&output), 7, "{}", text(&output));
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.artifacts.join("results.json")).unwrap()).unwrap();
+    assert_eq!(report["tests"][0]["outcome"], "failed");
 }

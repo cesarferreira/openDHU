@@ -1,5 +1,6 @@
 mod audio_cmd;
 mod config;
+mod crash_monitor;
 mod daemon_ctl;
 mod device;
 mod doctor;

@@ -285,22 +285,53 @@ pub fn run(mut opts: Options) -> Result<u8> {
             progress(&output, format!("  Resetting application {}...", app.label));
             app.reset()?;
         }
-        let r = run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
-            Progress::Started { index, action } => {
-                let description = index
-                    .checked_sub(1)
-                    .and_then(|n| test.steps.get(n))
-                    .map(step_description)
-                    .unwrap_or_default();
-                let name = if index == 0 {
-                    action.to_string()
-                } else {
-                    format!("{index}. {action}")
+        let mut r =
+            run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
+                Progress::Started { index, action } => {
+                    let description = index
+                        .checked_sub(1)
+                        .and_then(|n| test.steps.get(n))
+                        .map(step_description)
+                        .unwrap_or_default();
+                    let name = if index == 0 {
+                        action.to_string()
+                    } else {
+                        format!("{index}. {action}")
+                    };
+                    progress(&output, format!("  RUN {name}{description}"));
+                }
+                Progress::Finished(step) => print_step(&output, step),
+            });
+        if let Some(app) = &opts.app {
+            let health = app.monitor.finish();
+            let failure = match health {
+                Ok(Some(detail)) => Some((Outcome::Failed, 7, detail)),
+                Err(error) => Some((
+                    Outcome::Error,
+                    error.exit_code(),
+                    error.message().to_string(),
+                )),
+                Ok(None) => None,
+            };
+            if let Some((outcome, code, detail)) = failure {
+                let step = opendhu_test::model::StepResult {
+                    index: r.steps.last().map_or(0, |step| step.index) + 1,
+                    action: "app.health".into(),
+                    outcome,
+                    detail: detail.clone(),
+                    duration_ms: 0,
+                    exit_code: Some(code),
                 };
-                progress(&output, format!("  RUN {name}{description}"));
+                print_step(&output, &step);
+                r.steps.push(step);
+                r.message = Some(match r.message.take() {
+                    Some(message) => format!("{message}; {detail}"),
+                    None => detail,
+                });
+                r.outcome = outcome;
+                r.exit_code = code;
             }
-            Progress::Finished(step) => print_step(&output, step),
-        });
+        }
         progress(
             &output,
             format!(
