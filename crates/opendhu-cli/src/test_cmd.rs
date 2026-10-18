@@ -163,7 +163,13 @@ fn step_description(step: &opendhu_test::schema::Step) -> String {
     }
 }
 
-fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult) {
+fn print_step(
+    output: &crate::test_output::Output,
+    s: &opendhu_test::StepResult,
+    step: Option<&opendhu_test::schema::Step>,
+) {
+    use opendhu_test::schema::Step;
+
     let tag = match s.outcome {
         Outcome::Passed => "PASS",
         Outcome::Failed => "FAIL",
@@ -175,11 +181,17 @@ fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult)
     } else {
         format!("{}. {}", s.index, s.action)
     };
+    let detail = match (s.outcome, step) {
+        (Outcome::Passed, Some(Step::UiExpect { text, .. } | Step::UiWaitFor { text, .. })) => {
+            format!("projected text {text:?} visible")
+        }
+        _ => s.detail.clone(),
+    };
     progress(
         output,
         format!(
             "  {tag} {name}: {} ({:.1}s)",
-            s.detail,
+            detail,
             s.duration_ms as f64 / 1000.0
         ),
     );
@@ -330,7 +342,11 @@ pub(crate) fn run_with_emulators(
                     };
                     progress(&output, format!("  RUN {name}{description}"));
                 }
-                Progress::Finished(step) => print_step(&output, step),
+                Progress::Finished(step) => print_step(
+                    &output,
+                    step,
+                    step.index.checked_sub(1).and_then(|n| test.steps.get(n)),
+                ),
             });
         if let Some(app) = &opts.app {
             let health = app.monitor.finish();
@@ -352,7 +368,7 @@ pub(crate) fn run_with_emulators(
                     duration_ms: 0,
                     exit_code: Some(code),
                 };
-                print_step(&output, &step);
+                print_step(&output, &step, None);
                 r.steps.push(step);
                 r.message = Some(match r.message.take() {
                     Some(message) => format!("{message}; {detail}"),
