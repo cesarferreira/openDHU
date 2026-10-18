@@ -107,16 +107,7 @@ impl Locator {
             .clone()
             .filter(|p| p.is_absolute())
             .or_else(|| self.home.as_ref().map(|h| h.join(".config")))?;
-        let current = base.join("opendhu").join("config.toml");
-        let legacy = base.join("autolab").join("config.toml");
-        let path = if matches!(current.try_exists(), Ok(false))
-            && !matches!(legacy.try_exists(), Ok(false))
-        {
-            legacy
-        } else {
-            current
-        };
-        Some((path, false))
+        Some((base.join("opendhu").join("config.toml"), false))
     }
 }
 
@@ -262,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn default_location_may_be_absent_but_a_named_file_may_not() {
+    fn default_location_uses_only_opendhu_and_named_files_must_exist() {
         let dir = std::env::temp_dir().join(format!("opendhu-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let none = Locator {
@@ -280,7 +271,11 @@ mod tests {
         let legacy = dir.join("autolab");
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("config.toml"), "[session]\nserial = \"OLD\"").unwrap();
-        assert_eq!(load(&none, &dir).unwrap().serial.as_deref(), Some("OLD"));
+        assert_eq!(
+            load(&none, &dir).unwrap(),
+            Config::default(),
+            "old config directories must be ignored"
+        );
         let sub = dir.join("opendhu");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("config.toml"), "[session]\nserial = \"Z\"").unwrap();

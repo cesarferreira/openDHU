@@ -638,13 +638,7 @@ fn load_home_certificate(
     home: Option<&std::path::Path>,
 ) -> Result<Option<CertificateAndKey>, String> {
     let current = home.map(|home| home.join(".config/opendhu/credentials"));
-    match load_certificate(cert_path, key_path, current.as_deref())? {
-        Some(pair) => Ok(Some(pair)),
-        None => {
-            let legacy = home.map(|home| home.join(".config/autolab/credentials"));
-            load_certificate(None, None, legacy.as_deref())
-        }
-    }
+    load_certificate(cert_path, key_path, current.as_deref())
 }
 
 /// Explicit paths override the standard credential pair. An incomplete or unreadable pair is
@@ -918,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_credentials_remain_available_and_new_credentials_take_priority() {
+    fn only_opendhu_credentials_are_loaded_from_home() {
         let home = std::env::temp_dir().join(format!("opendhu-legacy-cert-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let legacy = home.join(".config/autolab/credentials");
@@ -930,7 +924,8 @@ mod tests {
         std::fs::write(legacy.join("head-unit-key.pem"), key).unwrap();
         assert_eq!(
             load_home_certificate(None, None, Some(&home)).unwrap(),
-            Some((cert.to_vec(), key.to_vec()))
+            None,
+            "old credential directories must be ignored",
         );
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("head-unit-cert.pem"), cert).unwrap();
