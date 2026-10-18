@@ -47,8 +47,12 @@ fn the_prd_example_passes_and_produces_the_documented_artifacts() {
         "{t}"
     );
     assert!(t.contains("Result: PASSED"), "{t}");
+    assert!(t.contains("PASS  1 test"), "{t}");
+
+    assert_eq!(t.matches("Report:").count(), 1, "{t}");
+    assert_eq!(t.matches("Artifacts:").count(), 1, "{t}");
     assert!(
-        t.contains("1 test: 1 passed, 0 failed, 0 errors, 0 skipped"),
+        !t.contains("0 failed") && !t.contains("metadata.json"),
         "{t}"
     );
 
@@ -101,6 +105,10 @@ fn a_failed_assertion_exits_7_and_still_restores_video_focus() {
         text(&o)
     );
 
+    let shown = text(&o);
+    assert!(shown.contains("FAIL  1 test · 1 failed"), "{shown}");
+    assert!(shown.contains("Log:        "), "{shown}");
+    assert!(shown.contains("logs/01-phone-must-confirm.log"), "{shown}");
     let r = json(&art.join("results.json"));
     assert_eq!(r["tests"][0]["outcome"], "failed");
     assert_eq!(r["exitCode"], 7);
@@ -451,4 +459,43 @@ fn default_reports_live_under_build_and_include_html() {
     assert!(cwd.join("build/test-results/results.json").is_file());
     assert!(cwd.join("build/test-results/results.html").is_file());
     assert!(!cwd.join("test-results").exists());
+}
+
+#[test]
+fn footer_paths_are_relative_and_verbose_lists_artifacts_without_linking_unwritten_html() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let root = s.scratch("footer");
+    let file = write(
+        &root,
+        "test.yaml",
+        "name: Footer\nsteps: [{action: wait, duration: 1ms}]\n",
+    );
+    for verbose in [false, true] {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_aa"));
+        command
+            .current_dir(&root)
+            .args([
+                "test",
+                file.to_str().unwrap(),
+                "--report",
+                "json",
+                "--artifacts-dir",
+                "art",
+            ])
+            .env("OPENDHU_RUNTIME_DIR", &s.dir)
+            .env("XDG_CONFIG_HOME", root.join("no-config"))
+            .env_remove("OPENDHU_CONFIG");
+        if verbose {
+            command.arg("--verbose");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(code(&output), 0, "{}", text(&output));
+        let shown = text(&output);
+        assert!(shown.contains("Report:     art/results.json"), "{shown}");
+        assert!(shown.contains("Artifacts:  art"), "{shown}");
+        assert!(!shown.contains("results.html"), "{shown}");
+        assert_eq!(shown.contains("art/metadata.json"), verbose, "{shown}");
+        assert_eq!(shown.contains("art/logs/01-footer.log"), verbose, "{shown}");
+    }
 }

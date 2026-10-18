@@ -162,7 +162,7 @@ fn headless_test_does_not_require_or_start_a_viewer() {
         .unwrap();
     assert_eq!(code(&output), 0, "{}", text(&output));
     assert!(!art.join("head-unit-viewer.log").exists());
-    assert!(text(&output).contains("1 passed"), "{}", text(&output));
+    assert!(text(&output).contains("PASS  1 test"), "{}", text(&output));
 }
 
 #[test]

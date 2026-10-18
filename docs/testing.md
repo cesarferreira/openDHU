@@ -249,6 +249,22 @@ on test order.
 
 ## Artifacts
 
+After cleanup, terminal output ends with one summary and the report and artifact paths:
+
+```text
+PASS  3 tests · 1 suite
+
+Report:     build/test-results/all-<run>/sample/results.html
+Artifacts:  build/test-results/all-<run>
+```
+
+Failures, errors and skipped tests appear in the summary only when nonzero. Failed tests include
+their names and log paths. Each suite gets a report link; HTML is preferred, falling back to JSON or
+JUnit when HTML was not requested. Paths within the current directory are shown relative to it.
+Use `aa test --verbose` (or `-v`) to list report files, metadata and per-test logs, and repeat full failure details.
+Terminal status labels use green for passes, red for failures and yellow for skips or interruption,
+with cyan path labels and muted paths. `NO_COLOR`, `TERM=dumb` and redirected output disable colors.
+
 ```text
 build/test-results/
   results.html        # browser report (default), or --report html

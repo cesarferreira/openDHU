@@ -163,6 +163,9 @@ enum Command {
         /// Print ordinary live progress without animated spinners
         #[arg(long)]
         no_interactive: bool,
+        /// List report files and per-test logs, and repeat full failure details
+        #[arg(long, short = 'v')]
+        verbose: bool,
         /// Run tests whose name or filename contains this text (case-insensitive)
         #[arg(long)]
         filter: Option<String>,
@@ -385,6 +388,7 @@ fn run(cli: Cli) -> Result<u8> {
             headless,
             interactive,
             no_interactive,
+            verbose,
             filter,
         } => {
             let cfg = load()?;
@@ -392,6 +396,7 @@ fn run(cli: Cli) -> Result<u8> {
                 paths,
                 list,
                 batch: false,
+                verbose,
                 report: if report.is_empty() {
                     cfg.report.clone()
                 } else {

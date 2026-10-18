@@ -136,9 +136,13 @@ fn terminal_results_are_colored_but_no_color_and_redirected_logs_stay_plain() {
         "passes need green terminal styling: {}",
         text(&terminal)
     );
+    let shown = text(&terminal);
+    assert!(shown.contains("\x1b[32mPASS\x1b[0m  1 test"), "{shown}");
+    assert!(shown.contains("\x1b[36mReport:"), "{shown}");
+    assert!(shown.contains("\x1b[2m"), "paths should be muted: {shown}");
     let monochrome = terminal_run(&s, &args, true);
     assert_eq!(code(&monochrome), 0, "{}", text(&monochrome));
-    for color in ["\x1b[32m", "\x1b[36m", "\x1b[0m"] {
+    for color in ["\x1b[32m", "\x1b[36m", "\x1b[2m", "\x1b[0m"] {
         assert!(
             !text(&monochrome).contains(color),
             "NO_COLOR leaked styling"
@@ -149,6 +153,14 @@ fn terminal_results_are_colored_but_no_color_and_redirected_logs_stay_plain() {
     assert!(
         !redirected.stdout.contains(&0x1b),
         "redirected logs leaked ANSI escapes"
+    );
+    std::fs::write(&file, "name: Wrong focus\nsteps: [{action: assert.status, expect: {videoFocus: {observed: off}}}]\n").unwrap();
+    let failure = terminal_run(&s, &args, false);
+    assert_eq!(code(&failure), 7, "{}", text(&failure));
+    let shown = text(&failure);
+    assert!(
+        shown.contains("\x1b[31mFAIL\x1b[0m  1 test · 1 failed"),
+        "{shown}"
     );
 }
 
@@ -177,7 +189,7 @@ fn interactive_defaults_animate_a_wait_then_leave_its_result_and_preserve_json()
         "wait did not animate: {shown}"
     );
     assert!(
-        shown.contains("wait (500ms)") && shown.contains("PASS") && shown.contains("1 passed"),
+        shown.contains("wait (500ms)") && shown.contains("\x1b[32mPASS\x1b[0m  1 test"),
         "{shown}"
     );
     let mut static_args = args.to_vec();

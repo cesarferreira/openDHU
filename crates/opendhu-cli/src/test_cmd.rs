@@ -8,8 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::ValueEnum;
 use opendhu_core::{Error, HeadUnitBackend, Result};
 use opendhu_test::report::{
-    BackendMeta, Format, Metadata, RunReport, Summary, exit_code_for, iso8601_utc, step_log,
-    write_artifacts,
+    BackendMeta, Format, Metadata, RunReport, Summary, exit_code_for, iso8601_utc, write_artifacts,
 };
 use opendhu_test::runner::{
     Clock, INTERRUPTED, Progress, RunConfig, SystemClock, run_test_with_progress,
@@ -32,6 +31,7 @@ pub struct Options {
     pub paths: Vec<PathBuf>,
     pub list: bool,
     pub batch: bool,
+    pub verbose: bool,
     pub filter: Option<String>,
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
@@ -198,10 +198,23 @@ pub(crate) fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
 }
 
 pub fn run(opts: Options) -> Result<u8> {
-    run_with_emulators(opts, None)
+    let output = Arc::clone(&opts.output);
+    let footer = !opts.list && !opts.validate;
+    let verbose = opts.verbose;
+    let result = run_with_emulators(opts, None);
+    if footer {
+        output.finish(
+            match &result {
+                Ok(code) => *code,
+                Err(error) => error.exit_code(),
+            },
+            verbose,
+        );
+    }
+    result
 }
 
-fn run_with_emulators(
+pub(crate) fn run_with_emulators(
     mut opts: Options,
     emulators: Option<&mut crate::suite::EmulatorPool>,
 ) -> Result<u8> {
@@ -214,7 +227,15 @@ fn run_with_emulators(
     opts.paths = crate::test_selection::resolve(opts.paths)?;
     let output = Arc::clone(&opts.output);
     if opts.paths.len() == 1 && crate::suite::is_suite(&opts.paths[0])? {
-        return crate::suite::run(opts, emulators);
+        let count_suite = !opts.batch && !opts.validate;
+        let result = crate::suite::run(opts, emulators);
+        if count_suite {
+            output.suite_finished(match &result {
+                Ok(code) => *code,
+                Err(error) => error.exit_code(),
+            });
+        }
+        return result;
     }
     if opts.usb {
         return Err(Error::InvalidArgs(
@@ -413,34 +434,18 @@ fn run_with_emulators(
     if opts.json && !opts.batch {
         println!("{}", opendhu_test::report::to_json(&report));
     } else if !opts.json {
-        println!(
-            "{} test{}: {} passed, {} failed, {} errors, {} skipped",
-            summary.tests,
-            if summary.tests == 1 { "" } else { "s" },
-            summary.passed,
-            summary.failed,
-            summary.errors,
-            summary.skipped
-        );
         if interrupted {
             let rest = match not_run {
                 0 => String::new(),
                 1 => " 1 test was not run.".into(),
                 n => format!(" {n} tests were not run."),
             };
-            println!("Interrupted.{rest} Video focus was restored if a test had left it off.");
+            progress(
+                &output,
+                format!("Interrupted.{rest} Video focus was restored if a test had left it off."),
+            );
         }
-        println!("Artifacts: {}", dir.display());
-        for p in &written {
-            println!("  {}", p.display());
-        }
-        for t in report
-            .tests
-            .iter()
-            .filter(|t| !t.passed() && t.outcome != Outcome::Skipped)
-        {
-            eprintln!("\n{}", step_log(t).trim_end());
-        }
+        output.report(&report, &dir, written);
     }
     Ok(exit_code)
 }
@@ -549,6 +554,7 @@ fn run_all(opts: Options) -> Result<u8> {
         .artifacts_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from("build/test-results").join(format!("all-{nonce}")));
+    opts.output.artifacts(&artifacts);
     let mut results = Vec::new();
     let mut exit_code = 0;
     let mut emulators = crate::suite::EmulatorPool::default();
@@ -576,6 +582,7 @@ fn run_all(opts: Options) -> Result<u8> {
         if exit_code == 0 {
             exit_code = code;
         }
+        opts.output.suite_finished(code);
         results.push(serde_json::json!({"name": suite.name, "path": suite.path, "tests": count, "exitCode": code, "error": error, "artifacts": dir}));
         if code == INTERRUPTED {
             break;
@@ -591,20 +598,8 @@ fn run_all(opts: Options) -> Result<u8> {
             "{}",
             serde_json::json!({"suites": results, "exitCode": exit_code, "interrupted": interrupted})
         );
-    } else {
-        let failed = results
-            .iter()
-            .filter(|result| result["exitCode"] != 0)
-            .count();
-        println!(
-            "{} suites: {} passed, {failed} failed",
-            results.len(),
-            results.len() - failed
-        );
-        if interrupted {
-            println!("Interrupted; remaining suites were not run.");
-        }
-        println!("Artifacts: {}", artifacts.display());
+    } else if interrupted {
+        progress(&opts.output, "Interrupted; remaining suites were not run.");
     }
     Ok(exit_code)
 }

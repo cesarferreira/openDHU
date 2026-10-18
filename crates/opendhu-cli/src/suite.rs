@@ -686,7 +686,7 @@ fn run_prepared(
         cwd.join(artifacts)
     };
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
-    test_cmd::progress(&output, format!("Artifacts: {}", artifacts.display()));
+    output.artifacts(&artifacts);
     let adb = adb_program();
     let usb_serial = if opts.usb {
         test_cmd::progress(&output, "Finding a USB phone...");
@@ -998,18 +998,20 @@ fn run_prepared(
             test_cmd::ReportFormat::Html,
         ];
     }
-    let result = test_cmd::run(opts);
-    test_cmd::progress(
-        &output,
-        "Cleaning up the suite session and owned resources...",
-    );
+    let verbose = opts.verbose;
+    let result = test_cmd::run_with_emulators(opts, None);
+    if verbose {
+        test_cmd::progress(
+            &output,
+            "Cleaning up the suite session and owned resources...",
+        );
+    }
     // Capture daemon protocol logs before removing its private runtime (never archive daemon.json).
     let _ = std::fs::copy(
         lease.runtime.join("daemon.log"),
         lease.artifacts.join("head-unit.log"),
     );
     lease.cleanup()?;
-    test_cmd::progress(&output, "Suite cleanup complete");
     result
 }
 

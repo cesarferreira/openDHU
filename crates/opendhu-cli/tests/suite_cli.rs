@@ -451,6 +451,11 @@ fn usb_start_failure_cleans_up_the_private_runtime() {
     s.env.push(("FAKE_NATIVE_MODE".into(), "exit-early".into()));
     let output = s.run(&[]);
     assert_ne!(code(&output), 0, "{}", text(&output));
+    assert!(
+        text(&output).contains(&format!("Artifacts:  {}", s.artifacts.display())),
+        "{}",
+        text(&output)
+    );
     let dir = s.suite.parent().unwrap();
     let runtime = std::fs::read_to_string(dir.join("runtime")).unwrap();
     assert!(!std::path::Path::new(runtime.trim()).exists());
@@ -858,4 +863,26 @@ fn invalid_emulator_dns_is_rejected_before_device_setup() {
         assert_eq!(code(&output), 2, "{}", text(&output));
         assert!(!s.dir.exists());
     }
+}
+
+#[test]
+fn all_suites_print_one_footer_after_cleanup_with_combined_test_counts() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+    s.register_all();
+    let output = s.all_command(&[]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let shown = text(&output);
+    assert!(shown.contains("PASS  2 tests · 2 suites"), "{shown}");
+    assert_eq!(shown.matches("Artifacts:").count(), 1, "{shown}");
+    assert_eq!(shown.matches("Report:").count(), 2, "{shown}");
+    assert!(!shown.contains("Suite cleanup complete"), "{shown}");
+    assert!(!shown.contains("metadata.json"), "{shown}");
+    assert!(
+        shown.rfind("Result: PASSED").unwrap() < shown.find("PASS  2 tests").unwrap(),
+        "{shown}"
+    );
+    assert!(!shown.contains("Cleaning up"), "{shown}");
+    let runtime = std::fs::read_to_string(s.suite.parent().unwrap().join("runtime")).unwrap();
+    assert!(!std::path::Path::new(runtime.trim()).exists());
 }
