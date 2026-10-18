@@ -195,7 +195,14 @@ pub(crate) fn install_interrupt_handler(flag: &Arc<AtomicBool>) -> Result<()> {
     .map_err(|e| Error::Other(format!("cannot install the interrupt handler: {e}")))
 }
 
-pub fn run(mut opts: Options) -> Result<u8> {
+pub fn run(opts: Options) -> Result<u8> {
+    run_with_emulators(opts, None)
+}
+
+fn run_with_emulators(
+    mut opts: Options,
+    emulators: Option<&mut crate::suite::EmulatorPool>,
+) -> Result<u8> {
     if opts.list {
         return list_tests(&opts);
     }
@@ -205,7 +212,7 @@ pub fn run(mut opts: Options) -> Result<u8> {
     opts.paths = crate::test_selection::resolve(opts.paths)?;
     let output = Arc::clone(&opts.output);
     if opts.paths.len() == 1 && crate::suite::is_suite(&opts.paths[0])? {
-        return crate::suite::run(opts);
+        return crate::suite::run(opts, emulators);
     }
     if opts.usb {
         return Err(Error::InvalidArgs(
@@ -542,6 +549,7 @@ fn run_all(opts: Options) -> Result<u8> {
         .unwrap_or_else(|| PathBuf::from("build/test-results").join(format!("all-{nonce}")));
     let mut results = Vec::new();
     let mut exit_code = 0;
+    let mut emulators = crate::suite::EmulatorPool::default();
     for (suite, count) in selected {
         if cancel.load(Ordering::SeqCst) {
             break;
@@ -553,7 +561,7 @@ fn run_all(opts: Options) -> Result<u8> {
         child.cancel = Some(Arc::clone(&cancel));
         let dir = artifacts.join(&suite.name);
         child.artifacts_dir = Some(dir.clone());
-        let (code, error) = match run(child) {
+        let (code, error) = match run_with_emulators(child, Some(&mut emulators)) {
             Ok(code) => (code, None),
             Err(error) => {
                 progress(
@@ -571,6 +579,7 @@ fn run_all(opts: Options) -> Result<u8> {
             break;
         }
     }
+    drop(emulators);
     let interrupted = cancel.load(Ordering::SeqCst);
     if interrupted {
         exit_code = INTERRUPTED;

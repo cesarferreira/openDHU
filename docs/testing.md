@@ -80,6 +80,9 @@ the same information as one JSON object.
 
 With no target, `aa test` runs all suites from the nearest `opendhu.yaml`, just like `aa test all`.
 It validates every selected suite's YAML before setup, then runs suites sequentially in name order.
+Each required AVD is reused across suites and stays locked for the run. Emulators started by the
+runner stop after all suites finish or the run is interrupted; pre-existing emulators stay running.
+Backend services, app setup and projection sessions are still created and cleaned up per suite.
 With `--filter`, suites without matching tests are skipped; no matches anywhere is an argument error.
 Each suite gets its own directory under `build/test-results/all-<timestamp>/`, or under the directory
 given by `--artifacts-dir`. A failed suite does not prevent later suites from running; the command
@@ -308,11 +311,16 @@ Google Play phone AVD with Android Auto installed, developer mode enabled, and i
 consent accepted. `adb`, `ffmpeg`, and `tesseract` with English data must be on PATH. Set `ANDROID_HOME`
 or `ANDROID_SDK_ROOT` to locate the Android SDK emulator, or put `emulator` on PATH.
 
+Optional `environment.dnsServers` lists up to four DNS server IP addresses passed to the SDK
+emulator at startup, for example `[8.8.8.8]` when host DNS auto-detection fails with a local or VPN
+resolver. Omitting it preserves SDK auto-detection. An already-running AVD keeps its current DNS.
+
 openDHU reuses a matching running AVD or starts the SDK emulator with `-no-window` and
 `-no-snapshot`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
 Auto's head-unit server through its Settings UI if needed, allocates a device-scoped ADB forward,
 and starts a private daemon. This does not replace an existing physical-phone session. Cleanup
-removes the forward and private daemon; it stops only an emulator that the suite itself started.
+removes the forward and private daemon. A standalone suite stops the emulator it started; an
+all-suites run retains that emulator until the entire run ends. Pre-existing emulators stay running.
 The AVD's user data is preserved: this is not a fresh device image or a production backend test.
 
 Pass `--usb` to use a physical phone instead of `environment.emulator`:

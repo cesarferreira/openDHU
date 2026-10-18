@@ -70,10 +70,18 @@ pub fn locate(words: &[Word], text: &str) -> Option<(u32, u32)> {
             phrase.push_str(&word.text);
             right = right.max(word.left.saturating_add(word.width));
             bottom = bottom.max(word.top.saturating_add(word.height));
-            if normalized(&phrase)
-                .find(&needle)
-                .is_some_and(|position| position < normalized(&words[start].text).len())
-            {
+            let phrase = normalized(&phrase);
+            if phrase.match_indices(&needle).any(|(position, _)| {
+                position < normalized(&words[start].text).len()
+                    && phrase[..position]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_alphanumeric())
+                    && phrase[position + needle.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_alphanumeric())
+            }) {
                 return Some((
                     (words[start].left + right) / 2,
                     (words[start].top + bottom) / 2,
@@ -323,6 +331,22 @@ fn finish_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_does_not_match_driver_before_the_drive_button() {
+        let words = parse_tsv("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t396\t205\t92\t25\t95\tDriver\n5\t1\t1\t1\t2\t1\t260\t444\t87\t30\t95\tDrive\n").unwrap();
+        assert_eq!(locate(&words[..1], "Drive"), None);
+        assert_eq!(locate(&words, "Drive"), Some((303, 459)));
+    }
+
+    #[test]
+    fn phrase_matches_respect_word_boundaries_and_allow_punctuation() {
+        let words = parse_tsv("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t10\t20\t40\t20\t95\t11\n5\t1\t1\t1\t1\t2\t60\t20\t80\t20\t95\tavailable\n5\t1\t1\t1\t2\t1\t10\t60\t100\t20\t95\tAV|50mph\n").unwrap();
+        assert_eq!(locate(&words, "1 available"), None);
+        assert_eq!(locate(&words, "11 available"), Some((75, 30)));
+        assert_eq!(locate(&words, "AV"), Some((60, 70)));
+        assert_eq!(locate(&words, "mph"), None);
+    }
 
     #[test]
     fn locates_only_the_matching_words_in_a_launcher_row() {

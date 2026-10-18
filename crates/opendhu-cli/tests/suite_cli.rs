@@ -114,15 +114,40 @@ impl UsbSuite {
                 "adb",
                 r#"#!/bin/sh
 printf '%s\n' "$*" >> "$USB_FIXTURE/calls"
-if [ "$1" = devices ]; then cat "$USB_FIXTURE/devices"; exit 0; fi
-[ "$1" = -s ] && [ "$2" = PHONE ] || exit 9
+if [ "$1" = devices ]; then
+  if [ "$EMULATOR_FIXTURE" = 1 ]; then
+    echo 'List of devices attached'
+    [ ! -f "$USB_FIXTURE/emulator-running" ] || echo 'emulator-5554 device'
+    [ ! -f "$USB_FIXTURE/other-running" ] || echo 'emulator-5556 device'
+  else cat "$USB_FIXTURE/devices"; fi
+  exit 0
+fi
+[ "$1" = -s ] && { [ "$2" = PHONE ] || { [ "$EMULATOR_FIXTURE" = 1 ] && { [ "$2" = emulator-5554 ] || [ "$2" = emulator-5556 ]; }; }; } || exit 9
+fixture_serial=$2
 shift 2
-if [ "$1" = reverse ]; then
+if [ "$1" = reverse ] && [ "$EMULATOR_FIXTURE" != 1 ]; then
   [ -f "$USB_FIXTURE/native-pid" ] && kill -0 "$(cat "$USB_FIXTURE/native-pid")" 2>/dev/null || {
     echo 'ADB disconnected after USB projection stopped' >&2; exit 9
   }
 fi
 case "$*" in
+  'emu avd name')
+    if [ "$fixture_serial" = emulator-5556 ]; then cat "$USB_FIXTURE/other-avd"; else cat "$USB_FIXTURE/avd-name"; fi;;
+  'emu kill')
+    if [ "$fixture_serial" = emulator-5556 ]; then prefix=other; else prefix=emulator; fi
+    rm -f "$USB_FIXTURE/$prefix-running"; kill "$(cat "$USB_FIXTURE/$prefix-pid")";;
+  'shell getprop sys.boot_completed') echo 1;;
+  'shell am force-stop com.google.android.projection.gearhead') rm -f "$USB_FIXTURE/server-running";;
+  'shell dumpsys activity services com.google.android.projection.gearhead')
+    [ ! -f "$USB_FIXTURE/server-running" ] || echo 'ServiceRecord{.companion.DeveloperHeadUnitNetworkService}' ;;
+  'shell am start -a com.google.android.projection.gearhead.SETTINGS') touch "$USB_FIXTURE/server-running";;
+  'forward tcp:0 tcp:5277') echo 37123;;
+  'forward --remove tcp:37123')
+    if [ "$EMULATOR_REPLACE" = 1 ] && [ ! -f "$USB_FIXTURE/emulator-replaced" ]; then
+      kill -KILL "$(cat "$USB_FIXTURE/emulator-pid")"
+      touch "$USB_FIXTURE/emulator-replaced"
+      echo external > "$USB_FIXTURE/emulator-running"
+    fi;;
   'install -r -t '*) rm -f "$USB_FIXTURE/log-pipe" "$USB_FIXTURE/monitor-ready";;
   'shell am start -W -n test.app/test.app.MainActivity')
     if [ -n "$USB_LAUNCH_CRASH" ] && [ -p "$USB_FIXTURE/log-pipe" ]; then
@@ -212,6 +237,36 @@ exec "$USB_FAKE_NATIVE"
         }
     }
 
+    fn emulator_fixture() -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let mut fixture = Self::new("List of devices attached\n");
+        let root = fixture.suite.parent().unwrap();
+        let name = format!("test_{}", root.file_name().unwrap().to_string_lossy());
+        std::fs::write(root.join("avd-name"), &name).unwrap();
+        let suite = std::fs::read_to_string(&fixture.suite)
+            .unwrap()
+            .replace("unavailable_avd", &name);
+        std::fs::write(&fixture.suite, suite).unwrap();
+        let emulator = root.join("bin/emulator");
+        std::fs::write(
+            &emulator,
+            r#"#!/bin/sh
+echo "boot:$2" >> "$USB_FIXTURE/emulator-events"
+echo "$*" >> "$USB_FIXTURE/emulator-args"
+if [ "$2" = "$(cat "$USB_FIXTURE/avd-name")" ]; then prefix=emulator; else
+  prefix=other; echo "$2" > "$USB_FIXTURE/other-avd"
+fi
+echo $$ > "$USB_FIXTURE/$prefix-pid"
+touch "$USB_FIXTURE/$prefix-running"
+exec sleep 120
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(emulator, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fixture.env.push(("EMULATOR_FIXTURE".into(), "1".into()));
+        fixture
+    }
+
     fn run(&self, extra: &[&str]) -> std::process::Output {
         let mut args = vec![
             "test",
@@ -246,8 +301,14 @@ exec "$USB_FAKE_NATIVE"
         cmd.current_dir(self.suite.parent().unwrap())
             .arg("test")
             .args(target)
+            .args(
+                if self.env.iter().any(|(key, _)| key == "EMULATOR_FIXTURE") {
+                    &[][..]
+                } else {
+                    &["--usb"][..]
+                },
+            )
             .args([
-                "--usb",
                 "--headless",
                 "--no-interactive",
                 "--artifacts-dir",
@@ -578,4 +639,216 @@ fn a_crash_during_the_configured_launch_is_not_discarded_by_test_reset() {
     let report: serde_json::Value =
         serde_json::from_slice(&std::fs::read(s.artifacts.join("results.json")).unwrap()).unwrap();
     assert_eq!(report["tests"][0]["outcome"], "failed");
+}
+
+#[test]
+fn all_emulator_boots_once_across_suites_and_stops_only_at_run_end() {
+    let _guard = USB_TEST.lock().unwrap();
+    for failing in [false, true] {
+        let s = UsbSuite::emulator_fixture();
+        s.register_all();
+        let root = s.suite.parent().unwrap();
+        if failing {
+            std::fs::write(root.join("failed.yaml"), "name: Wrong focus\nbackend: native\nsteps: [{action: assert.status, expect: {videoFocus: {observed: off}}}]\n").unwrap();
+            let suite = std::fs::read_to_string(&s.suite)
+                .unwrap()
+                .replace("tests: [test.yaml]", "tests: [failed.yaml]");
+            std::fs::write(&s.suite, suite).unwrap();
+        }
+        let output = s.registered_command(&[], &["--json"]).output().unwrap();
+        assert_eq!(
+            code(&output),
+            if failing { 7 } else { 0 },
+            "{}",
+            text(&output)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["suites"][1]["exitCode"], 0);
+        let events = std::fs::read_to_string(root.join("emulator-events")).unwrap();
+        assert_eq!(events.lines().count(), 1, "boot only once: {events}");
+        let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+        assert_eq!(
+            calls.matches("emu kill").count(),
+            1,
+            "stop once after all suites"
+        );
+        assert!(calls.rfind("emu kill").unwrap() > calls.rfind("install -r -t").unwrap());
+        let pid = std::fs::read_to_string(root.join("emulator-pid")).unwrap();
+        assert!(!alive(pid.trim().parse().unwrap()));
+        assert!(s.artifacts.join("first/results.json").is_file());
+        assert!(s.artifacts.join("second/results.json").is_file());
+    }
+}
+
+#[test]
+fn all_emulator_preserves_a_preexisting_emulator() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::emulator_fixture();
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    std::fs::write(root.join("emulator-running"), "external").unwrap();
+    let output = s.all_command(&["--json"]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert!(root.join("emulator-running").exists());
+    assert!(!root.join("emulator-events").exists());
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert!(!calls.contains("emu kill"));
+}
+
+#[test]
+fn all_emulator_reuses_each_required_avd_and_cleans_up_both() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::emulator_fixture();
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    let first = std::fs::read_to_string(&s.suite).unwrap();
+    let name = std::fs::read_to_string(root.join("avd-name")).unwrap();
+    std::fs::write(
+        root.join("second.yaml"),
+        first.replace(&name, "another_avd"),
+    )
+    .unwrap();
+    std::fs::copy(&s.suite, root.join("third.yaml")).unwrap();
+    std::fs::write(
+        root.join("opendhu.yaml"),
+        "suites: {first: suite.yaml, second: second.yaml, third: third.yaml}\n",
+    )
+    .unwrap();
+    let output = s.all_command(&["--json"]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let events = std::fs::read_to_string(root.join("emulator-events")).unwrap();
+    assert_eq!(events.lines().count(), 2, "one boot per AVD: {events}");
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert_eq!(calls.matches("emu kill").count(), 2);
+    assert!(calls.find("emu kill").unwrap() > calls.rfind("install -r -t").unwrap());
+    for prefix in ["emulator", "other"] {
+        let pid = std::fs::read_to_string(root.join(format!("{prefix}-pid"))).unwrap();
+        assert!(!alive(pid.trim().parse().unwrap()));
+    }
+}
+
+#[test]
+fn standalone_emulator_still_stops_at_suite_end() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::emulator_fixture();
+    let output = s
+        .registered_command(&["suite.yaml"], &["--json"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let root = s.suite.parent().unwrap();
+    assert!(!root.join("emulator-running").exists());
+    let pid = std::fs::read_to_string(root.join("emulator-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+}
+
+#[test]
+fn interrupting_all_emulator_stops_owned_emulator_and_skips_remaining_suites() {
+    use std::process::Stdio;
+    use std::time::Duration;
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::emulator_fixture();
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    std::fs::write(
+        root.join("test.yaml"),
+        "name: Long wait\nbackend: native\nsteps: [{action: wait, duration: 60s}]\n",
+    )
+    .unwrap();
+    let child = s
+        .all_command(&["--json"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let ready = wait_until(Duration::from_secs(15), || {
+        s.artifacts.join("first/suite.json").exists()
+    });
+    std::process::Command::new("kill")
+        .args([
+            if ready { "-INT" } else { "-KILL" },
+            &child.id().to_string(),
+        ])
+        .status()
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(ready, "suite must start: {}", text(&output));
+    assert_eq!(code(&output), 130, "{}", text(&output));
+    assert!(!s.artifacts.join("second").exists());
+    let pid = std::fs::read_to_string(root.join("emulator-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+    assert!(!root.join("emulator-running").exists());
+}
+
+#[test]
+fn all_emulator_does_not_stop_a_replacement_after_its_owned_child_exits() {
+    let _guard = USB_TEST.lock().unwrap();
+    let mut s = UsbSuite::emulator_fixture();
+    s.env.push(("EMULATOR_REPLACE".into(), "1".into()));
+    s.register_all();
+    let output = s.all_command(&["--json"]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let root = s.suite.parent().unwrap();
+    assert!(root.join("emulator-replaced").exists());
+    assert!(
+        root.join("emulator-running").exists(),
+        "external replacement must survive cleanup"
+    );
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert!(
+        !calls.contains("emu kill"),
+        "the original child exited; its serial is no longer owned"
+    );
+    let pid = std::fs::read_to_string(root.join("emulator-pid")).unwrap();
+    assert!(!alive(pid.trim().parse().unwrap()));
+}
+
+#[test]
+fn emulator_uses_configured_dns_servers_on_boot() {
+    let _guard = USB_TEST.lock().unwrap();
+    let s = UsbSuite::emulator_fixture();
+    let source = std::fs::read_to_string(&s.suite).unwrap().replace(
+        "  apk:",
+        "  dnsServers: [8.8.8.8, '2001:4860:4860::8888']\n  apk:",
+    );
+    std::fs::write(&s.suite, source).unwrap();
+    let output = s
+        .registered_command(&["suite.yaml"], &["--json"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let args = std::fs::read_to_string(s.suite.parent().unwrap().join("emulator-args")).unwrap();
+    assert!(
+        args.contains("-dns-server 8.8.8.8,2001:4860:4860::8888"),
+        "{args}"
+    );
+}
+
+#[test]
+fn invalid_emulator_dns_is_rejected_before_device_setup() {
+    let s = Sandbox::new();
+    let root = s.scratch("invalid-dns");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("test.yaml"),
+        "name: test\nsteps: [{action: wait, duration: 1ms}]\n",
+    )
+    .unwrap();
+    for dns in [
+        "[not-an-ip]",
+        "['']",
+        "[8.8.8.8,8.8.4.4,1.1.1.1,1.0.0.1,9.9.9.9]",
+    ] {
+        std::fs::write(root.join("suite.yaml"), format!("version: 1\nenvironment: {{emulator: phone, apk: missing.apk, package: test.app, appLabel: Test, dnsServers: {dns}}}\ntests: [test.yaml]\n")).unwrap();
+        let output = s.opendhu_env(
+            &[
+                "test",
+                root.join("suite.yaml").to_str().unwrap(),
+                "--validate",
+            ],
+            &[("PATH", "/no/tools")],
+        );
+        assert_eq!(code(&output), 2, "{}", text(&output));
+        assert!(!s.dir.exists());
+    }
 }

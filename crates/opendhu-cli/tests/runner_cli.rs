@@ -274,7 +274,6 @@ fn missing_paths_and_empty_directories_are_argument_errors() {
     let empty = s.scratch("tests");
     std::fs::create_dir_all(&empty).unwrap();
     assert_eq!(code(&s.opendhu(&["test", empty.to_str().unwrap()])), 2);
-    assert_eq!(code(&s.opendhu(&["test"])), 2, "a path is required");
 }
 
 // ---- Ctrl+C -------------------------------------------------------------------------------

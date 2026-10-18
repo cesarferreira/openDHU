@@ -30,6 +30,8 @@ pub(crate) struct Environment {
     pub(crate) emulator: String,
     #[serde(default = "yes")]
     headless: bool,
+    #[serde(default)]
+    dns_servers: Vec<std::net::IpAddr>,
     pub(crate) apk: PathBuf,
     package: String,
     app_label: String,
@@ -106,6 +108,11 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     let suite: Suite = serde_norway::from_value(crate::suite_config::resolve(path)?)
         .map_err(|e| Error::InvalidArgs(format!("invalid suite {}: {e}", path.display())))?;
     let env = &suite.environment;
+    if env.dns_servers.len() > 4 {
+        return Err(Error::InvalidArgs(
+            "suite dnsServers must contain at most four IP addresses".into(),
+        ));
+    }
     if suite.version != 1 {
         return Err(Error::InvalidArgs("suite version must be 1".into()));
     }
@@ -301,6 +308,55 @@ fn suite_cli(exe: &Path, runtime: &Path, args: &[&str], cancel: Option<&AtomicBo
     }
 }
 
+/// Run-scoped ownership keeps compatible suites on the same emulator, with its AVD locked.
+#[derive(Default)]
+pub struct EmulatorPool {
+    locks: std::collections::BTreeMap<String, std::fs::File>,
+    owned: Vec<(PathBuf, String, std::process::Child)>,
+}
+
+impl Drop for EmulatorPool {
+    fn drop(&mut self) {
+        for (adb, serial, child) in &mut self.owned {
+            stop_emulator(adb, Some(serial), child);
+        }
+    }
+}
+
+fn stop_emulator(adb: &Path, serial: Option<&str>, child: &mut std::process::Child) {
+    if child.try_wait().is_ok_and(|status| status.is_none())
+        && let Some(serial) = serial
+    {
+        let _ = device::adb(adb, serial, &["emu", "kill"]);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn lock_device(usb: bool, device_name: &str) -> Result<std::fs::File> {
+    let lock_dir = std::env::temp_dir().join(if usb {
+        "opendhu-usb-locks"
+    } else {
+        "opendhu-emulator-locks"
+    });
+    // USB has one global lease because the native transport cannot select among phones.
+    let lock_name = if usb { "phone" } else { device_name };
+    std::fs::create_dir_all(&lock_dir).map_err(|e| Error::Other(e.to_string()))?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_dir.join(format!("{lock_name}.lock")))
+        .map_err(|e| Error::Other(e.to_string()))?;
+    lock.try_lock_exclusive().map_err(|_| {
+        Error::SessionConflict(format!(
+            "device {device_name} is already leased by another suite"
+        ))
+    })?;
+    Ok(lock)
+}
+
 /// Ownership is recorded as soon as acquired. A failed startup still tears down its forwarding and
 /// private daemon, and never stops a phone session or an emulator it did not start.
 struct Lease {
@@ -312,7 +368,7 @@ struct Lease {
     reverses: Vec<crate::reverse::ReverseLease>,
     services: Vec<crate::services::OwnedService>,
     emulator_child: Option<std::process::Child>,
-    _lock: std::fs::File,
+    _lock: Option<std::fs::File>,
     logcat: Option<Arc<crate::crash_monitor::CrashMonitor>>,
     artifacts: PathBuf,
 }
@@ -381,11 +437,7 @@ impl Lease {
             }
         }
         if let Some(mut child) = self.emulator_child.take() {
-            if let Some(serial) = &self.serial {
-                let _ = device::adb(&self.adb, serial, &["emu", "kill"]);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_emulator(&self.adb, self.serial.as_deref(), &mut child);
         }
         while let Some(service) = self.services.pop() {
             drop(service);
@@ -414,7 +466,7 @@ pub(crate) fn inspect(
     crate::test_selection::matching(test_cmd::parse_all(&tests)?, filter)
 }
 
-pub fn run(mut opts: test_cmd::Options) -> Result<u8> {
+pub fn run(mut opts: test_cmd::Options, emulators: Option<&mut EmulatorPool>) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     let (suite, tests) = load(&opts.paths[0])?;
     let selected =
@@ -446,7 +498,7 @@ pub fn run(mut opts: test_cmd::Options) -> Result<u8> {
             cancel
         }
     };
-    let result = run_prepared(opts, suite, tests, Arc::clone(&cancel));
+    let result = run_prepared(opts, suite, tests, Arc::clone(&cancel), emulators);
     if cancel.load(Ordering::SeqCst) {
         Ok(130)
     } else {
@@ -475,6 +527,7 @@ fn run_prepared(
     suite: Suite,
     tests: Vec<PathBuf>,
     cancel: Arc<AtomicBool>,
+    mut emulators: Option<&mut EmulatorPool>,
 ) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     check_cancel(&cancel)?;
@@ -515,31 +568,18 @@ fn run_prepared(
     } else {
         None
     };
-    let lock_dir = std::env::temp_dir().join(if opts.usb {
-        "opendhu-usb-locks"
-    } else {
-        "opendhu-emulator-locks"
-    });
     let device_name = usb_serial.as_deref().unwrap_or(&suite.environment.emulator);
-    // USB has one global lease because the native USB transport cannot select among phones.
-    let lock_name = if opts.usb {
-        "phone"
+    let lock = if !opts.usb
+        && let Some(pool) = emulators.as_deref_mut()
+    {
+        if !pool.locks.contains_key(device_name) {
+            pool.locks
+                .insert(device_name.into(), lock_device(false, device_name)?);
+        }
+        None
     } else {
-        &suite.environment.emulator
+        Some(lock_device(opts.usb, device_name)?)
     };
-    std::fs::create_dir_all(&lock_dir).map_err(|e| Error::Other(e.to_string()))?;
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(lock_dir.join(format!("{lock_name}.lock")))
-        .map_err(|e| Error::Other(e.to_string()))?;
-    lock.try_lock_exclusive().map_err(|_| {
-        Error::SessionConflict(format!(
-            "device {device_name} is already leased by another suite"
-        ))
-    })?;
     let mut lease = Lease {
         exe: std::env::current_exe().map_err(|e| Error::Other(e.to_string()))?,
         runtime: std::env::temp_dir().join(format!("opendhu-suite-{}-{nonce}", std::process::id())),
@@ -604,6 +644,17 @@ fn run_prepared(
                     .map_err(|e| Error::Other(e.to_string()))?;
                 let mut command = Command::new(emulator);
                 command.args(["-avd", &suite.environment.emulator, "-no-snapshot"]);
+                if !suite.environment.dns_servers.is_empty() {
+                    command.arg("-dns-server").arg(
+                        suite
+                            .environment
+                            .dns_servers
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    );
+                }
                 if suite.environment.headless {
                     command.arg("-no-window");
                 }
@@ -658,6 +709,11 @@ fn run_prepared(
         }
     };
     lease.serial = Some(serial.clone());
+    if let Some(pool) = emulators
+        && let Some(child) = lease.emulator_child.take()
+    {
+        pool.owned.push((lease.adb.clone(), serial.clone(), child));
+    }
     let apk = suite
         .environment
         .apk
