@@ -24,7 +24,7 @@ pub struct Check {
     pub detail: String,
 }
 
-fn check(level: Level, name: &str, detail: impl Into<String>) -> Check {
+pub(crate) fn check(level: Level, name: &str, detail: impl Into<String>) -> Check {
     Check {
         level,
         name: name.into(),
@@ -189,15 +189,19 @@ pub fn has_failures(checks: &[Check]) -> bool {
     checks.iter().any(|c| c.level == Level::Fail)
 }
 
-/// The native backend is optional, so a missing piece is information, not a failure.
-fn native_checks(out: &mut Vec<Check>) {
+pub(crate) fn native_head_unit() -> std::result::Result<PathBuf, Vec<PathBuf>> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(PathBuf::from));
     let env = std::env::var_os("OPENDHU_NATIVE_HU")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
-    let hu = opendhu_daemon::find_native_hu(env, exe_dir, std::env::var("PATH").ok().as_deref());
+    opendhu_daemon::find_native_hu(env, exe_dir, std::env::var("PATH").ok().as_deref())
+}
+
+/// The native backend is optional, so a missing piece is information, not a failure.
+fn native_checks(out: &mut Vec<Check>) {
+    let hu = native_head_unit();
     out.push(match hu {
         Ok(p) => check(Level::Ok, "native head unit", p.display().to_string()),
         Err(_) => check(

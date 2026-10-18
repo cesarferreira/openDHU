@@ -14,23 +14,23 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Suite {
+pub(crate) struct Suite {
     version: u32,
     #[serde(default, rename = "artifactsDir")]
     artifacts_dir: Option<PathBuf>,
-    environment: Environment,
+    pub(crate) environment: Environment,
     tests: Vec<String>,
     #[serde(default)]
-    services: Vec<crate::services::Service>,
+    pub(crate) services: Vec<crate::services::Service>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Environment {
-    emulator: String,
+pub(crate) struct Environment {
+    pub(crate) emulator: String,
     #[serde(default = "yes")]
     headless: bool,
-    apk: PathBuf,
+    pub(crate) apk: PathBuf,
     package: String,
     app_label: String,
     #[serde(default)]
@@ -97,12 +97,13 @@ pub fn is_suite(path: &Path) -> Result<bool> {
         Ok(value) => value,
         Err(_) => return Ok(false), // The ordinary parser supplies the syntax diagnostic.
     };
-    Ok(value.get("environment").is_some() || value.get("version").is_some())
+    Ok(value.get("environment").is_some()
+        || value.get("version").is_some()
+        || value.get("extends").is_some())
 }
 
-fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
-    let text = std::fs::read_to_string(path).map_err(|e| Error::InvalidArgs(e.to_string()))?;
-    let mut suite: Suite = serde_norway::from_str(&text)
+pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
+    let suite: Suite = serde_norway::from_value(crate::suite_config::resolve(path)?)
         .map_err(|e| Error::InvalidArgs(format!("invalid suite {}: {e}", path.display())))?;
     let env = &suite.environment;
     if suite.version != 1 {
@@ -169,23 +170,18 @@ fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
             ));
         }
     }
-    let base = path.parent().unwrap_or(Path::new("."));
-    if !suite.environment.apk.is_absolute() {
-        suite.environment.apk = base.join(&suite.environment.apk);
-    }
-    if let Some(dir) = &mut suite.artifacts_dir {
-        if dir.as_os_str().is_empty() {
-            return Err(Error::InvalidArgs(
-                "suite artifactsDir must not be empty".into(),
-            ));
-        }
-        if !dir.is_absolute() {
-            *dir = base.join(&*dir);
-        }
+    if suite
+        .artifacts_dir
+        .as_ref()
+        .is_some_and(|dir| dir.as_os_str().is_empty())
+    {
+        return Err(Error::InvalidArgs(
+            "suite artifactsDir must not be empty".into(),
+        ));
     }
     let mut tests = Vec::new();
     for pattern in &suite.tests {
-        let pattern = base.join(pattern);
+        let pattern = PathBuf::from(pattern);
         let matches = glob::glob(&pattern.to_string_lossy())
             .map_err(|e| Error::InvalidArgs(e.to_string()))?;
         let mut found = false;
@@ -214,6 +210,14 @@ fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     Ok((suite, tests))
 }
 
+pub(crate) fn emulator_program() -> PathBuf {
+    std::env::var_os("ANDROID_HOME")
+        .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
+        .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("emulator"))
+}
+
 fn find_emulator(adb: &Path, name: &str) -> Result<Option<String>> {
     let devices = device::command(adb, &["devices"], Duration::from_secs(20))?;
     for line in devices.lines().skip(1) {
@@ -232,7 +236,7 @@ fn find_emulator(adb: &Path, name: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn find_usb_phone(adb: &Path) -> Result<String> {
+pub(crate) fn find_usb_phone(adb: &Path) -> Result<String> {
     let output = device::command(adb, &["devices", "-l"], Duration::from_secs(20))?;
     let devices = opendhu_dhu::adb::parse_devices(&output);
     let phones: Vec<_> = devices.iter().filter(|device| device.usb).collect();
@@ -595,11 +599,7 @@ fn run_prepared(
                         }
                     ),
                 );
-                let emulator = std::env::var_os("ANDROID_HOME")
-                    .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
-                    .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
-                    .filter(|path| path.is_file())
-                    .unwrap_or_else(|| PathBuf::from("emulator"));
+                let emulator = emulator_program();
                 let file = std::fs::File::create(artifacts.join("emulator.log"))
                     .map_err(|e| Error::Other(e.to_string()))?;
                 let mut command = Command::new(emulator);
@@ -819,6 +819,43 @@ mod tests {
             std::fs::write(&path, text).unwrap();
             assert!(load(&path).is_err());
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn inherited_paths_and_lists_use_the_declaring_file_and_explicit_replacement() {
+        let dir = std::env::temp_dir().join(format!("aa-suite-inheritance-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("shared")).unwrap();
+        std::fs::create_dir_all(dir.join("child")).unwrap();
+        std::fs::write(dir.join("shared/base.yaml"), "version: 1\nartifactsDir: evidence\nenvironment: {emulator: test_phone, apk: app.apk, package: example.app, appLabel: Base, permissions: [android.permission.ACCESS_FINE_LOCATION], reversePorts: [{device: 10101, host: 19101}]}\nservices: [{name: backend, command: [node, start.mjs], cwd: '', readyPort: 56551}]\n").unwrap();
+        std::fs::write(
+            dir.join("shared/middle.yaml"),
+            "extends: base.yaml\nenvironment: {appLabel: Middle}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("child/test.yaml"),
+            "name: Child\nsteps: [{action: wait, duration: 1ms}]\n",
+        )
+        .unwrap();
+        let path = dir.join("child/suite.yaml");
+        std::fs::write(&path, "extends: ../shared/middle.yaml\nenvironment: {appLabel: Child, permissions: []}\ntests: [test.yaml]\n").unwrap();
+        let (suite, tests) = load(&path).unwrap();
+        assert_eq!(suite.environment.app_label, "Child");
+        assert_eq!(suite.environment.apk, dir.join("child/../shared/app.apk"));
+        assert!(suite.environment.permissions.is_empty());
+        assert_eq!(suite.environment.reverse_ports[0].host, 19101);
+        assert_eq!(suite.services[0].cwd, Some(dir.join("child/../shared")));
+        assert_eq!(
+            suite.artifacts_dir,
+            Some(dir.join("child/../shared/evidence"))
+        );
+        assert_eq!(tests, vec![dir.join("child/test.yaml")]);
+        std::fs::write(&path, "extends: ../shared/base.yaml\nenvironment: {apk: child.apk, reversePorts: []}\nservices: []\ntests: [test.yaml]\n").unwrap();
+        let (suite, _) = load(&path).unwrap();
+        assert_eq!(suite.environment.apk, dir.join("child/child.apk"));
+        assert!(suite.services.is_empty());
+        assert!(suite.environment.reverse_ports.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

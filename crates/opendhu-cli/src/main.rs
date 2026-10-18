@@ -9,6 +9,8 @@ mod reverse;
 mod services;
 mod session_backend;
 mod suite;
+mod suite_config;
+mod suite_doctor;
 mod test_cmd;
 mod test_output;
 mod test_selection;
@@ -164,7 +166,12 @@ enum Command {
     },
     /// Check the environment without touching a running session
     Doctor {
-        #[arg(long)]
+        /// Suite name or YAML path to diagnose
+        suite: Option<PathBuf>,
+        /// Diagnose a USB phone instead of the suite emulator
+        #[arg(long, requires = "suite")]
+        usb: bool,
+        #[arg(long, conflicts_with = "suite")]
         dhu_path: Option<PathBuf>,
     },
     /// Run the openDHU daemon in the foreground
@@ -402,16 +409,29 @@ fn run(cli: Cli) -> Result<u8> {
                 json,
             })
         }
-        Command::Doctor { dhu_path } => {
-            let checks = match load() {
-                Ok(cfg) => {
-                    let dhu = config::dhu_path(dhu_path, cfg.dhu_path.clone(), dhu_env_set);
-                    doctor::run(dhu, cfg.source.as_deref())
+        Command::Doctor {
+            dhu_path,
+            suite,
+            usb,
+        } => {
+            let checks = if let Some(target) = suite {
+                let paths = test_selection::resolve(vec![target])?;
+                let mut checks = suite_doctor::run(&paths[0], usb)?;
+                if let Err(e) = load() {
+                    checks.insert(0, doctor::config_error(&e));
                 }
-                Err(e) => {
-                    let mut checks = vec![doctor::config_error(&e)];
-                    checks.extend(doctor::run(dhu_path, None).into_iter().skip(1));
-                    checks
+                checks
+            } else {
+                match load() {
+                    Ok(cfg) => {
+                        let dhu = config::dhu_path(dhu_path, cfg.dhu_path.clone(), dhu_env_set);
+                        doctor::run(dhu, cfg.source.as_deref())
+                    }
+                    Err(e) => {
+                        let mut checks = vec![doctor::config_error(&e)];
+                        checks.extend(doctor::run(dhu_path, None).into_iter().skip(1));
+                        checks
+                    }
                 }
             };
             if json {

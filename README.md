@@ -19,6 +19,7 @@ git clone https://github.com/cesarferreira/openDHU.git
 cd openDHU
 make install
 aa doctor
+aa doctor sample  # Check a registered suite before running it
 ```
 
 Installs `aa`, `opendhu-native-hu`, and `opendhu-gui` into `~/.cargo/bin`; add it to your `PATH`.

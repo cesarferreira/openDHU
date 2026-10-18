@@ -87,6 +87,64 @@ locations. `all --validate` validates the selected YAML without requiring APKs o
 `--filter` selects test names or filenames by case-insensitive substring. All YAML is validated first;
 a filter matching nothing exits with an argument error before starting services, devices or a viewer.
 
+## Diagnose a suite before running it
+
+```bash
+aa doctor robotaxi                   # Registered name, or pass a suite YAML path
+aa doctor robotaxi --usb             # Check a USB phone instead of the configured AVD
+aa doctor robotaxi --json            # Same checks as a JSON array
+```
+
+Suite diagnostics use the same configuration resolver and test validation as `aa test`.
+They check the APK, required native head unit and tools, Tesseract English data, the
+configured AVD (which may be stopped), service executables/directories and readiness ports.
+USB diagnostics select exactly one authorized USB phone and skip the emulator check.
+The command never executes service commands, installs APKs, boots an emulator or starts projection.
+It returns 3 for failed checks and 2 for invalid suite configuration. Ports are checked only
+at that moment; running the suite still acquires its normal resource locks.
+Android Auto provisioning, head-unit credentials, app permissions and service health need a real run.
+Plain `aa doctor` retains its general environment checks.
+
+## Share suite setup
+
+A suite may extend one local YAML file. Put common environment and services in a setup file:
+
+```yaml
+# e2e/shared.yaml
+version: 1
+environment:
+  emulator: medium_phone
+  apk: ../app/build/outputs/apk/dev/debug/app-dev-debug.apk
+  package: example.app.dev.debug
+  appLabel: Example App
+services:
+  - name: backend
+    command: [node, backend/start.mjs]
+    readyPort: 56551
+```
+
+Each journey then supplies its tests and any differences:
+
+```yaml
+# e2e/robotaxi.yaml
+extends: shared.yaml
+environment:
+  appLabel: Example Robotaxi
+tests: [robotaxi/*.yaml]
+```
+
+Environment fields override individually. Every list, including `services`, `tests`,
+`permissions` and `reversePorts`, replaces the inherited list completely; `services: []`
+explicitly disables inherited services. Other top-level fields replace their inherited value.
+There is no implicit service merging or list concatenation.
+
+Paths resolve relative to the file that declares them: the parent path, APK, test globs,
+`artifactsDir` and service `cwd`. A service without `cwd` runs in the directory containing
+its declaration; relative command paths and arguments are interpreted there as usual.
+A shared file can omit `tests`, but the resolved suite must include tests and all required
+configuration. Parent chains are supported up to 32 files; cycles, missing files and unknown
+fields are errors. Names, `all`, `--list`, `--validate` and diagnostics all use this resolver.
+
 ## Format
 
 ```yaml
