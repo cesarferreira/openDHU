@@ -149,12 +149,28 @@ pub fn ensure_head_unit_server(program: &Path, serial: &str) -> Result<()> {
 fn start_from_settings(program: &Path, serial: &str, path: &str) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut opened_menu = false;
+    let mut last_note = String::new();
     loop {
         if server_running(program, serial)? {
             return Ok(());
         }
-        adb(program, serial, &["shell", "uiautomator", "dump", path])?;
-        let xml = adb(program, serial, &["shell", "cat", path])?;
+        // uiautomator can exit 0 without writing a dump while the UI is busy or not yet up.
+        let dumped = adb(program, serial, &["shell", "uiautomator", "dump", path]);
+        let xml = match &dumped {
+            Ok(_) => adb(program, serial, &["shell", "cat", path]).ok(),
+            Err(_) => None,
+        };
+        let Some(xml) = xml else {
+            last_note = match dumped {
+                Ok(out) => out.trim().to_string(),
+                Err(e) => e.to_string(),
+            };
+            if Instant::now() >= deadline {
+                return Err(provisioning_error(&last_note));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        };
         if let Some((x, y)) = node_center(&xml, "text", "Start head unit server") {
             tap(program, serial, x, y)?;
         } else if node_center(&xml, "text", "Stop head unit server").is_some() {
@@ -166,14 +182,21 @@ fn start_from_settings(program: &Path, serial: &str, path: &str) -> Result<()> {
             }
         }
         if Instant::now() >= deadline {
-            return Err(provisioning_error());
+            return Err(provisioning_error(&last_note));
         }
         std::thread::sleep(Duration::from_millis(250));
     }
 }
 
-fn provisioning_error() -> Error {
-    Error::BackendUnavailable("Android Auto head-unit server could not start. Provision this emulator baseline: open Android Auto Settings, enable developer mode by tapping Version repeatedly, accept the developer prompt, then choose More options > Start head unit server. Complete initial projection consent before running the suite. Settings UI must use English.".into())
+fn provisioning_error(note: &str) -> Error {
+    let note = if note.is_empty() {
+        String::new()
+    } else {
+        format!(" Last uiautomator output: {note}.")
+    };
+    Error::BackendUnavailable(format!(
+        "Android Auto head-unit server could not start. Provision this emulator baseline: open Android Auto Settings, enable developer mode by tapping Version repeatedly, accept the developer prompt, then choose More options > Start head unit server. Complete initial projection consent before running the suite. Settings UI must use English.{note}"
+    ))
 }
 
 fn tap(program: &Path, serial: &str, x: u32, y: u32) -> Result<()> {
