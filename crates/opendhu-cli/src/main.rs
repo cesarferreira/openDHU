@@ -5,6 +5,7 @@ mod daemon_ctl;
 mod device;
 mod doctor;
 mod output_path;
+mod phone_setup;
 mod reverse;
 mod services;
 mod session_backend;
@@ -147,6 +148,9 @@ enum Command {
         /// Validate suite and test files without starting a device or session
         #[arg(long)]
         validate: bool,
+        /// Never change Android Auto settings on the emulator (first-run welcome, Unknown sources)
+        #[arg(long)]
+        no_phone_setup: bool,
         /// Show the native head-unit window (enabled by default; requires opendhu-gui)
         #[arg(long, conflicts_with = "headless")]
         show_head_unit: bool,
@@ -376,6 +380,7 @@ fn run(cli: Cli) -> Result<u8> {
             skip_unsupported,
             usb,
             validate,
+            no_phone_setup,
             show_head_unit,
             headless,
             interactive,
@@ -402,6 +407,7 @@ fn run(cli: Cli) -> Result<u8> {
                 filter,
                 usb,
                 validate,
+                phone_setup: !no_phone_setup,
                 cancel: None,
                 app: None,
                 runtime_dir: None,

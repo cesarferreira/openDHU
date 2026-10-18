@@ -199,7 +199,7 @@ fn provisioning_error(note: &str) -> Error {
     ))
 }
 
-fn tap(program: &Path, serial: &str, x: u32, y: u32) -> Result<()> {
+pub(crate) fn tap(program: &Path, serial: &str, x: u32, y: u32) -> Result<()> {
     adb(
         program,
         serial,
@@ -208,7 +208,7 @@ fn tap(program: &Path, serial: &str, x: u32, y: u32) -> Result<()> {
     Ok(())
 }
 
-fn attribute<'a>(node: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn attribute<'a>(node: &'a str, key: &str) -> Option<&'a str> {
     let marker = format!(" {key}=\"");
     let value = node.split_once(&marker)?.1;
     Some(value.split_once('"')?.0)
@@ -227,7 +227,7 @@ fn node_center(xml: &str, key: &str, value: &str) -> Option<(u32, u32)> {
         })
 }
 
-fn bounds_center(bounds: &str) -> Option<(u32, u32)> {
+pub(crate) fn bounds_center(bounds: &str) -> Option<(u32, u32)> {
     let (first, second) = bounds
         .strip_prefix('[')?
         .strip_suffix(']')?

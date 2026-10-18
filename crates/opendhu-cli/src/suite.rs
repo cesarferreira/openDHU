@@ -75,6 +75,10 @@ impl opendhu_test::runner::ApplicationControl for Application {
     fn check_health(&self) -> Result<Option<String>> {
         self.monitor.check()
     }
+    fn projection_blocker(&self) -> Result<Option<String>> {
+        let windows = device::adb(&self.adb, &self.serial, &["shell", "dumpsys", "window"])?;
+        Ok(first_run_setup_blocker(&windows))
+    }
     fn restart(&self) -> Result<()> {
         self.reset()
     }
@@ -87,6 +91,21 @@ impl opendhu_test::runner::ApplicationControl for Application {
         )?;
         Ok(())
     }
+}
+
+/// Android Auto keeps a phone-side setup screen in front until first-run welcome and consent
+/// are finished, and projection never starts behind it.
+fn first_run_setup_blocker(dumpsys_window: &str) -> Option<String> {
+    let focus = dumpsys_window
+        .lines()
+        .find(|line| line.contains("mCurrentFocus="))?;
+    (focus.contains("com.google.android.projection.gearhead") && focus.contains(".preflight."))
+        .then(|| {
+            "Android Auto has not finished first-run setup on the phone (it is still on its \
+             welcome/authorization screen). Open Android Auto on this emulator, accept the \
+             welcome and permission prompts, and keep that state as the emulator baseline"
+                .into()
+        })
 }
 
 pub fn is_suite(path: &Path) -> Result<bool> {
@@ -450,6 +469,7 @@ struct Lease {
     runtime: PathBuf,
     adb: PathBuf,
     serial: Option<String>,
+    first_run: Option<crate::phone_setup::FirstRunWatcher>,
     forward: Option<String>,
     reverses: Vec<crate::reverse::ReverseLease>,
     services: Vec<crate::services::OwnedService>,
@@ -668,6 +688,7 @@ fn run_prepared(
         adb,
         serial: None,
         forward: None,
+        first_run: None,
         reverses: Vec::new(),
         services: Vec::new(),
         emulator_child: None,
@@ -832,6 +853,13 @@ fn run_prepared(
     let endpoint = if opts.usb {
         None
     } else {
+        // The welcome sheet appears once the head unit connects; accept it for this run.
+        if opts.phone_setup {
+            lease.first_run = Some(crate::phone_setup::FirstRunWatcher::start(
+                lease.adb.clone(),
+                serial.clone(),
+            ));
+        }
         test_cmd::progress(&output, "Restarting the Android Auto head-unit server...");
         device::restart_head_unit_server(&lease.adb, &serial)?;
         check_cancel(&cancel)?;
@@ -945,6 +973,22 @@ fn run_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_android_auto_first_run_screen_in_front() {
+        let stuck = "  mCurrentFocus=Window{4fbbe64 u0 com.google.android.projection.gearhead/com.google.android.apps.auto.components.preflight.phone.PreflightPhoneWelcomeActivity}\n";
+        assert!(
+            first_run_setup_blocker(stuck)
+                .unwrap()
+                .contains("first-run setup")
+        );
+        let normal =
+            "  mCurrentFocus=Window{1 u0 dev.opendhu.demo/dev.opendhu.demo.MainActivity}\n";
+        assert_eq!(first_run_setup_blocker(normal), None);
+        let car = "  mCurrentFocus=Window{2 u0 com.google.android.projection.gearhead/com.google.android.gearhead.vanagon.VnLauncher}\n";
+        assert_eq!(first_run_setup_blocker(car), None);
+        assert_eq!(first_run_setup_blocker("no focus line"), None);
+    }
 
     #[test]
     fn infers_sdk_from_local_properties_in_an_ancestor() {

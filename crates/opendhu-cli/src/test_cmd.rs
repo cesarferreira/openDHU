@@ -36,6 +36,8 @@ pub struct Options {
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
     pub usb: bool,
+    /// Let a managed emulator run fix up Android Auto's phone-side settings.
+    pub phone_setup: bool,
     pub show_head_unit: bool,
     pub cancel: Option<Arc<AtomicBool>>,
     pub app: Option<crate::suite::Application>,

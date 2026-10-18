@@ -79,6 +79,11 @@ pub trait ApplicationControl {
     fn check_health(&self) -> opendhu_core::Result<Option<String>> {
         Ok(None)
     }
+    /// Why projection cannot be working (e.g. Android Auto first-run setup unfinished on the
+    /// phone), when that can be observed. Used to explain an app that never appears.
+    fn projection_blocker(&self) -> opendhu_core::Result<Option<String>> {
+        Ok(None)
+    }
     /// Stop the application process. The runner opens it through the projected launcher afterward.
     fn restart(&self) -> opendhu_core::Result<()>;
     fn input_text(&self, text: &str) -> opendhu_core::Result<()>;
@@ -654,6 +659,8 @@ fn screen_text(
     let image = dir.join(format!("screen-{id:04}.png"));
     let deadline = cfg.clock.now() + timeout;
     let mut last = String::new();
+    let mut pending: Option<(u32, u32)> = None;
+    let mut frames = 0u32;
     loop {
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while observing projected UI");
@@ -668,6 +675,7 @@ fn screen_text(
             Ok(words) => words,
             Err(e) => return End::error(&e),
         };
+        frames += 1;
         // Completion wins over another tap, including when the desired screen was already open.
         if let Some(result) = until
             && crate::screen::locate(&words, result).is_some()
@@ -681,6 +689,32 @@ fn screen_text(
             crate::screen::locate_launcher_label(&words, text, 70, 410)
         } else {
             crate::screen::locate(&words, text)
+        };
+        // Another car app that stalls (common on a freshly booted emulator) puts an ANR dialog over
+        // the launcher; "Wait" lets it recover and uncovers the icons.
+        if launcher
+            && crate::screen::text(&words)
+                .to_lowercase()
+                .contains("responding")
+            && let Some((x, y)) = crate::screen::locate(&words, "Wait")
+        {
+            if let Err(e) = backend.tap(x, y) {
+                return End::error(&e);
+            }
+            pending = None;
+            cfg.clock.sleep(Duration::from_secs(1));
+            continue;
+        }
+        // The launcher grid animates in; a label seen mid-slide is not where the icon will be.
+        // Only tap once two consecutive frames agree on its position.
+        let found = if launcher && tap {
+            let steady = found
+                .zip(pending)
+                .is_some_and(|((x, y), (px, py))| x.abs_diff(px) <= 10 && y.abs_diff(py) <= 10);
+            pending = found;
+            found.filter(|_| steady)
+        } else {
+            found
         };
         if let Some((x, y)) = found {
             if tap {
@@ -709,7 +743,11 @@ fn screen_text(
             last = seen;
         }
         let now = cfg.clock.now();
-        if now >= deadline {
+        // The launcher tap needs the label confirmed in two consecutive frames. A slow host (or a
+        // stale first frame after the toggle tap) can use up the window before that happens, and
+        // returning then would let the caller's next toggle tap close the grid it just found.
+        let confirming = launcher && tap && (frames < 2 || pending.is_some());
+        if now >= deadline && !(confirming && now < deadline + Duration::from_secs(10)) {
             return End::timeout(format!(
                 "{}; last OCR: {last}; screenshot: {}",
                 until.map_or_else(
@@ -722,8 +760,10 @@ fn screen_text(
             ));
         }
         let pause = if until.is_some() { 500 } else { 250 };
-        cfg.clock
-            .sleep(Duration::from_millis(pause).min(deadline - now));
+        cfg.clock.sleep(
+            Duration::from_millis(pause)
+                .min(deadline.saturating_sub(now).max(Duration::from_millis(1))),
+        );
     }
 }
 
@@ -758,21 +798,24 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
         // A prefix also appears in host errors and another app's similarly named content.
         let result = screen_text(
             label,
-            Duration::from_secs(2).min(deadline.saturating_sub(cfg.clock.now())),
+            Duration::from_secs(4).min(deadline.saturating_sub(cfg.clock.now())),
             true,
             true,
             None,
             backend,
             cfg,
         );
-        if result.outcome == Outcome::Passed {
-            return result;
-        }
-        if result.outcome == Outcome::Error {
+        if result.outcome == Outcome::Passed || result.outcome == Outcome::Error {
             return result;
         }
     }
-    End::timeout(format!(
-        "app {label:?} was not visible in the Android Auto launcher"
-    ))
+    let blocker = cfg
+        .application
+        .and_then(|app| app.projection_blocker().ok().flatten());
+    End::timeout(match blocker {
+        Some(reason) => {
+            format!("app {label:?} was not visible in the Android Auto launcher: {reason}")
+        }
+        None => format!("app {label:?} was not visible in the Android Auto launcher"),
+    })
 }
