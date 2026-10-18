@@ -190,7 +190,10 @@ case "$*" in
 esac
 "#,
             ),
-            ("tesseract", "#!/bin/sh\nexit 0\n"),
+            (
+                "tesseract",
+                "#!/bin/sh\n[ \"$1\" = --list-langs ] && printf 'List of available languages (1):\\neng\\n'\nexit 0\n",
+            ),
             (
                 "emulator",
                 "#!/bin/sh\necho emulator >> \"$USB_FIXTURE/calls\"\nexit 9\n",
@@ -226,6 +229,10 @@ exec "$USB_FAKE_NATIVE"
             ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
             (
                 "ANDROID_HOME".into(),
+                dir.join("missing-sdk").display().to_string(),
+            ),
+            (
+                "ANDROID_SDK_ROOT".into(),
                 dir.join("missing-sdk").display().to_string(),
             ),
         ];

@@ -25,7 +25,9 @@ pub fn command(program: &Path, args: &[&str], limit: Duration) -> Result<String>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::BackendUnavailable(format!("could not start command: {e}")))?;
+        .map_err(|e| {
+            Error::BackendUnavailable(format!("could not start {}: {e}", program.display()))
+        })?;
     // Drain both pipes while the child runs; dumpsys output can exceed pipe capacity.
     let stdout = child.stdout.take().expect("stdout pipe");
     let stderr = child.stderr.take().expect("stderr pipe");

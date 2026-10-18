@@ -217,12 +217,98 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     Ok((suite, tests))
 }
 
+/// `sdk.dir` from the nearest `local.properties` at or above `start` (Gradle/Android Studio).
+fn sdk_dir_from_local_properties(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find_map(|dir| {
+        let text = std::fs::read_to_string(dir.join("local.properties")).ok()?;
+        text.lines().find_map(|line| {
+            let value = line.trim().strip_prefix("sdk.dir")?.trim_start();
+            let value = value.strip_prefix(['=', ':'])?.trim();
+            // Java properties escape `\\`, `\:` and friends.
+            let mut path = String::new();
+            let mut chars = value.chars();
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    path.extend(chars.next());
+                } else {
+                    path.push(c);
+                }
+            }
+            Some(PathBuf::from(path))
+        })
+    })
+}
+
+/// The SDK root implied by a tool's real location, e.g. `<sdk>/platform-tools/adb`.
+fn sdk_root_of_tool(tool: &Path) -> Option<PathBuf> {
+    let real = tool.canonicalize().ok()?;
+    real.ancestors()
+        .skip(1)
+        .find(|dir| {
+            matches!(
+                dir.file_name().and_then(|n| n.to_str()),
+                Some("platform-tools" | "emulator" | "cmdline-tools" | "tools")
+            )
+        })
+        .and_then(|dir| dir.parent())
+        .map(Path::to_path_buf)
+}
+
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|dir| dir.join(name))
+        .find(|path| path.is_file())
+}
+
+/// Find an Android SDK tool without assuming where the SDK lives. In order:
+/// `ANDROID_HOME`/`ANDROID_SDK_ROOT` and `PATH` (in the order `path_first` selects, since adb
+/// has always preferred `PATH` and the emulator the SDK), the project's `local.properties` `sdk.dir`, the
+/// SDK that any other SDK tool on `PATH` belongs to, then common install directories.
+/// A bare `name` is the last resort, so errors name the missing tool.
+fn sdk_tool(name: &str, relative: &str, path_first: bool) -> PathBuf {
+    let in_roots = |roots: Vec<PathBuf>| {
+        roots
+            .into_iter()
+            .map(|root| root.join(relative))
+            .find(|path| path.is_file())
+    };
+    let from_env = || in_roots(opendhu_dhu::adb::sdk_roots_from_env());
+    let from_path = || on_path(name);
+    let found = if path_first {
+        from_path().or_else(from_env)
+    } else {
+        from_env().or_else(from_path)
+    };
+    found
+        .or_else(|| {
+            let cwd = std::env::current_dir().ok()?;
+            in_roots(sdk_dir_from_local_properties(&cwd).into_iter().collect())
+        })
+        .or_else(|| {
+            in_roots(
+                ["adb", "emulator", "avdmanager", "sdkmanager"]
+                    .into_iter()
+                    .filter_map(on_path)
+                    .filter_map(|tool| sdk_root_of_tool(&tool))
+                    .collect(),
+            )
+        })
+        .or_else(|| {
+            let home = PathBuf::from(std::env::var_os("HOME")?);
+            in_roots(vec![
+                home.join("Android/Sdk"),
+                home.join("Library/Android/sdk"),
+            ])
+        })
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+pub(crate) fn adb_program() -> PathBuf {
+    sdk_tool("adb", "platform-tools/adb", true)
+}
+
 pub(crate) fn emulator_program() -> PathBuf {
-    std::env::var_os("ANDROID_HOME")
-        .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
-        .map(|sdk| PathBuf::from(sdk).join("emulator/emulator"))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("emulator"))
+    sdk_tool("emulator", "emulator/emulator", false)
 }
 
 fn find_emulator(adb: &Path, name: &str) -> Result<Option<String>> {
@@ -538,12 +624,8 @@ fn run_prepared(
         )));
     }
     test_cmd::progress(&output, "Checking test tools...");
-    // Fail before starting hardware when OCR isn't installed.
-    device::command(
-        Path::new("tesseract"),
-        &["--version"],
-        Duration::from_secs(10),
-    )?;
+    // Fail before starting hardware when a required tool is missing.
+    crate::suite_doctor::preflight()?;
     let cwd = std::env::current_dir().map_err(|e| Error::Other(e.to_string()))?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -561,7 +643,7 @@ fn run_prepared(
     };
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
     test_cmd::progress(&output, format!("Artifacts: {}", artifacts.display()));
-    let adb = PathBuf::from("adb");
+    let adb = adb_program();
     let usb_serial = if opts.usb {
         test_cmd::progress(&output, "Finding a USB phone...");
         Some(find_usb_phone(&adb)?)
@@ -863,6 +945,39 @@ fn run_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn infers_sdk_from_local_properties_in_an_ancestor() {
+        let root = std::env::temp_dir().join(format!("aa-sdk-props-{}", std::process::id()));
+        let nested = root.join("app/e2e");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            root.join("local.properties"),
+            "# c\nsdk.dir=/opt/my\\ sdk\\:x\nother=1\n",
+        )
+        .unwrap();
+        assert_eq!(
+            sdk_dir_from_local_properties(&nested),
+            Some(PathBuf::from("/opt/my sdk:x"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn infers_sdk_root_from_a_symlinked_tool() {
+        let root = std::env::temp_dir().join(format!("aa-sdk-tool-{}", std::process::id()));
+        let tools = root.join("sdk/platform-tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(tools.join("adb"), "").unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::os::unix::fs::symlink(tools.join("adb"), root.join("bin/adb")).unwrap();
+        assert_eq!(
+            sdk_root_of_tool(&root.join("bin/adb")),
+            Some(root.join("sdk").canonicalize().unwrap())
+        );
+        assert_eq!(sdk_root_of_tool(&root.join("missing")), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn rejects_unknown_suite_fields_and_versions_before_devices() {
         let dir = std::env::temp_dir().join(format!("aa-suite-schema-{}", std::process::id()));

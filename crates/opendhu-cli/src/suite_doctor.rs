@@ -44,36 +44,9 @@ pub fn run(path: &Path, usb: bool) -> Result<Vec<Check>> {
         ));
     }
     let host_path = std::env::var_os("PATH").unwrap_or_default();
-    let adb = program("adb", &cwd, &host_path);
-    checks.push(check(
-        if adb.is_some() {
-            Level::Ok
-        } else {
-            Level::Fail
-        },
-        "adb",
-        adb.as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "not executable on PATH; add Android SDK platform-tools".into()),
-    ));
-    match program("tesseract", &cwd, &host_path) {
-        Some(p) => match crate::device::command(&p, &["--list-langs"], Duration::from_secs(10)) {
-            Ok(langs) if langs.lines().any(|l| l.trim() == "eng") => {
-                checks.push(check(Level::Ok, "ocr", "tesseract with English data"))
-            }
-            Ok(_) => checks.push(check(
-                Level::Fail,
-                "ocr",
-                "install tesseract English language data (eng)",
-            )),
-            Err(e) => checks.push(check(Level::Fail, "ocr", e.to_string())),
-        },
-        None => checks.push(check(
-            Level::Fail,
-            "ocr",
-            "tesseract is not executable on PATH; install it with English data",
-        )),
-    }
+    let (adb_check, adb) = adb_check(&cwd, &host_path);
+    checks.push(adb_check);
+    checks.push(ocr_check(&cwd, &host_path));
     if usb {
         if let Some(adb) = adb {
             match crate::suite::find_usb_phone(&adb) {
@@ -162,4 +135,66 @@ fn executable(path: &Path) -> bool {
         && path
             .metadata()
             .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+}
+
+/// Locate adb the way suite runs do and report it.
+pub(crate) fn adb_check(cwd: &Path, host_path: &std::ffi::OsStr) -> (Check, Option<PathBuf>) {
+    let adb = Some(crate::suite::adb_program())
+        .filter(|p| executable(p))
+        .or_else(|| program("adb", cwd, host_path));
+    let report = check(
+        if adb.is_some() {
+            Level::Ok
+        } else {
+            Level::Fail
+        },
+        "adb",
+        adb.as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| {
+                "not found on PATH or in the Android SDK; install platform-tools".into()
+            }),
+    );
+    (report, adb)
+}
+
+/// tesseract with English data, which the screen-text steps in managed tests need.
+pub(crate) fn ocr_check(cwd: &Path, host_path: &std::ffi::OsStr) -> Check {
+    match program("tesseract", cwd, host_path) {
+        Some(p) => match crate::device::command(&p, &["--list-langs"], Duration::from_secs(10)) {
+            Ok(langs) if langs.lines().any(|l| l.trim() == "eng") => {
+                check(Level::Ok, "ocr", "tesseract with English data")
+            }
+            Ok(_) => check(
+                Level::Fail,
+                "ocr",
+                "install tesseract English language data (eng)",
+            ),
+            Err(e) => check(Level::Fail, "ocr", e.to_string()),
+        },
+        None => check(
+            Level::Fail,
+            "ocr",
+            "tesseract is not executable on PATH; install it with English data (e.g. `sudo apt install tesseract-ocr` or `brew install tesseract`)",
+        ),
+    }
+}
+
+/// Tools every managed run needs, checked together so one run reports all that are missing.
+pub fn preflight() -> Result<()> {
+    let cwd = std::env::current_dir().map_err(|e| opendhu_core::Error::Other(e.to_string()))?;
+    let host_path = std::env::var_os("PATH").unwrap_or_default();
+    let missing: Vec<String> = [adb_check(&cwd, &host_path).0, ocr_check(&cwd, &host_path)]
+        .into_iter()
+        .filter(|c| c.level == Level::Fail)
+        .map(|c| format!("{}: {}", c.name, c.detail))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(opendhu_core::Error::BackendUnavailable(format!(
+            "missing test tools ({})",
+            missing.join("; ")
+        )))
+    }
 }

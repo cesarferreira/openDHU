@@ -143,6 +143,35 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
         }
     }
 
+    // Only managed test suites (`aa test`) need these, so they warn instead of failing.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let host_path = std::env::var_os("PATH").unwrap_or_default();
+    let ocr = crate::suite_doctor::ocr_check(&cwd, &host_path);
+    out.push(check(
+        if ocr.level == Level::Fail {
+            Level::Warn
+        } else {
+            ocr.level
+        },
+        "ocr (aa test)",
+        ocr.detail,
+    ));
+    let emulator = crate::suite::emulator_program();
+    let emulator_found = emulator.is_absolute() && emulator.is_file();
+    out.push(check(
+        if emulator_found {
+            Level::Ok
+        } else {
+            Level::Warn
+        },
+        "emulator (aa test)",
+        if emulator_found {
+            emulator.display().to_string()
+        } else {
+            "not found; managed suites boot an AVD from the Android SDK emulator".into()
+        },
+    ));
+
     let session = opendhu_daemon::Client::connect()
         .and_then(|c| c.status())
         .ok()
