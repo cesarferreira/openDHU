@@ -199,7 +199,7 @@ pub fn run(mut opts: Options) -> Result<u8> {
     if opts.list {
         return list_tests(&opts);
     }
-    if crate::test_selection::is_all(&opts.paths) {
+    if opts.paths.is_empty() || crate::test_selection::is_all(&opts.paths) {
         return run_all(opts);
     }
     opts.paths = crate::test_selection::resolve(opts.paths)?;

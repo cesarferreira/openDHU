@@ -73,6 +73,7 @@ Managed suites handle device setup, APK installation, and cleanup. Try the inclu
 
 ```bash
 make sample-build                       # Requires Android SDK and JDK 17+
+aa test                                 # Run every registered suite
 aa test sample                          # Use the configured emulator
 aa test sample --usb                    # Use one authorized USB phone instead
 aa test sample --filter persistence     # Run matching tests

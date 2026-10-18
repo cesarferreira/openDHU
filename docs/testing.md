@@ -62,7 +62,8 @@ aa test robotaxi --list                   # List tests without starting a device
 aa test robotaxi
 aa test robotaxi --filter persistence --interactive
 aa test storybook --filter route --validate
-aa test all                              # Run every registered suite in name order
+aa test                                  # Run every registered suite in name order
+aa test all                              # Explicit form of the same command
 aa test all --usb                        # Use one USB phone for each managed suite
 aa test all --filter persistence --validate --json
 ```
@@ -77,7 +78,8 @@ with a target (including `all`) it prints test names and files, applying `--filt
 `aa test --list --filter TEXT` lists matching tests across all registered suites. `--json` returns
 the same information as one JSON object.
 
-`all` validates every selected suite's YAML before setup, then runs suites sequentially in name order.
+With no target, `aa test` runs all suites from the nearest `opendhu.yaml`, just like `aa test all`.
+It validates every selected suite's YAML before setup, then runs suites sequentially in name order.
 With `--filter`, suites without matching tests are skipped; no matches anywhere is an argument error.
 Each suite gets its own directory under `build/test-results/all-<timestamp>/`, or under the directory
 given by `--artifacts-dir`. A failed suite does not prevent later suites from running; the command

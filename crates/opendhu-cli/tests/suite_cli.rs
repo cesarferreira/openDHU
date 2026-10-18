@@ -238,11 +238,15 @@ exec "$USB_FAKE_NATIVE"
     }
 
     fn all_command(&self, extra: &[&str]) -> std::process::Command {
+        self.registered_command(&["all"], extra)
+    }
+
+    fn registered_command(&self, target: &[&str], extra: &[&str]) -> std::process::Command {
         let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_aa"));
         cmd.current_dir(self.suite.parent().unwrap())
+            .arg("test")
+            .args(target)
             .args([
-                "test",
-                "all",
                 "--usb",
                 "--headless",
                 "--no-interactive",
@@ -389,47 +393,51 @@ fn usb_start_failure_cleans_up_the_private_runtime() {
 #[test]
 fn all_usb_runs_suites_sequentially_with_separate_reports_and_one_json_summary() {
     let _guard = USB_TEST.lock().unwrap();
-    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
-    s.register_all();
-    let output = s.all_command(&["--json"]).output().unwrap();
-    assert_eq!(code(&output), 0, "{}", text(&output));
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["exitCode"], 0);
-    assert_eq!(value["suites"][0]["name"], "first");
-    assert_eq!(value["suites"][1]["name"], "second");
-    for name in ["first", "second"] {
-        let dir = s.artifacts.join(name);
-        assert!(dir.join("results.json").exists());
-        assert!(dir.join("results.html").exists());
-        assert!(dir.join("suite.json").exists());
+    for target in [&[][..], &["all"][..]] {
+        let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+        s.register_all();
+        let output = s.registered_command(target, &["--json"]).output().unwrap();
+        assert_eq!(code(&output), 0, "{}", text(&output));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["exitCode"], 0);
+        assert_eq!(value["suites"][0]["name"], "first");
+        assert_eq!(value["suites"][1]["name"], "second");
+        for name in ["first", "second"] {
+            let dir = s.artifacts.join(name);
+            assert!(dir.join("results.json").exists());
+            assert!(dir.join("results.html").exists());
+            assert!(dir.join("suite.json").exists());
+        }
+        let root = s.suite.parent().unwrap();
+        let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+        assert_eq!(calls.matches("install -r -t").count(), 2, "{calls}");
+        let runtime = std::fs::read_to_string(root.join("runtime")).unwrap();
+        assert!(!std::path::Path::new(runtime.trim()).exists());
+        let pid = std::fs::read_to_string(root.join("native-pid")).unwrap();
+        assert!(!alive(pid.trim().parse().unwrap()));
     }
-    let root = s.suite.parent().unwrap();
-    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
-    assert_eq!(calls.matches("install -r -t").count(), 2, "{calls}");
-    let runtime = std::fs::read_to_string(root.join("runtime")).unwrap();
-    assert!(!std::path::Path::new(runtime.trim()).exists());
-    let pid = std::fs::read_to_string(root.join("native-pid")).unwrap();
-    assert!(!alive(pid.trim().parse().unwrap()));
 }
 
 #[test]
 fn all_usb_continues_after_a_failed_suite_and_returns_failure() {
     let _guard = USB_TEST.lock().unwrap();
-    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
-    s.register_all();
-    let root = s.suite.parent().unwrap();
-    std::fs::write(root.join("failed.yaml"), "name: Wrong focus\nbackend: native\nsteps: [{action: assert.status, expect: {videoFocus: {observed: off}}}]\n").unwrap();
-    let suite = std::fs::read_to_string(&s.suite)
-        .unwrap()
-        .replace("tests: [test.yaml]", "tests: [failed.yaml]");
-    std::fs::write(&s.suite, suite).unwrap();
-    let output = s.all_command(&["--json"]).output().unwrap();
-    assert_eq!(code(&output), 7, "{}", text(&output));
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["exitCode"], 7);
-    assert_eq!(value["suites"][0]["exitCode"], 7);
-    assert_eq!(value["suites"][1]["exitCode"], 0);
-    assert!(s.artifacts.join("second/results.json").is_file());
+    for target in [&[][..], &["all"][..]] {
+        let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
+        s.register_all();
+        let root = s.suite.parent().unwrap();
+        std::fs::write(root.join("failed.yaml"), "name: Wrong focus\nbackend: native\nsteps: [{action: assert.status, expect: {videoFocus: {observed: off}}}]\n").unwrap();
+        let suite = std::fs::read_to_string(&s.suite)
+            .unwrap()
+            .replace("tests: [test.yaml]", "tests: [failed.yaml]");
+        std::fs::write(&s.suite, suite).unwrap();
+        let output = s.registered_command(target, &["--json"]).output().unwrap();
+        assert_eq!(code(&output), 7, "{}", text(&output));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["exitCode"], 7);
+        assert_eq!(value["suites"][0]["exitCode"], 7);
+        assert_eq!(value["suites"][1]["exitCode"], 0);
+        assert!(s.artifacts.join("second/results.json").is_file());
+    }
 }
 
 #[test]

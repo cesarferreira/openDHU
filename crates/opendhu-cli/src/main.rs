@@ -127,8 +127,7 @@ enum Command {
     },
     /// Run YAML suites or tests, including named project suites
     Test {
-        /// Test files, directories, or suite names registered in the project opendhu.yaml
-        #[arg(required_unless_present = "list")]
+        /// Test files, directories, or registered suite names; omitted runs all project suites
         paths: Vec<PathBuf>,
         /// List registered suites, or tests within the selected paths, without starting devices
         #[arg(long)]

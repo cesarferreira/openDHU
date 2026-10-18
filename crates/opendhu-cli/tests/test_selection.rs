@@ -176,28 +176,31 @@ fn lists_filtered_tests_in_a_named_suite_without_an_apk() {
 fn validates_all_registered_suites_and_skips_suites_without_filter_matches() {
     let s = Sandbox::new();
     let root = registered_suites(&s);
-    for (extra, count) in [(vec![], 2), (vec!["--filter", "robotaxi"], 1)] {
-        let mut args = vec!["test", "all", "--usb", "--validate", "--json"];
-        args.extend(extra);
-        let output = run(&s, &root.join("nested"), &args);
-        assert_eq!(code(&output), 0, "{}", text(&output));
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(value["valid"], true);
-        assert_eq!(value["suites"].as_array().unwrap().len(), count);
-        assert_eq!(value["tests"], count);
-        assert!(!s.dir.exists());
+    for target in [vec![], vec!["all"]] {
+        for (extra, count) in [(vec![], 2), (vec!["--filter", "robotaxi"], 1)] {
+            let mut args = vec!["test"];
+            args.extend_from_slice(&target);
+            args.extend(["--usb", "--validate", "--json"]);
+            args.extend(extra);
+            let output = run(&s, &root.join("nested"), &args);
+            assert_eq!(code(&output), 0, "{}", text(&output));
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["valid"], true);
+            assert_eq!(value["suites"].as_array().unwrap().len(), count);
+            assert_eq!(value["tests"], count);
+            assert!(!s.dir.exists());
+        }
+        let mut args = vec!["test"];
+        args.extend(target);
+        args.extend(["--filter", "absent", "--validate"]);
+        let output = run(&s, &root, &args);
+        assert_eq!(code(&output), 2);
+        assert!(
+            text(&output).contains("matched no tests"),
+            "{}",
+            text(&output)
+        );
     }
-    let output = run(
-        &s,
-        &root,
-        &["test", "all", "--filter", "absent", "--validate"],
-    );
-    assert_eq!(code(&output), 2);
-    assert!(
-        text(&output).contains("matched no tests"),
-        "{}",
-        text(&output)
-    );
 }
 
 #[test]
@@ -205,11 +208,17 @@ fn registry_diagnostics_explain_missing_empty_and_nearest_project() {
     let s = Sandbox::new();
     let root = registered_suites(&s);
     std::fs::write(root.join("nested/opendhu.yaml"), "suites: {}\n").unwrap();
-    let empty = run(&s, &root.join("nested"), &["test", "all", "--validate"]);
-    assert_eq!(code(&empty), 2);
-    assert!(text(&empty).contains("no suites"), "{}", text(&empty));
+    for args in [
+        vec!["test", "--validate"],
+        vec!["test", "all", "--validate"],
+    ] {
+        let empty = run(&s, &root.join("nested"), &args);
+        assert_eq!(code(&empty), 2);
+        assert!(text(&empty).contains("no suites"), "{}", text(&empty));
+    }
     std::fs::remove_file(root.join("opendhu.yaml")).unwrap();
     for args in [
+        vec!["test"],
         vec!["test", "--list"],
         vec!["test", "all"],
         vec!["test", "robotaxi"],
