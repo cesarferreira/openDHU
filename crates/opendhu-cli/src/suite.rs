@@ -40,6 +40,16 @@ pub(crate) struct Environment {
     launch_activity: Option<String>,
     #[serde(default)]
     reverse_ports: Vec<ReversePort>,
+    /// App preferences to set before launch, e.g. a developer feature flag a journey needs.
+    preferences: Option<Preferences>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct Preferences {
+    /// SharedPreferences file name, without `.xml`.
+    pub(crate) file: String,
+    #[serde(default)]
+    pub(crate) booleans: std::collections::BTreeMap<String, bool>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -177,6 +187,20 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
         return Err(Error::InvalidArgs(
             "suite launchActivity must be a class name".into(),
         ));
+    }
+    if let Some(preferences) = &env.preferences {
+        let name_ok = |name: &str| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        };
+        if !name_ok(&preferences.file) || !preferences.booleans.keys().all(|k| name_ok(k)) {
+            return Err(Error::InvalidArgs(
+                "suite preferences file and keys may only use letters, digits, '.', '_' and '-'"
+                    .into(),
+            ));
+        }
     }
     let mut ports = std::collections::BTreeSet::new();
     for port in &env.reverse_ports {
@@ -847,6 +871,25 @@ fn run_prepared(
             ],
         )?;
     }
+    if let Some(preferences) = &suite.environment.preferences
+        && !preferences.booleans.is_empty()
+    {
+        check_cancel(&cancel)?;
+        test_cmd::progress(
+            &output,
+            format!(
+                "Setting {} app preference(s)...",
+                preferences.booleans.len()
+            ),
+        );
+        device::set_boolean_preferences(
+            &lease.adb,
+            &serial,
+            &suite.environment.package,
+            &preferences.file,
+            &preferences.booleans,
+        )?;
+    }
     if !opts.usb {
         lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
@@ -973,6 +1016,30 @@ fn run_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_are_parsed_and_validated() {
+        let dir = std::env::temp_dir().join(format!("aa-suite-prefs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("test.yaml"),
+            "name: T\nsteps: [{action: wait, duration: 1ms}]\n",
+        )
+        .unwrap();
+        let suite = |prefs: &str| {
+            let path = dir.join("suite.yaml");
+            std::fs::write(&path, format!("version: 1\nenvironment: {{emulator: medium_phone, apk: app.apk, package: test.app, appLabel: Test, {prefs}}}\ntests: [test.yaml]\n")).unwrap();
+            load(&path)
+        };
+        let ok = suite("preferences: {file: APPLICATION_SHARED_PREFERENCES, booleans: {EnableRobotaxiMode: true}}").unwrap().0;
+        let prefs = ok.environment.preferences.unwrap();
+        assert_eq!(prefs.file, "APPLICATION_SHARED_PREFERENCES");
+        assert_eq!(prefs.booleans.get("EnableRobotaxiMode"), Some(&true));
+        assert!(suite("preferences: {file: '../x', booleans: {}}").is_err());
+        assert!(suite("preferences: {file: p, booleans: {'a b': true}}").is_err());
+        assert!(suite("preferences: {file: p, strings: {a: b}}").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn detects_android_auto_first_run_screen_in_front() {

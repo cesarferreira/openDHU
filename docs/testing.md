@@ -413,6 +413,9 @@ environment:
   permissions: [android.permission.ACCESS_COARSE_LOCATION, android.permission.ACCESS_FINE_LOCATION]
   launchActivity: example.app.MainActivity
   reversePorts: [{device: 10101, host: 19101}]
+  preferences:
+    file: APPLICATION_SHARED_PREFERENCES
+    booleans: {EnableSomeDeveloperFlag: true}
 services:
   - name: backend
     command: [node, backend/start.mjs]
@@ -433,6 +436,13 @@ The suite installs the APK, grants the declared runtime permissions, acquires de
 reverse mappings without replacing existing ones, and optionally opens `launchActivity` once before
 projection. It removes its own reverse mappings during cleanup. These operations affect the dedicated
 test AVD only. They do not clear application data.
+
+`preferences` sets boolean entries in one of the app's SharedPreferences files (`file` is the name
+without `.xml`) after install and before launch, so a journey can turn on a developer flag instead of
+relying on a manually provisioned AVD. The app is stopped first, other entries in the file are kept,
+and the file is written through `run-as`, so the app must be a debuggable build. Like other
+environment fields, a child suite's `preferences` replaces the inherited one completely; a shared
+base can set a flag to `false` so every suite starts from a known state.
 
 Backend steps use a loopback fixture API, while the app uses its normal production network clients:
 

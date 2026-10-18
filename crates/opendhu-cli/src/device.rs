@@ -119,6 +119,103 @@ pub fn restart_head_unit_server(program: &Path, serial: &str) -> Result<()> {
     ensure_head_unit_server(program, serial)
 }
 
+/// Set boolean entries in one of a debuggable app's SharedPreferences files, keeping every other
+/// entry. The app is stopped first so it reads the file fresh on its next launch. Uses `run-as`,
+/// so the app must be a debuggable build; nothing outside the app's own storage is touched.
+pub fn set_boolean_preferences(
+    program: &Path,
+    serial: &str,
+    package: &str,
+    file: &str,
+    booleans: &std::collections::BTreeMap<String, bool>,
+) -> Result<()> {
+    adb(program, serial, &["shell", "am", "force-stop", package])?;
+    let path = format!("shared_prefs/{file}.xml");
+    let existing = match adb(program, serial, &["shell", "run-as", package, "cat", &path]) {
+        Ok(xml) => xml,
+        Err(error) => {
+            let text = error.message();
+            if text.contains("not debuggable") || text.contains("Unknown package") {
+                return Err(Error::BackendUnavailable(format!(
+                    "cannot set app preferences: {package} must be a debuggable build installed on the device ({})",
+                    text.trim()
+                )));
+            }
+            String::new() // The file does not exist yet.
+        }
+    };
+    let updated = with_boolean_preferences(&existing, booleans);
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let local =
+        std::env::temp_dir().join(format!("opendhu-prefs-{}-{nonce}.xml", std::process::id()));
+    let remote = format!(
+        "/data/local/tmp/opendhu-prefs-{}-{nonce}.xml",
+        std::process::id()
+    );
+    std::fs::write(&local, updated).map_err(|e| Error::Other(e.to_string()))?;
+    let local_text = local.to_string_lossy().into_owned();
+    let result = adb(program, serial, &["push", &local_text, &remote])
+        .and_then(|_| {
+            adb(
+                program,
+                serial,
+                &["shell", "run-as", package, "mkdir", "-p", "shared_prefs"],
+            )
+        })
+        .and_then(|_| {
+            adb(
+                program,
+                serial,
+                &["shell", "run-as", package, "cp", &remote, &path],
+            )
+        });
+    let _ = adb(program, serial, &["shell", "rm", "-f", &remote]);
+    let _ = std::fs::remove_file(&local);
+    result.map(|_| ())
+}
+
+/// `xml` with each boolean set: an existing entry of the same name is replaced and everything else
+/// is kept. Android writes `<boolean name="k" value="v" />` lines inside a single `<map>`.
+pub(crate) fn with_boolean_preferences(
+    xml: &str,
+    booleans: &std::collections::BTreeMap<String, bool>,
+) -> String {
+    let mut lines: Vec<String> = xml.lines().map(str::to_string).collect();
+    if !lines.iter().any(|l| l.contains("<map")) {
+        lines = vec![
+            "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>".into(),
+            "<map>".into(),
+            "</map>".into(),
+        ];
+    }
+    for line in &mut lines {
+        if line.trim() == "<map />" {
+            *line = "<map>".into();
+        }
+    }
+    if !lines.iter().any(|l| l.trim() == "</map>") {
+        lines.push("</map>".into());
+    }
+    for (key, value) in booleans {
+        let marker = format!("<boolean name=\"{key}\" ");
+        lines.retain(|l| !l.contains(&marker));
+        let end = lines
+            .iter()
+            .rposition(|l| l.trim() == "</map>")
+            .expect("map close tag");
+        lines.insert(
+            end,
+            format!("    <boolean name=\"{key}\" value=\"{value}\" />"),
+        );
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 /// Start the developer head-unit server through its public Settings UI.
 /// Android Auto must already have developer mode and initial consent provisioned.
 pub fn ensure_head_unit_server(program: &Path, serial: &str) -> Result<()> {
@@ -247,6 +344,26 @@ pub(crate) fn bounds_center(bounds: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_are_merged_without_losing_other_entries() {
+        let flags = std::collections::BTreeMap::from([("EnableRobotaxiMode".to_string(), true)]);
+        let fresh = with_boolean_preferences("", &flags);
+        assert!(fresh.contains("<map>") && fresh.contains("</map>"));
+        assert!(fresh.contains(r#"<boolean name="EnableRobotaxiMode" value="true" />"#));
+
+        let existing = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <string name=\"keep\">me</string>\n    <boolean name=\"EnableRobotaxiMode\" value=\"false\" />\n    <boolean name=\"Other\" value=\"true\" />\n</map>\n";
+        let merged = with_boolean_preferences(existing, &flags);
+        assert!(merged.contains(r#"<string name="keep">me</string>"#));
+        assert!(merged.contains(r#"<boolean name="Other" value="true" />"#));
+        assert_eq!(merged.matches("EnableRobotaxiMode").count(), 1);
+        assert!(merged.contains(r#"<boolean name="EnableRobotaxiMode" value="true" />"#));
+
+        let empty_map = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map />\n";
+        let filled = with_boolean_preferences(empty_map, &flags);
+        assert!(filled.contains("<map>") && !filled.contains("<map />"));
+        assert_eq!(with_boolean_preferences(&filled, &flags), filled);
+    }
 
     #[cfg(unix)]
     #[test]
