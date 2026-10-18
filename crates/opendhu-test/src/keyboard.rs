@@ -82,7 +82,7 @@ pub(crate) fn type_text(
                     "projected keyboard frame changed from the supported 800x480 profile".into(),
                 ));
             }
-            let observed = crate::screen::recognize(&image, || {
+            let observed = crate::screen::recognize_keyboard(&image, || {
                 cfg.clock.cancelled() || cfg.clock.now() >= deadline
             });
             // Translate a cancelled OCR process into the runner's interruption code, rather than

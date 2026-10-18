@@ -203,35 +203,76 @@ pub fn recognize(image: &Path, cancelled: impl Fn() -> bool) -> Result<Vec<Word>
     // Dimmed but visible template status text can disappear in normal OCR. Binarize the
     // projected pixels and invert to dark text on white, retaining the unmodified passes
     // above for fine glyphs and keyboard layout checks.
-    let contrast = image.with_extension("contrast.png");
-    let mut enhance = Command::new("ffmpeg");
-    enhance
+    // Automatic segmentation at a higher threshold also recovers enclosed control labels
+    // that sparse-text mode omits, without assuming where those controls appear.
+    for (name, threshold, segmentation) in [("contrast", 60, "11"), ("segmented", 110, "3")] {
+        let contrast = image.with_extension(format!("{name}.png"));
+        let mut enhance = Command::new("ffmpeg");
+        enhance
+            .args(["-v", "error", "-y", "-i"])
+            .arg(&image)
+            .args([
+                "-vf",
+                &format!(
+                    "format=gray,lut=y='if(gt(val,{threshold}),255,0)',negate,scale=iw*2:ih*2"
+                ),
+            ])
+            .arg(&contrast);
+        finish_command(enhance, &error_log, &cancelled)?;
+        let contrast_output = image.with_extension(name);
+        let mut command = Command::new(&program);
+        command
+            .arg(&contrast)
+            .arg(&contrast_output)
+            .args(["--psm", segmentation, "tsv"]);
+        finish_command(command, &error_log, &cancelled)?;
+        let tsv = std::fs::read_to_string(image.with_extension(format!("{name}.tsv")))
+            .map_err(|error| Error::Other(format!("cannot read {name} OCR output: {error}")))?;
+        let mut contrast_words = parse_tsv(&tsv)?;
+        for word in &mut contrast_words {
+            word.line.insert_str(0, &format!("{name}:"));
+            word.left /= 2;
+            word.top /= 2;
+            word.width = word.width.div_ceil(2);
+            word.height = word.height.div_ceil(2);
+        }
+        words.extend(contrast_words);
+    }
+    Ok(words)
+}
+
+/// Observe the guarded 800x480 keyboard without search results changing glyph segmentation.
+/// Preserve the full-frame passes and save the focused pass alongside them for diagnosis.
+pub fn recognize_keyboard(image: &Path, cancelled: impl Fn() -> bool) -> Result<Vec<Word>> {
+    let mut words = recognize(image, &cancelled)?;
+    let image = std::fs::canonicalize(image)
+        .map_err(|e| Error::Other(format!("cannot resolve screenshot: {e}")))?;
+    let crop = image.with_extension("keyboard.png");
+    let output = image.with_extension("keyboard");
+    let error_log = image.with_extension("ocr.log");
+    let mut resize = Command::new("ffmpeg");
+    resize
         .args(["-v", "error", "-y", "-i"])
         .arg(&image)
-        .args([
-            "-vf",
-            "format=gray,lut=y='if(gt(val,60),255,0)',negate,scale=iw*2:ih*2",
-        ])
-        .arg(&contrast);
-    finish_command(enhance, &error_log, &cancelled)?;
-    let contrast_output = image.with_extension("contrast");
-    let mut command = Command::new(&program);
-    command
-        .arg(&contrast)
-        .arg(&contrast_output)
-        .args(["--psm", "11", "tsv"]);
+        .args(["-vf", "crop=520:190:140:225,scale=iw*2:ih*2"])
+        .arg(&crop);
+    finish_command(resize, &error_log, &cancelled)?;
+    let program = std::env::var_os("OPENDHU_TESSERACT").unwrap_or_else(|| "tesseract".into());
+    let mut command = Command::new(program);
+    // Treat the fixed keyboard rows as a block: sparse-text mode can omit isolated y/z keys.
+    command.arg(&crop).arg(&output).args(["--psm", "6", "tsv"]);
     finish_command(command, &error_log, &cancelled)?;
-    let tsv = std::fs::read_to_string(contrast_output.with_extension("contrast.tsv"))
-        .map_err(|error| Error::Other(format!("cannot read contrast OCR output: {error}")))?;
-    let mut contrast_words = parse_tsv(&tsv)?;
-    for word in &mut contrast_words {
-        word.line.insert_str(0, "contrast:");
-        word.left /= 2;
-        word.top /= 2;
+    let tsv = std::fs::read_to_string(output.with_extension("keyboard.tsv"))
+        .map_err(|e| Error::Other(format!("cannot read keyboard OCR output: {e}")))?;
+    let mut keyboard_words = parse_tsv(&tsv)?;
+    for word in &mut keyboard_words {
+        word.line.insert_str(0, "keyboard:");
+        word.left = word.left / 2 + 140;
+        word.top = word.top / 2 + 225;
         word.width = word.width.div_ceil(2);
         word.height = word.height.div_ceil(2);
     }
-    words.extend(contrast_words);
+    words.extend(keyboard_words);
     Ok(words)
 }
 
