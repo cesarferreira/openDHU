@@ -255,6 +255,7 @@ dependencies = [
 name = "opendhu-gui"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "opendhu-core",
  "opendhu-daemon",
  "opendhu-dhu",

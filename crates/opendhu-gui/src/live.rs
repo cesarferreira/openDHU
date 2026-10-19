@@ -122,9 +122,12 @@ impl Live {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()?;
-        Some(egui::ColorImage::from_rgba_unmultiplied(
+        // H.264 is opaque: FFmpeg's RGBA pixels already have alpha 255, so their bytes
+        // are also valid premultiplied Color32 pixels. Move the allocation instead of
+        // allocating and converting every pixel again on the UI thread.
+        Some(egui::ColorImage::new(
             [self.screen.0, self.screen.1],
-            &bytes,
+            bytemuck::allocation::cast_vec(bytes),
         ))
     }
 }
@@ -144,7 +147,10 @@ fn stream(
         .ok_or("ffmpeg not found; it decodes the live picture (macOS: brew install ffmpeg)")?;
     let mut child = Command::new(ffmpeg)
         // Not `-fflags nobuffer`: with it ffmpeg stalls on a still screen and on a long burst (checked).
+        // This is one interactive stream. Automatic frame/filter thread pools queue
+        // full-sized frames and add worker overhead; keep the pipeline low latency.
         .args(["-v", "error", "-nostdin", "-flags", "low_delay"])
+        .args(["-threads", "1", "-filter_threads", "1"])
         .args([
             "-probesize",
             "32",
@@ -155,7 +161,8 @@ fn stream(
             "-i",
             "pipe:0",
         ])
-        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        // Output options follow -i: rawvideo also enables frame threading by default.
+        .args(["-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -201,4 +208,27 @@ fn stream(
     let _ = child.wait();
     let _ = sink.join();
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoded_rgba_frame_reuses_its_storage_without_changing_colors() {
+        let mut live = Live::new();
+        live.screen = (2, 1);
+        let bytes = vec![255, 0, 0, 255, 0, 128, 255, 255];
+        let allocation = bytes.as_ptr() as usize;
+        *live.frame.lock().unwrap() = Some(bytes);
+
+        let image = live.take_frame().unwrap();
+        assert_eq!(image.size, [2, 1]);
+        assert_eq!(
+            image.pixels,
+            [egui::Color32::RED, egui::Color32::from_rgb(0, 128, 255)]
+        );
+        assert_eq!(image.pixels.as_ptr() as usize, allocation);
+        assert!(live.take_frame().is_none());
+    }
 }

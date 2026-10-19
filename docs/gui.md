@@ -77,7 +77,14 @@ command runs; live touches do not block subsequent touches. Successful taps do n
 - The native window, Settings, diagnostics drawer, screenshot capture, Home/Back, touch, and fullscreen were
   checked with an isolated HTTP/video fixture. This validates the UI and command requests, not a physical
   phone's response. A physical-phone session was not available for this redesign.
-- macOS is the supported desktop platform so far. The window uses `eframe` with the OpenGL backend.
+- Desktop targets are macOS and Linux. The window uses `eframe` with the OpenGL backend; Linux uses
+  X11, including XWayland on a Wayland desktop. FFmpeg must be available on `PATH` for the live picture.
+- All 29 GUI tests passed in an ARM64 Linux container, and `cargo check --locked -p opendhu-gui
+  --all-targets --target x86_64-unknown-linux-gnu` passed. Linux FFmpeg 5.1.9 also decoded a 60-frame
+  800×480 motion fixture with byte-identical RGBA output before and after worker-thread tuning.
+  An interactive Linux desktop/projection session has not yet been checked.
+- The performance figures in the [README](../README.md#performance) were measured on macOS and do not
+  establish Linux CPU, memory, or display performance.
 - The GUI dependencies are separate from the `aa` binary.
 
 ## Checking how it looks

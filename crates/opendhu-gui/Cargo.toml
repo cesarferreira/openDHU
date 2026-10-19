@@ -17,6 +17,7 @@ opendhu-daemon = { path = "../opendhu-daemon" }
 opendhu-native = { path = "../opendhu-native" }
 opendhu-dhu = { path = "../opendhu-dhu" }
 egui-phosphor = "0.10"
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 eframe.workspace = true
 image.workspace = true
 serde_json.workspace = true

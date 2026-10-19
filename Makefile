@@ -4,7 +4,7 @@
 # Targets marked [phone] need a real phone with Android Auto, unlocked, on USB. They stop with an
 # error if a DHU or openDHU daemon is already running, so they never touch someone else's session.
 
-.PHONY: help all build build-release install install-release install-cli install-native install-gui \
+.PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui \
         clean test check fmt lint run daemon gui doctor stop demo vendor-check validate-examples \
         hw hw-dhu hw-native
 
@@ -36,8 +36,9 @@ help:
 	@echo "    sample-validate     validate sample YAML without an SDK or emulator"
 	@echo
 	@echo "  Install"
-	@echo "    install             aa, opendhu-native-hu and opendhu-gui (debug)"
-	@echo "    install-release     the same, release"
+	@echo "    install             aa, opendhu-native-hu and opendhu-gui (release)"
+	@echo "    install-release     alias for install"
+	@echo "    install-debug       the same, debug (development only)"
 	@echo "    install-cli | install-native | install-gui   one of them"
 	@echo
 	@echo "  Run (usage: make run ARGS=\"status\")"
@@ -92,19 +93,19 @@ validate-examples: build
 
 install: install-cli install-native install-gui
 
-install-release:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-cli --locked --bins --force
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-native-hu --locked --bins --force
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-gui --locked --bins --force
+install-release: install
+
+install-debug: INSTALL_FLAGS := --debug
+install-debug: install
 
 install-cli:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-cli --locked --bins --debug --force
+	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-cli --locked --bins $(INSTALL_FLAGS) --force
 
 install-native:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-native-hu --locked --bins --debug --force
+	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-native-hu --locked --bins $(INSTALL_FLAGS) --force
 
 install-gui:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-gui --locked --bins --debug --force
+	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-gui --locked --bins $(INSTALL_FLAGS) --force
 
 clean:
 	cargo clean

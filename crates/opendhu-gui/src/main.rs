@@ -96,13 +96,7 @@ impl eframe::App for App {
         self.live
             .tick(ctx, want && self.form.live, self.state.screen());
         if let Some(img) = self.live.take_frame() {
-            match &mut self.state.live_texture {
-                Some(t) => t.set(img, egui::TextureOptions::LINEAR),
-                None => {
-                    self.state.live_texture =
-                        Some(ctx.load_texture("live", img, egui::TextureOptions::LINEAR));
-                }
-            }
+            update_live_texture(ctx, &mut self.state.live_texture, img);
         }
         if !want {
             self.state.live_texture = None;
@@ -122,6 +116,24 @@ impl eframe::App for App {
     }
 }
 
+fn update_live_texture(
+    ctx: &egui::Context,
+    texture: &mut Option<egui::TextureHandle>,
+    image: egui::ColorImage,
+) {
+    match texture {
+        // Same-sized video frames only replace texels. A full set asks the OpenGL
+        // renderer to reallocate texture storage for every frame.
+        Some(t) if t.size() == image.size => {
+            t.set_partial([0, 0], image, egui::TextureOptions::LINEAR);
+        }
+        Some(t) => t.set(image, egui::TextureOptions::LINEAR),
+        None => {
+            *texture = Some(ctx.load_texture("live", image, egui::TextureOptions::LINEAR));
+        }
+    }
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -135,4 +147,65 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod texture_tests {
+    use super::*;
+
+    #[test]
+    fn live_texture_updates_reuse_storage_until_the_resolution_changes() {
+        let ctx = egui::Context::default();
+        let mut texture = None;
+        let first = ctx.run(egui::RawInput::default(), |ctx| {
+            update_live_texture(
+                ctx,
+                &mut texture,
+                egui::ColorImage::filled([2, 1], egui::Color32::RED),
+            );
+        });
+        let id = texture.as_ref().unwrap().id();
+        let delta = first
+            .textures_delta
+            .set
+            .iter()
+            .find(|(t, _)| *t == id)
+            .unwrap();
+        assert_eq!(delta.1.pos, None);
+
+        let next = ctx.run(egui::RawInput::default(), |ctx| {
+            update_live_texture(
+                ctx,
+                &mut texture,
+                egui::ColorImage::filled([2, 1], egui::Color32::BLUE),
+            );
+        });
+        assert_eq!(texture.as_ref().unwrap().id(), id);
+        let delta = next
+            .textures_delta
+            .set
+            .iter()
+            .find(|(t, _)| *t == id)
+            .unwrap();
+        assert_eq!(delta.1.pos, Some([0, 0]));
+        assert_eq!(delta.1.image.size(), [2, 1]);
+        let egui::ImageData::Color(pixels) = &delta.1.image;
+        assert_eq!(pixels.pixels, [egui::Color32::BLUE; 2]);
+
+        let resized = ctx.run(egui::RawInput::default(), |ctx| {
+            update_live_texture(
+                ctx,
+                &mut texture,
+                egui::ColorImage::filled([1, 2], egui::Color32::GREEN),
+            );
+        });
+        let delta = resized
+            .textures_delta
+            .set
+            .iter()
+            .find(|(t, _)| *t == id)
+            .unwrap();
+        assert_eq!(delta.1.pos, None);
+        assert_eq!(texture.as_ref().unwrap().size(), [1, 2]);
+    }
 }
