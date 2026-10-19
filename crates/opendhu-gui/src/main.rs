@@ -33,7 +33,9 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        ui::configure(&cc.egui_ctx);
         let (tx, rx) = mpsc::channel();
+        worker::spawn_device_poller(cc.egui_ctx.clone(), tx.clone());
         worker::spawn_poller(cc.egui_ctx.clone(), tx.clone());
         Self {
             state: State::new(),
@@ -124,7 +126,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("openDHU")
-            .with_inner_size([1000.0, 640.0])
+            .with_inner_size([1152.0, 768.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };

@@ -3,6 +3,7 @@
 pub mod adb;
 mod backend;
 pub mod console;
+pub mod device;
 pub mod discovery;
 mod png;
 mod process;

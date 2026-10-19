@@ -14,9 +14,16 @@ use crate::backend::AnyBackend;
 /// phone leaves USB accessory mode and is briefly invisible to adb.
 const DEVICE_WAIT: Duration = Duration::from_secs(10);
 
+pub struct LaunchedBackend {
+    pub backend: AnyBackend,
+    pub serial: String,
+    pub transport: &'static str,
+    pub emulator: Option<opendhu_dhu::device::EmulatorConnection>,
+}
+
 /// Start the head unit the request asks for. Returns it with the phone's adb serial, which the
 /// session needs for tunnels and status.
-pub fn launch_backend(req: &StartRequest) -> Result<(AnyBackend, String)> {
+pub fn launch_backend(req: &StartRequest) -> Result<LaunchedBackend> {
     if let Some(tcp) = &req.native_tcp {
         if req.backend != BackendKind::Native {
             return Err(Error::InvalidArgs(
@@ -29,12 +36,31 @@ pub fn launch_backend(req: &StartRequest) -> Result<(AnyBackend, String)> {
         BackendKind::Dhu => {
             let launch = resolve(req)?;
             let backend = DhuBackend::launch(&launch)?;
-            Ok((AnyBackend::Dhu(backend), launch.serial))
+            Ok(LaunchedBackend {
+                backend: AnyBackend::Dhu(backend),
+                serial: launch.serial,
+                transport: "usb",
+                emulator: None,
+            })
         }
         BackendKind::Native => {
-            let (launch, serial) = resolve_native(req)?;
+            let (mut launch, serial) = resolve_native(req)?;
+            let emulator = if launch.tcp.is_none() && serial.starts_with("emulator-") {
+                let connection =
+                    opendhu_dhu::device::EmulatorConnection::prepare(&adb_path()?, &serial)?;
+                launch.tcp = Some(connection.endpoint());
+                Some(connection)
+            } else {
+                None
+            };
+            let transport = if launch.tcp.is_some() { "tcp" } else { "usb" };
             let backend = NativeBackend::launch(&launch)?;
-            Ok((AnyBackend::Native(backend), serial))
+            Ok(LaunchedBackend {
+                backend: AnyBackend::Native(backend),
+                serial,
+                transport,
+                emulator,
+            })
         }
     }
 }
@@ -86,9 +112,17 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
             ))
         },
     )?;
+    let serial = match &req.serial {
+        Some(s) if s.trim().is_empty() => {
+            return Err(Error::InvalidArgs("`serial` is empty".into()));
+        }
+        Some(s) => s.clone(),
+        None => pick_device()?,
+    };
     // The native head unit takes whichever Android phone is on USB, so a second phone would make
     // the choice ambiguous. Refuse instead of guessing.
     if req.native_tcp.is_none()
+        && !serial.starts_with("emulator-")
         && let Ok(adb) = adb_path()
         && let Ok(devices) = adb::list_devices(&adb)
         && devices.iter().filter(|d| d.usb).count() > 1
@@ -98,13 +132,6 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
                 .into(),
         ));
     }
-    let serial = match &req.serial {
-        Some(s) if s.trim().is_empty() => {
-            return Err(Error::InvalidArgs("`serial` is empty".into()));
-        }
-        Some(s) => s.clone(),
-        None => pick_device()?,
-    };
     Ok((
         NativeLaunch {
             program,

@@ -15,6 +15,8 @@ path = "src/main.rs"
 opendhu-core = { path = "../opendhu-core" }
 opendhu-daemon = { path = "../opendhu-daemon" }
 opendhu-native = { path = "../opendhu-native" }
+opendhu-dhu = { path = "../opendhu-dhu" }
+egui-phosphor = "0.10"
 eframe.workspace = true
 image.workspace = true
 serde_json.workspace = true

@@ -72,6 +72,45 @@ pub fn spawn_poller(ctx: egui::Context, tx: mpsc::Sender<Update>) {
     });
 }
 
+/// Device discovery also works before the daemon starts, and never blocks the UI/status poller.
+pub fn spawn_device_poller(ctx: egui::Context, tx: mpsc::Sender<Update>) {
+    thread::spawn(move || {
+        loop {
+            use opendhu_dhu::adb;
+            let devices = adb::find_adb(
+                std::env::var("PATH").ok().as_deref(),
+                &adb::sdk_roots_from_env(),
+            )
+            .ok_or_else(|| "adb not found; install Android platform-tools.".to_owned())
+            .and_then(|path| adb::list_devices(&path).map_err(|e| e.to_string()));
+            if !send(&tx, &ctx, Update::Devices(devices)) {
+                return;
+            }
+            thread::sleep(Duration::from_secs(3));
+        }
+    });
+}
+
+pub fn open_file(path: PathBuf, ctx: egui::Context, tx: mpsc::Sender<Update>) {
+    thread::spawn(move || {
+        #[cfg(target_os = "macos")]
+        let program = "open";
+        #[cfg(not(target_os = "macos"))]
+        let program = "xdg-open";
+        let result = Command::new(program).arg(&path).status();
+        if !matches!(result, Ok(s) if s.success()) {
+            send(
+                &tx,
+                &ctx,
+                Update::Notice(crate::model::Notice {
+                    text: format!("Cannot open {}", path.display()),
+                    is_error: true,
+                }),
+            );
+        }
+    });
+}
+
 fn spawn_stream(
     client: Client,
     ctx: egui::Context,
@@ -109,20 +148,20 @@ pub fn run(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
 }
 
 /// A touch from the live picture. Unlike a button press it does not hold the buttons disabled, so
-/// several can follow each other, and it reports only through the notice line.
+/// several can follow each other. Only failures need a notice.
 #[cfg_attr(test, allow(dead_code))]
 pub fn run_touch(cmd: Cmd, ctx: egui::Context, tx: mpsc::Sender<Update>) {
     thread::spawn(move || {
-        let result = execute(&cmd, &ctx, &tx);
-        let (text, is_error) = match result {
-            Ok(t) => (t, false),
-            Err(t) => (t, true),
-        };
-        send(
-            &tx,
-            &ctx,
-            Update::Notice(crate::model::Notice { text, is_error }),
-        );
+        if let Err(text) = execute(&cmd, &ctx, &tx) {
+            send(
+                &tx,
+                &ctx,
+                Update::Notice(crate::model::Notice {
+                    text,
+                    is_error: true,
+                }),
+            );
+        }
     });
 }
 

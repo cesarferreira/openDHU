@@ -136,7 +136,19 @@ Check that the patched `rustls-webpki` is really in use with `cargo tree -i rust
 
 ## ADB-forwarded TCP transport
 
-To connect an emulator or a phone's Android Auto head-unit server without USB accessory mode:
+For an SDK emulator, ordinary startup (including the GUI's Start button) prepares the developer head-unit
+server and a session-owned ephemeral TCP forward automatically:
+
+```bash
+aa start --serial emulator-5554
+```
+
+Android Auto developer mode and initial projection consent must already be provisioned. The session removes
+its forward when stopped or if startup fails. Automatic device selection also uses this path when the only
+authorized device is an emulator.
+
+To supply an existing forward explicitly, or connect a physical phone's developer head-unit server without
+USB accessory mode:
 
 ```bash
 adb -s emulator-5554 forward tcp:15277 tcp:5277

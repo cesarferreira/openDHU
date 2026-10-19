@@ -35,6 +35,7 @@ struct RunningSession {
     serial: String,
     tunnels: Arc<Tunnels>,
     stop_keeper: Arc<AtomicBool>,
+    _emulator: Option<Arc<opendhu_dhu::device::EmulatorConnection>>,
 }
 
 enum Slot {
@@ -529,7 +530,12 @@ impl Daemon {
 /// Runs on a blocking thread. If anything after the DHU launch fails, dropping the backend stops
 /// the DHU, so a failed start leaves nothing running.
 fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Result<RunningSession> {
-    let (backend, serial) = launch::launch_backend(req)?;
+    let launch::LaunchedBackend {
+        backend,
+        serial,
+        transport,
+        emulator,
+    } = launch::launch_backend(req)?;
     let tunnels = Arc::new(tunnels::setup(&serial, &req.reverse)?);
     let stop_keeper = Arc::new(AtomicBool::new(false));
     if !tunnels.ports.is_empty() {
@@ -545,12 +551,8 @@ fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Resu
         id,
         backend: Arc::new(Mutex::new(backend)),
         kind: req.backend,
-        transport: if req.native_tcp.is_some() {
-            "tcp"
-        } else {
-            "usb"
-        }
-        .into(),
+        transport: transport.into(),
+        _emulator: emulator.map(Arc::new),
         serial,
         tunnels,
         stop_keeper,

@@ -1,8 +1,7 @@
 # Desktop window (`aa gui`)
 
-`opendhu-gui` is a native window for the openDHU daemon. It is a client of the HTTP API in [api.md](api.md),
-like the CLI. It adds no new power and needs no security change: it reads `daemon.json` for the port and the
-token, and sends no `Origin` header.
+`opendhu-gui` is a native window for the openDHU daemon. Like the CLI, it uses the HTTP API in
+[api.md](api.md): it reads `daemon.json` for the port and token, and sends no `Origin` header.
 
 ```bash
 aa gui                          # after make install
@@ -12,42 +11,77 @@ cargo install --path crates/opendhu-gui --locked
 
 `aa gui` finds `opendhu-gui` next to the CLI or on `PATH`.
 
-The window works with or without a session. If no daemon runs, it says so and offers **Start session**, with a
-choice of head unit (openDHU native by default, or Google DHU). That button runs `aa start --backend native` or `aa start --dhu` for the selected head unit, so the daemon start-up and your [config file](configuration.md) behave exactly as in
-the terminal. `aa` must sit next to `opendhu-gui` or be on `PATH`.
+## Connect
 
-## What it shows
+The connection bar shows the selected phone, connection state, **Settings**, and **Start** / **Stop**.
+The device picker discovers phones through adb even before a daemon is running. Unauthorized and offline
+phones remain visible but cannot be selected. **Automatic device** lets `aa start` choose the only authorized
+phone. A running session shows its actual phone; stop it before choosing another device.
 
-- **Session**: backend and version, phone serial, transport, process ids, and each `--reverse` tunnel with its live
-  state. **Stop session** ends it.
-- **Live view** (native backend): the head unit's display, live: the projected Android Auto screen, as a car's screen would show it (not the phone's own screen). It replaces the DHU's window. The window reads `GET /v1/video` and decodes it with
-  `ffmpeg`, so `ffmpeg` must be installed. **Click** the picture to tap, **drag** to swipe; the drag takes as long as
-  you took (50 ms to 2 s). Touches go to the phone as a car's touch screen would send them. Untick "Show the head unit display" to stop the
-  stream. The DHU draws its own window, so there is no live view for it.
-- **Audio**: tick **Play the phone's audio** (off by default) to hear what the phone plays, through `ffplay`. A line under
-  the picture shows how many seconds of sound have arrived on each channel.
-- **Video focus**: what openDHU requested, what the head unit reports, and the phone-side value. With the DHU that
-  is always `unknown`. With the native backend it is the phone's own word. **Focus on** and **Focus off** send the command.
-- **Screenshot**: saves a PNG to the path you type (absolute, ends in `.png`, no spaces) and previews it. On the
-  native backend, **clicking the preview taps the phone at that spot**. It is a real touch on the real phone.
-- **Events**: the daemon's event stream, live. Events from before the window connected are not shown, because the
-  API has no replay.
+With no session, the window shows a single connection panel. **Start session** runs `aa start --backend native`
+(or `aa start --dhu` for Google DHU), so daemon startup and your [config file](configuration.md) behave as they
+do in the terminal. `aa` must sit next to `opendhu-gui` or be on `PATH`.
 
-Buttons are disabled while a command runs and when the session cannot take them (for example Focus before the
-session is running). Errors from the daemon appear in the bar at the bottom, in the daemon's words.
+**Settings** holds the head-unit choice, optional device serial, reverse ports, and Google DHU's headless option.
+Session settings are disabled while a session is active. The screenshot folder can be changed at any time.
 
-## Limits
+Selecting an SDK emulator with the native backend automatically restarts Android Auto's developer head-unit
+server and creates an ephemeral adb TCP forward. The session owns that forward and removes it on Stop or
+startup failure. The emulator must already have Android Auto developer mode and initial projection consent
+provisioned, as it does for test suites. Physical phones continue to use USB.
 
-- Clicking in the real window was checked against the daemon's request log: Start, Take screenshot, Focus on and off,
-  and Stop all produced the matching requests. **Not confirmed in the real window:** a click on the preview (tap) never
-  reached the daemon in the runs I watched, and I could not tell from the log whether the sessions were native or
-  the DHU. Both are covered by headless tests that drive the window with synthetic clicks, which is weaker evidence.
-  Taps themselves were verified on the phone from the CLI.
-- macOS only so far (that is where it was built and run). It uses `eframe` with the OpenGL backend.
-- A screenshot preview shows whatever is on the phone's screen. Keep saved screenshots out of version control.
-- The GUI adds about 110 crates to the workspace build. The `aa` binary does not depend on it.
+## Live display and controls
+
+The native backend's projected Android Auto display fills the main area. It fits both window dimensions,
+keeps the negotiated aspect ratio, and stays above the controls without scrolling. It is the head unit's
+screen, as a car would show it. **Click** to tap; **drag** to swipe. The swipe takes as long as the drag
+(50 ms to 2 s), and coordinates are mapped back to the negotiated screen resolution.
+
+The picture comes from `GET /v1/video` and is decoded by `ffmpeg`, which must be installed. Google DHU has
+its own display window; the viewer explains this instead of showing a second projection.
+
+The lower toolbar has:
+
+- **Home** and **Back**, sent as car-button key presses to the phone.
+- **Audio**, off by default, to play the phone's audio through `ffplay`. Audio can still be muted when video
+  focus is off.
+- **Screenshot**, which saves a uniquely named PNG in the chosen folder. **Open screenshot** appears in
+  the status bar after a successful capture. The folder must exist, be absolute, and contain no spaces.
+- **Fullscreen**; press **Escape** to return to the window.
+- **More**, for pausing the display, long button presses, video focus, directional buttons, and media keys.
+
+When the phone releases video focus, the old picture is dimmed, touch is disabled, and **Resume projection**
+requests focus again. Stream failures also dim the old picture and disable touch. Car buttons are experimental:
+the phone may ignore them.
+
+The screenshot folder is remembered when Settings is closed, in `$XDG_CONFIG_HOME/opendhu/gui.json` or
+`~/.config/opendhu/gui.json`. Screenshot filenames include a timestamp so repeated captures do not overwrite
+one another.
+
+## Diagnostics
+
+**Diagnostics** opens a resizable drawer beneath the controls. It is closed by default and contains session
+and backend details, certificate source, process IDs, reverse-tunnel state, video-focus observations, stream
+and audio counters, the last screenshot, and live events. Events from before the window connected are not
+shown because the API has no replay.
+
+Errors and stream/tunnel problems appear in the status bar even when the drawer is closed. Open the drawer
+or hover over a truncated message for details. Commands that change session state stay disabled while another
+command runs; live touches do not block subsequent touches. Successful taps do not fill the status bar.
+
+## Verification and limits
+
+- Automated GUI tests cover startup options, fitted display geometry and scaled taps at multiple window sizes,
+  stale-frame touch suppression, screenshot commands, collapsed diagnostics, tunnel failures after startup,
+  and muting audio after losing video focus. Worker tests exercise a real daemon with a scripted DHU.
+- The native window, Settings, diagnostics drawer, screenshot capture, Home/Back, touch, and fullscreen were
+  checked with an isolated HTTP/video fixture. This validates the UI and command requests, not a physical
+  phone's response. A physical-phone session was not available for this redesign.
+- macOS is the supported desktop platform so far. The window uses `eframe` with the OpenGL backend.
+- The GUI dependencies are separate from the `aa` binary.
 
 ## Checking how it looks
 
 Set `OPENDHU_GUI_SNAPSHOT=/path/to/out.png` and the window saves an image of itself after about 2.5 s and quits.
-It captures only the openDHU window, never the rest of the desktop.
+It captures only the openDHU content area. `OPENDHU_GUI_SNAPSHOT_AFTER_MS` overrides the delay for a stream
+that needs longer to fill.

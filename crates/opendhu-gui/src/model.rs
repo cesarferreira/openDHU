@@ -31,6 +31,7 @@ pub struct Notice {
 /// Something that happened in the background, delivered to the window.
 pub enum Update {
     Conn(Conn),
+    Devices(Result<Vec<opendhu_dhu::adb::AdbDevice>, String>),
     Event(LogLine),
     /// A message that is not tied to a button press (a touch from the live picture).
     Notice(Notice),
@@ -53,6 +54,8 @@ pub struct Shot {
 
 pub struct State {
     pub conn: Conn,
+    pub devices: Vec<opendhu_dhu::adb::AdbDevice>,
+    pub device_problem: Option<String>,
     pub log: VecDeque<LogLine>,
     pub notice: Option<Notice>,
     /// Commands still running. Buttons stay disabled while this is above zero.
@@ -62,9 +65,9 @@ pub struct State {
     pub live_texture: Option<eframe::egui::TextureHandle>,
     /// Why the live picture is not showing, if it is not.
     pub live_problem: Option<String>,
-    /// Frame counters, shown under the picture.
+    /// Frame counters, available in diagnostics.
     pub live_summary: String,
-    /// Audio counters, shown while audio is on.
+    /// Audio counters, available in diagnostics while audio is on.
     pub audio_summary: Option<String>,
 }
 
@@ -80,6 +83,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             conn: Conn::Disconnected,
+            devices: Vec::new(),
+            device_problem: None,
             log: VecDeque::new(),
             notice: None,
             busy: 0,
@@ -161,6 +166,16 @@ impl State {
     pub fn apply(&mut self, update: Update) {
         match update {
             Update::Conn(c) => self.conn = c,
+            Update::Devices(result) => match result {
+                Ok(devices) => {
+                    self.devices = devices;
+                    self.device_problem = None;
+                }
+                Err(problem) => {
+                    self.devices.clear();
+                    self.device_problem = Some(problem);
+                }
+            },
             Update::Notice(n) => self.notice = Some(n),
             Update::Event(line) => {
                 if self.log.len() == LOG_CAP {
