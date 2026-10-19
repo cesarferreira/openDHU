@@ -102,7 +102,7 @@ pub fn locate_in_region(words: &[Word], text: &str, top: u32, bottom: u32) -> Op
 }
 
 /// Match a complete launcher label, keeping app body text and similarly named apps distinct.
-/// Android Auto truncates long labels with either three dots or a Unicode ellipsis.
+/// Android Auto truncates long labels with an ellipsis, which OCR can read as a colon.
 pub fn locate_launcher_label(
     words: &[Word],
     label: &str,
@@ -121,7 +121,10 @@ pub fn locate_launcher_label(
             let shown = normalized(&text(line));
             let truncated = shown
                 .strip_suffix("...")
-                .or_else(|| shown.strip_suffix('…'));
+                .or_else(|| shown.strip_suffix('…'))
+                // Wallpaper behind USB launcher labels can merge the ellipsis dots.
+                .or_else(|| shown.strip_suffix(":.."))
+                .or_else(|| shown.strip_suffix(':'));
             let matches = shown == expected
                 || truncated.is_some_and(|prefix| {
                     let prefix = prefix.trim_end();
@@ -379,6 +382,26 @@ mod tests {
             locate_launcher_label(&words("RobotUI Stor"), "RobotUI Storybook", 70, 410).is_none()
         );
         assert!(locate_launcher_label(&words("RobotUI Stor..."), "Robot UI", 70, 410).is_none());
+    }
+
+    #[test]
+    fn launcher_labels_accept_ellipsis_misread_as_colon_on_usb_wallpaper() {
+        // Observed in the Pixel 6 launcher: openDHU D… becomes D: or D:..
+        for (suffix, width, x) in [("D:", 21, 526), ("D:..", 37, 530), ("D...", 44, 532)] {
+            let mut words = parse_tsv(&format!("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t13\t1\t1\t1\t963\t409\t148\t33\t92\topenDHU\n5\t1\t13\t1\t1\t2\t1123\t409\t{width}\t25\t90\t{suffix}\n")).unwrap();
+            for word in &mut words {
+                word.left /= 2;
+                word.top /= 2;
+                word.width = word.width.div_ceil(2);
+                word.height = word.height.div_ceil(2);
+            }
+            assert_eq!(
+                locate_launcher_label(&words, "openDHU Demo", 70, 410),
+                Some((x, 212)),
+                "suffix {suffix:?}"
+            );
+            assert_eq!(locate_launcher_label(&words, "Other Demo", 70, 410), None);
+        }
     }
 
     #[test]
