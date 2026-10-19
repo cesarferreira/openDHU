@@ -1,4 +1,4 @@
-//! The live picture: the daemon's H.264 stream, decoded by `ffmpeg` into RGBA frames.
+//! The live picture: H.264 decoded by `ffmpeg` into RGBA or YUV frames.
 //!
 //! One background thread feeds the daemon's bytes to `ffmpeg` and a second reads the frames back.
 //! Only the newest frame is kept, so a slow window never builds up a backlog.
@@ -28,6 +28,7 @@ pub struct Live {
     /// The screen size of the stream currently running (or last started), for `take_frame` to shape
     /// the raw bytes `stream` decoded at that same size.
     screen: (usize, usize),
+    pub yuv: bool,
 }
 
 /// Counters the window shows under the picture, so a frozen or restarting stream can be told apart
@@ -43,6 +44,7 @@ struct Stats {
 impl Live {
     pub fn new() -> Self {
         Self {
+            yuv: false,
             frame: Arc::default(),
             stop: Arc::default(),
             running: Arc::default(),
@@ -70,6 +72,9 @@ impl Live {
         if running || self.last_try.is_some_and(|t| t.elapsed() < RETRY) {
             return;
         }
+        // No reader is running now: discard the previous stream's frame before
+        // changing dimensions or starting another decoder.
+        self.frame.lock().unwrap_or_else(|e| e.into_inner()).take();
         self.last_try = Some(Instant::now());
         self.stats.restarts.fetch_add(1, Ordering::SeqCst);
         // A new attempt starts clean: the last attempt's error no longer applies.
@@ -87,8 +92,9 @@ impl Live {
             ctx.clone(),
             self.screen,
         );
+        let yuv = self.yuv;
         thread::spawn(move || {
-            let result = stream(&frame, &stop, &ctx, &stats, started, screen);
+            let result = stream(&frame, &stop, &ctx, &stats, started, screen, yuv);
             *problem.lock().unwrap_or_else(|e| e.into_inner()) = result.err();
             running.store(false, Ordering::SeqCst);
             ctx.request_repaint();
@@ -115,6 +121,18 @@ impl Live {
         )
     }
 
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    pub fn take_yuv(&self) -> Option<([usize; 2], Vec<u8>)> {
+        self.frame
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .map(|v| ([self.screen.0, self.screen.1], v))
+    }
+
     /// The newest decoded frame, if one arrived since the last call.
     pub fn take_frame(&self) -> Option<egui::ColorImage> {
         let bytes = self
@@ -139,13 +157,19 @@ fn stream(
     stats: &Arc<Stats>,
     started: Instant,
     (width, height): (usize, usize),
+    yuv: bool,
 ) -> Result<(), String> {
-    let frame_bytes = width * height * 4;
+    let frame_bytes = if yuv {
+        crate::gpu::plane_layout([width, height])[2].2.end
+    } else {
+        width * height * 4
+    };
     let client = Client::connect().map_err(|e| e.to_string())?;
     let mut video = client.video().map_err(|e| e.to_string())?;
     let ffmpeg = opendhu_native::find_ffmpeg()
         .ok_or("ffmpeg not found; it decodes the live picture (macOS: brew install ffmpeg)")?;
-    let mut child = Command::new(ffmpeg)
+    let mut command = Command::new(ffmpeg);
+    let child = command
         // Not `-fflags nobuffer`: with it ffmpeg stalls on a still screen and on a long burst (checked).
         // This is one interactive stream. Automatic frame/filter thread pools queue
         // full-sized frames and add worker overhead; keep the pipeline low latency.
@@ -160,9 +184,21 @@ fn stream(
             "h264",
             "-i",
             "pipe:0",
-        ])
+        ]);
+    if yuv {
+        child.args(["-vf", "scale=out_color_matrix=bt601:out_range=tv"]);
+    }
+    let mut child = child
         // Output options follow -i: rawvideo also enables frame threading by default.
-        .args(["-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .args([
+            "-threads",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            if yuv { "yuv420p" } else { "rgba" },
+            "-",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

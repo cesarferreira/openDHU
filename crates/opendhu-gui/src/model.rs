@@ -63,6 +63,7 @@ pub struct State {
     pub shot: Option<Shot>,
     /// The newest frame of the live picture.
     pub live_texture: Option<eframe::egui::TextureHandle>,
+    pub gpu_video: Option<eframe::egui::PaintCallback>,
     /// Why the live picture is not showing, if it is not.
     pub live_problem: Option<String>,
     /// Frame counters, available in diagnostics.
@@ -90,6 +91,7 @@ impl State {
             busy: 0,
             shot: None,
             live_texture: None,
+            gpu_video: None,
             live_problem: None,
             live_summary: String::new(),
             audio_summary: None,

@@ -596,3 +596,52 @@ fn the_default_drawer_shows_session_details_and_focus_controls_without_scrolling
         "focus controls must not be cut off: {control:?}, {clip:?}"
     );
 }
+
+#[test]
+fn gpu_video_stays_fitted_and_uses_the_existing_scaled_touch_controls() {
+    for stopped in [false, true] {
+        let ctx = egui::Context::default();
+        let mut state = native_state_with_a_shot(&ctx);
+        state.gpu_video = Some(egui::PaintCallback {
+            rect: egui::Rect::NOTHING,
+            callback: std::sync::Arc::new(()),
+        });
+        if stopped {
+            if let Conn::Connected(status) = &mut state.conn {
+                status
+                    .session
+                    .as_mut()
+                    .unwrap()
+                    .details
+                    .as_mut()
+                    .unwrap()
+                    .head_unit
+                    .video_focus
+                    .observed = opendhu_core::FocusState::Off;
+            }
+        }
+        let mut form = Form::new();
+        let size = egui::vec2(1000.0, 640.0);
+        render(&ctx, &mut state, &mut form, size, vec![]);
+        let output = render(&ctx, &mut state, &mut form, size, vec![]);
+        let rect = output
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Callback(c) => Some(c.rect),
+                _ => None,
+            })
+            .expect("GPU video must be visible");
+        assert!(rect.min.y >= 48.0 && rect.max.y <= size.y - 72.0);
+        assert!((rect.width() / rect.height() - 800.0 / 480.0).abs() < 0.01);
+        SENT.with(|s| s.borrow_mut().clear());
+        click_at(&ctx, &mut state, &mut form, size, rect.center());
+        let sent = SENT.with(|s| s.borrow_mut().drain(..).collect::<Vec<_>>());
+        assert_eq!(
+            sent.iter()
+                .any(|c| matches!(c, Cmd::Tap(399..=400, 239..=240))),
+            !stopped,
+            "{sent:?}"
+        );
+    }
+}

@@ -450,15 +450,31 @@ fn projection(
     let stopped = state.phone_stopped_projecting();
     let native = state.native_running();
     let mut overlay = None;
+    let gpu = state.gpu_video.as_ref().filter(|_| native && form.live);
     let texture = state.live_texture.as_ref().filter(|_| native && form.live);
-    if let Some(texture) = texture {
-        let mut image = egui::Image::new((texture.id(), rect.size()));
-        if stopped || state.live_problem.is_some() {
-            image = image.tint(Color32::from_gray(65));
+    if gpu.is_some() || texture.is_some() {
+        let disabled = stopped || state.live_problem.is_some();
+        let response = if let Some(gpu) = gpu {
+            let mut callback = gpu.clone();
+            callback.rect = rect;
+            ui.painter().add(egui::Shape::Callback(callback));
+            ui.allocate_rect(
+                rect,
+                if disabled {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click_and_drag()
+                },
+            )
         } else {
-            image = image.sense(egui::Sense::click_and_drag());
-        }
-        let response = ui.put(rect, image);
+            let mut image = egui::Image::new((texture.unwrap().id(), rect.size()));
+            if disabled {
+                image = image.tint(Color32::from_gray(65));
+            } else {
+                image = image.sense(egui::Sense::click_and_drag());
+            }
+            ui.put(rect, image)
+        };
         let at = |p: egui::Pos2| to_pixel(p - rect.min, rect.size(), state.screen());
         if response.drag_started()
             && let Some(p) = response.interact_pointer_pos()
@@ -662,7 +678,11 @@ fn diagnostics(
                             egui::Label::new(RichText::new(text).color(DIM).size(12.0)).truncate(),
                         )
                         .on_hover_text(&notice.text);
-                    } else if state.native_running() && form.live && state.live_texture.is_none() {
+                    } else if state.native_running()
+                        && form.live
+                        && state.live_texture.is_none()
+                        && state.gpu_video.is_none()
+                    {
                         status(ui, "Waiting for video", DIM);
                     } else if state.phase() == Some(Phase::Running) {
                         status(ui, "No issues", OK);

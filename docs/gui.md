@@ -69,6 +69,21 @@ Errors and stream/tunnel problems appear in the status bar even when the drawer 
 or hover over a truncated message for details. Commands that change session state stay disabled while another
 command runs; live touches do not block subsequent touches. Successful taps do not fill the status bar.
 
+## GPU color conversion
+
+The GUI defaults to compact YUV video with GPU color conversion on macOS and Linux. FFmpeg still
+decodes H.264; an OpenGL shader converts and draws the planes directly in the existing fitted
+video rectangle. It requires desktop OpenGL 3.1+ or OpenGL ES 3; GPU setup or rendering failures
+automatically fall back to RGBA. Run `OPENDHU_GPU_VIDEO=0 aa gui` to force RGBA.
+Touch, paused-frame handling and display fitting use
+the existing controls. Saved screenshots use the backend's decoder.
+
+Color normalization targets limited-range BT.601 before upload. Shader chroma interpolation and
+rounding can differ slightly from the normal viewer. Mac color-bar comparisons covered BT.601,
+BT.709 and full-range input, with mean RGB differences of 0.4–1.1 levels out of 255 and flat-patch
+channel differences up to 3 levels. See [performance results](../README.md#gpu-color-conversion)
+for the measured CPU and RSS comparison.
+
 ## Verification and limits
 
 - Automated GUI tests cover startup options, fitted display geometry and scaled taps at multiple window sizes,
@@ -79,10 +94,13 @@ command runs; live touches do not block subsequent touches. Successful taps do n
   phone's response. A physical-phone session was not available for this redesign.
 - Desktop targets are macOS and Linux. The window uses `eframe` with the OpenGL backend; Linux uses
   X11, including XWayland on a Wayland desktop. FFmpeg must be available on `PATH` for the live picture.
-- All 29 GUI tests passed in an ARM64 Linux container, and `cargo check --locked -p opendhu-gui
+  Debian/Ubuntu desktops need the OpenGL and X11 runtime libraries, including `libgl1` and
+  `libxkbcommon-x11-0`.
+- All 31 GUI tests passed in an ARM64 Linux container, and `cargo check --locked -p opendhu-gui
   --all-targets --target x86_64-unknown-linux-gnu` passed. Linux FFmpeg 5.1.9 also decoded a 60-frame
   800×480 motion fixture with byte-identical RGBA output before and after worker-thread tuning.
-  An interactive Linux desktop/projection session has not yet been checked.
+  The actual Linux GPU shader window was also checked with a paced H.264 color-bar fixture under
+  Xvfb/Mesa software OpenGL. Physical Linux GPU performance and phone projection remain untested.
 - The performance figures in the [README](../README.md#performance) were measured on macOS and do not
   establish Linux CPU, memory, or display performance.
 - The GUI dependencies are separate from the `aa` binary.
