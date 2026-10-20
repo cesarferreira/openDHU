@@ -912,21 +912,12 @@ mod tests {
     }
 
     #[test]
-    fn only_opendhu_credentials_are_loaded_from_home() {
-        let home = std::env::temp_dir().join(format!("opendhu-legacy-cert-{}", std::process::id()));
+    fn credentials_are_loaded_from_home() {
+        let home = std::env::temp_dir().join(format!("opendhu-home-cert-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        let legacy = home.join(".config/autolab/credentials");
         let current = home.join(".config/opendhu/credentials");
-        std::fs::create_dir_all(&legacy).unwrap();
         let cert = b"-----BEGIN CERTIFICATE-----\nlegacy\n";
-        let key = b"-----BEGIN PRIVATE KEY-----\nlegacy\n";
-        std::fs::write(legacy.join("head-unit-cert.pem"), cert).unwrap();
-        std::fs::write(legacy.join("head-unit-key.pem"), key).unwrap();
-        assert_eq!(
-            load_home_certificate(None, None, Some(&home)).unwrap(),
-            None,
-            "old credential directories must be ignored",
-        );
+        assert_eq!(load_home_certificate(None, None, Some(&home)).unwrap(), None);
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("head-unit-cert.pem"), cert).unwrap();
         assert!(load_home_certificate(None, None, Some(&home)).is_err());

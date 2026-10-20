@@ -607,10 +607,10 @@ pub trait AndroidAutoVideoChannelTrait {
     /// Set the focus of the video stream to be as requested
     async fn set_focus(&self, focus: bool);
 
-    /// The phone sent a video `StartIndication`: it is now sending frames. (AutoLab addition.)
+    /// The phone sent a video `StartIndication`: it is now sending frames. (openDHU addition.)
     async fn phone_video_started(&self, _session: i32) {}
 
-    /// The phone sent a video `StopIndication`: it stopped sending frames. (AutoLab addition.)
+    /// The phone sent a video `StopIndication`: it stopped sending frames. (openDHU addition.)
     async fn phone_video_stopped(&self) {}
     /// Retrieve the video configuration for the channel
     fn retrieve_video_configuration(&self) -> &VideoConfiguration;

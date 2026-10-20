@@ -268,14 +268,6 @@ mod tests {
             home: None,
         };
         assert!(load(&named, &dir).is_err());
-        let legacy = dir.join("autolab");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join("config.toml"), "[session]\nserial = \"OLD\"").unwrap();
-        assert_eq!(
-            load(&none, &dir).unwrap(),
-            Config::default(),
-            "old config directories must be ignored"
-        );
         let sub = dir.join("opendhu");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("config.toml"), "[session]\nserial = \"Z\"").unwrap();

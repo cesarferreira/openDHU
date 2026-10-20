@@ -201,107 +201,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "opendhu-cli"
-version = "0.1.0"
-dependencies = [
- "opendhu-core",
- "opendhu-daemon",
- "opendhu-dhu",
- "opendhu-native",
- "opendhu-test",
- "clap",
- "ctrlc",
- "fs2",
- "glob",
- "libc",
- "serde",
- "serde_json",
- "serde_norway",
- "toml",
-]
-
-[[package]]
-name = "opendhu-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "opendhu-daemon"
-version = "0.1.0"
-dependencies = [
- "opendhu-core",
- "opendhu-dhu",
- "opendhu-native",
- "axum",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "ureq",
-]
-
-[[package]]
-name = "opendhu-dhu"
-version = "0.1.0"
-dependencies = [
- "opendhu-core",
-]
-
-[[package]]
-name = "opendhu-gui"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "opendhu-core",
- "opendhu-daemon",
- "opendhu-dhu",
- "opendhu-native",
- "eframe",
- "egui-phosphor",
- "image",
- "serde_json",
-]
-
-[[package]]
-name = "opendhu-native"
-version = "0.1.0"
-dependencies = [
- "opendhu-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "opendhu-native-hu"
-version = "0.1.0"
-dependencies = [
- "android-auto",
- "async-trait",
- "opendhu-core",
- "opendhu-native",
- "image",
- "log",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "opendhu-test"
-version = "0.1.0"
-dependencies = [
- "opendhu-core",
- "serde",
- "serde_json",
- "serde_norway",
- "ureq",
-]
-
-[[package]]
 name = "aws-lc-rs"
 version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2251,6 +2150,107 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "opendhu-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ctrlc",
+ "fs2",
+ "glob",
+ "libc",
+ "opendhu-core",
+ "opendhu-daemon",
+ "opendhu-dhu",
+ "opendhu-native",
+ "opendhu-test",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "toml",
+]
+
+[[package]]
+name = "opendhu-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "opendhu-daemon"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "opendhu-core",
+ "opendhu-dhu",
+ "opendhu-native",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "ureq",
+]
+
+[[package]]
+name = "opendhu-dhu"
+version = "0.1.0"
+dependencies = [
+ "opendhu-core",
+]
+
+[[package]]
+name = "opendhu-gui"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eframe",
+ "egui-phosphor",
+ "image",
+ "opendhu-core",
+ "opendhu-daemon",
+ "opendhu-dhu",
+ "opendhu-native",
+ "serde_json",
+]
+
+[[package]]
+name = "opendhu-native"
+version = "0.1.0"
+dependencies = [
+ "opendhu-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "opendhu-native-hu"
+version = "0.1.0"
+dependencies = [
+ "android-auto",
+ "async-trait",
+ "image",
+ "log",
+ "opendhu-core",
+ "opendhu-native",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "opendhu-test"
+version = "0.1.0"
+dependencies = [
+ "opendhu-core",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "ureq",
+]
 
 [[package]]
 name = "orbclient"

@@ -10,7 +10,7 @@ use crate::{
 /// The handler for speech audio for the android auto protocol
 pub struct SpeechAudioChannelHandler {
     /// The phone's audio session, from its start message. Each buffer is acknowledged with it, or the
-    /// phone stops after ten unacknowledged buffers. (AutoLab addition.)
+    /// phone stops after ten unacknowledged buffers. (openDHU addition.)
     session: std::sync::Mutex<Option<i32>>,
 }
 
