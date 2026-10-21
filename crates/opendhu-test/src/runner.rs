@@ -640,6 +640,9 @@ fn screenshot(rel: &str, backend: &mut dyn HeadUnitBackend, artifacts: &Path) ->
     }
 }
 
+/// How long a tap with an expected result gets to take effect before it is sent again.
+const RETAP_AFTER: Duration = Duration::from_secs(5);
+
 static SCREEN_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn screen_text(
@@ -661,6 +664,8 @@ fn screen_text(
     let mut last = String::new();
     let mut pending: Option<(u32, u32)> = None;
     let mut frames = 0u32;
+    let mut taps: Vec<(u32, u32)> = Vec::new();
+    let mut last_tap_at: Option<Duration> = None;
     loop {
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while observing projected UI");
@@ -681,7 +686,7 @@ fn screen_text(
             && crate::screen::locate(&words, result).is_some()
         {
             return End::pass(format!(
-                "projected result {result:?} visible after tapping {text:?}; {}",
+                "projected result {result:?} visible after tapping {text:?} at {taps:?}; {}",
                 image.display()
             ));
         }
@@ -705,9 +710,10 @@ fn screen_text(
             cfg.clock.sleep(Duration::from_secs(1));
             continue;
         }
-        // The launcher grid animates in; a label seen mid-slide is not where the icon will be.
-        // Only tap once two consecutive frames agree on its position.
-        let found = if launcher && tap {
+        // Lists and the launcher grid animate in; text seen mid-slide is not where the row will be,
+        // and a tap there lands on a neighbour (AV opening DC). Only tap once two consecutive
+        // frames agree on its position.
+        let found = if tap {
             let steady = found
                 .zip(pending)
                 .is_some_and(|((x, y), (px, py))| x.abs_diff(px) <= 10 && y.abs_diff(py) <= 10);
@@ -720,10 +726,16 @@ fn screen_text(
             if tap {
                 // Never tap after the observation deadline; a final screenshot can still prove
                 // completion, but should not send another action that cannot be observed.
-                if until.is_none() || cfg.clock.now() < deadline {
+                // A re-tap while the first is still being handled lands on the next screen: the
+                // old frame lingers during the transition, so "Drive" tapped twice opened DC.
+                let settled =
+                    last_tap_at.is_none_or(|at| cfg.clock.now().saturating_sub(at) >= RETAP_AFTER);
+                if until.is_none() || (cfg.clock.now() < deadline && settled) {
                     if let Err(e) = backend.tap(x, y) {
                         return End::error(&e);
                     }
+                    last_tap_at = Some(cfg.clock.now());
+                    taps.push((x, y));
                     if until.is_none() {
                         return End::pass(format!(
                             "tapped projected text {text:?} at ({x}, {y}); assert on the result"
@@ -743,10 +755,10 @@ fn screen_text(
             last = seen;
         }
         let now = cfg.clock.now();
-        // The launcher tap needs the label confirmed in two consecutive frames. A slow host (or a
+        // A tap needs the text confirmed in two consecutive frames. A slow host (or a
         // stale first frame after the toggle tap) can use up the window before that happens, and
         // returning then would let the caller's next toggle tap close the grid it just found.
-        let confirming = launcher && tap && (frames < 2 || pending.is_some());
+        let confirming = tap && (frames < 2 || pending.is_some());
         if now >= deadline && !(confirming && now < deadline + Duration::from_secs(10)) {
             return End::timeout(format!(
                 "{}; last OCR: {last}; screenshot: {}",

@@ -51,6 +51,21 @@ fn normalized(text: &str) -> String {
         .to_lowercase()
 }
 
+/// Fold glyphs OCR confuses with a capital I (`l`, `1`, `|`) and collapse repeats, so
+/// `Robot UI` still matches when read as `Robot Ul` or `RobotUlI`.
+fn fold_ocr_confusables(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for c in text
+        .chars()
+        .map(|c| if matches!(c, 'l' | '1' | '|') { 'i' } else { c })
+    {
+        if !(c == 'i' && folded.ends_with('i')) {
+            folded.push(c);
+        }
+    }
+    folded
+}
+
 /// Locate a phrase's words, rather than the whole line (launcher icons can share a line).
 pub fn locate(words: &[Word], text: &str) -> Option<(u32, u32)> {
     let needle = normalized(text);
@@ -109,7 +124,7 @@ pub fn locate_launcher_label(
     top: u32,
     bottom: u32,
 ) -> Option<(u32, u32)> {
-    let expected = normalized(label);
+    let expected = fold_ocr_confusables(&normalized(label));
     let mut start = 0;
     while start < words.len() {
         let mut end = start + 1;
@@ -118,7 +133,7 @@ pub fn locate_launcher_label(
         }
         let line = &words[start..end];
         if line.iter().all(|word| word.top >= top && word.top < bottom) {
-            let shown = normalized(&text(line));
+            let shown = fold_ocr_confusables(&normalized(&text(line)));
             let truncated = shown
                 .strip_suffix("...")
                 .or_else(|| shown.strip_suffix('…'))
@@ -382,6 +397,20 @@ mod tests {
             locate_launcher_label(&words("RobotUI Stor"), "RobotUI Storybook", 70, 410).is_none()
         );
         assert!(locate_launcher_label(&words("RobotUI Stor..."), "Robot UI", 70, 410).is_none());
+    }
+
+    #[test]
+    fn launcher_labels_tolerate_capital_i_misread_as_lowercase_l() {
+        let words = |label: &str| {
+            parse_tsv(&format!("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t200\t138\t200\t20\t99\t{label}\n")).unwrap()
+        };
+        assert!(locate_launcher_label(&words("Robot Ul"), "Robot UI", 70, 410).is_some());
+        assert!(
+            locate_launcher_label(&words("RobotUlI Stor..."), "RobotUI Storybook", 70, 410)
+                .is_some()
+        );
+        assert!(locate_launcher_label(&words("RobotUlI Stor..."), "Robot UI", 70, 410).is_none());
+        assert!(locate_launcher_label(&words("Robot Ul"), "RobotUI Storybook", 70, 410).is_none());
     }
 
     #[test]
