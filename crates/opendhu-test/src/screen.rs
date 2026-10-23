@@ -139,7 +139,10 @@ pub fn locate_launcher_label(
                 .or_else(|| shown.strip_suffix('…'))
                 // Wallpaper behind USB launcher labels can merge the ellipsis dots.
                 .or_else(|| shown.strip_suffix(":.."))
-                .or_else(|| shown.strip_suffix(':'));
+                .or_else(|| shown.strip_suffix(':'))
+                // OCR can also keep only one or two of the three ellipsis dots.
+                .or_else(|| shown.strip_suffix(".."))
+                .or_else(|| shown.strip_suffix('.'));
             let matches = shown == expected
                 || truncated.is_some_and(|prefix| {
                     let prefix = prefix.trim_end();
@@ -415,8 +418,14 @@ mod tests {
 
     #[test]
     fn launcher_labels_accept_ellipsis_misread_as_colon_on_usb_wallpaper() {
-        // Observed in the Pixel 6 launcher: openDHU D… becomes D: or D:..
-        for (suffix, width, x) in [("D:", 21, 526), ("D:..", 37, 530), ("D...", 44, 532)] {
+        // Observed in the Pixel 6 launcher: openDHU D… becomes D:, D:.., D.. or D.
+        for (suffix, width, x) in [
+            ("D:", 21, 526),
+            ("D:..", 37, 530),
+            ("D...", 44, 532),
+            ("D..", 40, 531),
+            ("D.", 20, 526),
+        ] {
             let mut words = parse_tsv(&format!("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t13\t1\t1\t1\t963\t409\t148\t33\t92\topenDHU\n5\t1\t13\t1\t1\t2\t1123\t409\t{width}\t25\t90\t{suffix}\n")).unwrap();
             for word in &mut words {
                 word.left /= 2;
