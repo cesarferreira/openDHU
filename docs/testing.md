@@ -29,6 +29,24 @@ The phone emulator can remain headless: `environment.headless` controls the phon
 `aa test --headless` hides the head-unit viewer. `--validate` opens no window. Viewer diagnostics go
 to `head-unit-viewer.log` in the artifacts directory.
 
+### Watch a run in the terminal (`--tui`)
+
+Instead of a window, `--tui` shows the head unit and the test progress in the terminal you ran `aa test`
+in, which also works over SSH. The terminal must support the kitty graphics protocol (kitty, Ghostty,
+WezTerm). Install the viewer with `make install-tui`.
+
+```bash
+aa test e2e/production.yaml --tui
+aa test sample --tui          # a managed suite: the viewer follows each test's own session
+```
+
+The live picture is on top and the progress lines (`RUN`, `PASS`, `FAIL`) are underneath. Click and drag
+on the picture to touch the phone, as in `aa tui`. When the run ends the viewer waits for `q`, then the
+whole run is printed into your scrollback and `aa` exits with the run's status. Closing the viewer early
+does not stop the tests; their output continues in the shell. `--tui` cannot be combined with
+`--headless`, `--show-head-unit`, `--interactive` or `--json`, and `--list` and `--validate` do not open
+it. See [tui.md](tui.md) for keys, SSH behaviour and troubleshooting.
+
 ## Terminal progress and named suites
 
 Terminal output colors current work cyan, passes green, failures/errors red and skips yellow.
