@@ -10,8 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use opendhu_daemon::Client;
-
 use crate::Msg;
 
 /// After a failed or ended stream, wait this long before trying again.
@@ -24,6 +22,7 @@ pub struct Frame {
 
 struct Stream {
     size: (u32, u32),
+    generation: u64,
     stop: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
 }
@@ -51,7 +50,10 @@ impl Video {
     pub fn tick(&mut self, size: (u32, u32)) {
         if let Some(s) = &self.stream {
             let running = s.running.load(Ordering::SeqCst);
-            if s.size == size && (running || self.last_try.is_some_and(|t| t.elapsed() < RETRY)) {
+            if s.size == size
+                && s.generation == crate::session::generation()
+                && (running || self.last_try.is_some_and(|t| t.elapsed() < RETRY))
+            {
                 return;
             }
             s.stop.store(true, Ordering::SeqCst);
@@ -59,6 +61,7 @@ impl Video {
         self.last_try = Some(Instant::now());
         let stream = Stream {
             size,
+            generation: crate::session::generation(),
             stop: Arc::default(),
             running: Arc::new(AtomicBool::new(true)),
         };
@@ -101,7 +104,7 @@ fn run(
     tx: &Sender<Msg>,
     (width, height): (u32, u32),
 ) -> Result<(), String> {
-    let client = Client::connect().map_err(|e| e.to_string())?;
+    let client = crate::session::client().map_err(|e| e.to_string())?;
     let mut video = client.video().map_err(|e| e.to_string())?;
     let ffmpeg = opendhu_native::find_ffmpeg()
         .ok_or("ffmpeg not found; it decodes the live picture (macOS: brew install ffmpeg)")?;

@@ -4,6 +4,7 @@
 
 mod kitty;
 mod layout;
+mod session;
 mod term;
 mod video;
 
@@ -34,6 +35,8 @@ pub enum Msg {
     /// One line of the test run's progress, and the end of the run.
     Log(String),
     LogEnd,
+    /// The daemon to follow changed.
+    Runtime,
 }
 
 #[derive(Clone)]
@@ -104,6 +107,14 @@ fn spawn_log(tx: Sender<Msg>) -> Option<Log> {
     let pipe = unsafe { std::fs::File::from_raw_fd(fd) };
     thread::spawn(move || {
         for line in io::BufReader::new(pipe).lines().map_while(Result::ok) {
+            // `aa` marks control lines with a leading record separator: `\x1eruntime\t<dir>`.
+            if let Some(dir) = line.strip_prefix("\x1eruntime\t") {
+                let dir = (!dir.is_empty()).then(|| dir.into());
+                if session::set(dir) && tx.send(Msg::Runtime).is_err() {
+                    return;
+                }
+                continue;
+            }
             let clean = line
                 .replace('\t', "    ")
                 .chars()
@@ -155,7 +166,7 @@ fn styled(line: &str, cols: u32) -> String {
 fn spawn_status(tx: Sender<Msg>) {
     thread::spawn(move || {
         loop {
-            let status = Client::connect()
+            let status = session::client()
                 .and_then(|c| c.status())
                 .ok()
                 .and_then(|s| {
@@ -259,6 +270,13 @@ impl<'a> App<'a> {
                 }
             }
             Msg::Status(status) => self.status = status,
+            Msg::Runtime => {
+                // The old session's picture and status are someone else's now.
+                self.frame = None;
+                self.frames = 0;
+                self.status = None;
+                self.started = Instant::now();
+            }
             Msg::Log(line) => {
                 if let Some(log) = &mut self.log {
                     log.lines.push(line);
@@ -377,7 +395,7 @@ impl<'a> App<'a> {
     ) {
         let (tx, label) = (self.tx.clone(), label.to_string());
         thread::spawn(move || {
-            let note = match Client::connect().and_then(call) {
+            let note = match session::client().and_then(call) {
                 Ok(()) => label,
                 Err(e) => format!("{label}: {e}"),
             };

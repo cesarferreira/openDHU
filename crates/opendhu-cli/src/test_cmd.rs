@@ -274,6 +274,7 @@ pub(crate) fn run_with_emulators(
     });
     let dir = artifacts_dir(opts.artifacts_dir, needs_shots)?;
 
+    output.set_viewer_runtime(opts.runtime_dir.as_deref());
     progress(&output, "Connecting to the head-unit session...");
     let client = match &opts.runtime_dir {
         Some(dir) => opendhu_daemon::Client::connect_in(dir)?,

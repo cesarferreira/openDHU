@@ -207,6 +207,16 @@ impl Output {
         });
     }
 
+    /// Tell the viewer which daemon's runtime directory the current test uses (`None`: the default).
+    pub(crate) fn set_viewer_runtime(&self, dir: Option<&Path>) {
+        let mut guard = self.viewer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(viewer) = guard.as_mut() {
+            let dir = dir.map(|d| d.display().to_string()).unwrap_or_default();
+            // A broken pipe is handled by the next progress line; control lines are not progress.
+            let _ = writeln!(viewer.pipe, "\x1eruntime\t{dir}");
+        }
+    }
+
     /// Close the viewer's pipe and return what it showed, for `print` once the viewer has closed.
     pub(crate) fn detach_viewer(&self) -> Vec<String> {
         let viewer = self.viewer.lock().unwrap_or_else(|e| e.into_inner()).take();
