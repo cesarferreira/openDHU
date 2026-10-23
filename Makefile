@@ -11,6 +11,10 @@
 BIN := ~/.cargo/target/debug
 OPENDHU_BIN ?= aa
 SAMPLE_TEST_ARGS ?=
+INSTALL_PROFILE = $(if $(filter --debug,$(INSTALL_FLAGS)),debug,release)
+INSTALL_BUILD_FLAG = $(if $(filter --debug,$(INSTALL_FLAGS)),,--release)
+INSTALL_TARGET_DIR = $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),target)
+INSTALL_BIN_DIR = $(if $(CARGO_INSTALL_ROOT),$(CARGO_INSTALL_ROOT),$(if $(CARGO_HOME),$(CARGO_HOME),$(HOME)/.cargo))/bin
 
 # Default target: everything that needs no hardware.
 all: lint vendor-check build test validate-examples
@@ -99,13 +103,19 @@ install-debug: INSTALL_FLAGS := --debug
 install-debug: install
 
 install-cli:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-cli --locked --bins $(INSTALL_FLAGS) --force
+	CARGO_INCREMENTAL=0 cargo build --locked --bins -p opendhu-cli $(INSTALL_BUILD_FLAG)
+	@mkdir -p "$(INSTALL_BIN_DIR)"
+	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/aa" "$(INSTALL_BIN_DIR)/aa"
 
 install-native:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-native-hu --locked --bins $(INSTALL_FLAGS) --force
+	CARGO_INCREMENTAL=0 cargo build --locked --bins -p opendhu-native-hu $(INSTALL_BUILD_FLAG)
+	@mkdir -p "$(INSTALL_BIN_DIR)"
+	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/opendhu-native-hu" "$(INSTALL_BIN_DIR)/opendhu-native-hu"
 
 install-gui:
-	CARGO_INCREMENTAL=0 cargo install --path crates/opendhu-gui --locked --bins $(INSTALL_FLAGS) --force
+	CARGO_INCREMENTAL=0 cargo build --locked --bins -p opendhu-gui $(INSTALL_BUILD_FLAG)
+	@mkdir -p "$(INSTALL_BIN_DIR)"
+	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/opendhu-gui" "$(INSTALL_BIN_DIR)/opendhu-gui"
 
 clean:
 	cargo clean
