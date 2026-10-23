@@ -231,25 +231,6 @@ pub fn to_junit(report: &RunReport) -> String {
 
 /// A portable report with no network resources or scripts. Evidence paths stay relative to it.
 pub fn to_html(report: &RunReport, dir: &Path) -> String {
-    fn status(outcome: Outcome) -> &'static str {
-        match outcome {
-            Outcome::Passed => "passed",
-            Outcome::Failed => "failed",
-            Outcome::Error => "error",
-            Outcome::Skipped => "skipped",
-        }
-    }
-    fn url(path: &str) -> String {
-        let mut encoded = String::new();
-        for byte in path.bytes() {
-            if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
-                encoded.push(byte as char);
-            } else {
-                let _ = write!(encoded, "%{byte:02X}");
-            }
-        }
-        encoded
-    }
     fn screenshots(base: &Path, dir: &Path, found: &mut Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -298,7 +279,7 @@ pub fn to_html(report: &RunReport, dir: &Path) -> String {
         let _ = write!(html, "<p>Backend: {}</p>", xml_escape(&backend.name));
     }
     for (index, test) in report.tests.iter().enumerate() {
-        let state = status(test.outcome);
+        let state = outcome_class(test.outcome);
         let _ = write!(
             html,
             "<details{}><summary><span class=\"badge {state}\">{state}</span> {} <small>{}s</small></summary><div class=\"body\"><p class=\"source\">{}</p><a href=\"logs/{:02}-{}.log\">Test log</a>",
@@ -314,7 +295,7 @@ pub fn to_html(report: &RunReport, dir: &Path) -> String {
         }
         html.push_str("<div class=\"table\"><table><thead><tr><th>Step</th><th>Result</th><th>Duration</th><th>Details</th></tr></thead><tbody>");
         for step in &test.steps {
-            let state = status(step.outcome);
+            let state = outcome_class(step.outcome);
             let _ = write!(
                 html,
                 "<tr><td>{}</td><td class=\"{state}\">{state}</td><td>{}s</td><td class=\"detail\">{}</td></tr>",
@@ -346,6 +327,124 @@ pub fn to_html(report: &RunReport, dir: &Path) -> String {
     }
     html.push_str("<footer><a href=\"metadata.json\">Run metadata</a> · Keep this file with its artifact folder to preserve evidence links.</footer></main></body></html>\n");
     html
+}
+
+/// One suite's contribution to a consolidated `aa test all` report. `report` is `None` when the
+/// suite failed before running any test, in which case `error` says why.
+pub struct SuiteEntry<'a> {
+    pub name: &'a str,
+    pub exit_code: u8,
+    pub error: Option<&'a str>,
+    pub report: Option<&'a RunReport>,
+}
+
+/// One page for every suite in a run. Links are relative to the folder that holds the per-suite
+/// folders (`<suite>/results.html`, `<suite>/logs/NN-test.log`).
+pub fn to_combined_html(suites: &[SuiteEntry], interrupted: bool) -> String {
+    let mut total = Summary::default();
+    for report in suites.iter().filter_map(|s| s.report) {
+        let s = &report.metadata.summary;
+        total.tests += s.tests;
+        total.passed += s.passed;
+        total.failed += s.failed;
+        total.errors += s.errors;
+        total.skipped += s.skipped;
+    }
+    let failed_suites = suites.iter().filter(|s| s.exit_code != 0).count();
+    let mut html = String::from(include_str!("report_header.html"));
+    let _ = write!(
+        html,
+        "<header><p class=\"eyebrow\">openDHU · Test report</p><h1>{}</h1><p>{} suite{}, {} failed</p></header>",
+        if interrupted {
+            "Interrupted"
+        } else if failed_suites == 0 {
+            "Passed"
+        } else {
+            "Failed"
+        },
+        suites.len(),
+        if suites.len() == 1 { "" } else { "s" },
+        failed_suites
+    );
+    let _ = write!(
+        html,
+        "<section class=\"counts\" aria-label=\"Summary\"><strong>{} tests</strong><span class=\"passed\">{} passed</span><span class=\"failed\">{} failed</span><span class=\"error\">{} errors</span><span class=\"skipped\">{} skipped</span></section>",
+        total.tests, total.passed, total.failed, total.errors, total.skipped
+    );
+    for suite in suites {
+        let state = if suite.exit_code == 0 {
+            "passed"
+        } else {
+            "failed"
+        };
+        let name = xml_escape(suite.name);
+        let counts = suite.report.map_or(String::new(), |r| {
+            let s = &r.metadata.summary;
+            format!(
+                "{} tests · {} passed · {} failed · {} errors · {} skipped · {}s",
+                s.tests,
+                s.passed,
+                s.failed,
+                s.errors,
+                s.skipped,
+                secs(r.metadata.duration_ms)
+            )
+        });
+        let _ = write!(
+            html,
+            "<details{}><summary><span class=\"badge {state}\">{state}</span> {name} <small>{counts}</small></summary><div class=\"body\">",
+            if suite.exit_code == 0 { "" } else { " open" },
+        );
+        if let Some(error) = suite.error {
+            let _ = write!(html, "<p class=\"failed\">{}</p>", xml_escape(error));
+        }
+        if let Some(report) = suite.report {
+            let href = url(&format!("{}/results.html", suite.name));
+            let _ = write!(html, "<p><a href=\"{href}\">Full suite report</a></p>");
+            html.push_str("<div class=\"table\"><table><thead><tr><th>Test</th><th>Result</th><th>Duration</th><th>Details</th></tr></thead><tbody>");
+            for (index, test) in report.tests.iter().enumerate() {
+                let state = outcome_class(test.outcome);
+                let log = url(&format!(
+                    "{}/logs/{:02}-{}.log",
+                    suite.name,
+                    index + 1,
+                    slug(&test.name)
+                ));
+                let _ = write!(
+                    html,
+                    "<tr><td><a href=\"{log}\">{}</a></td><td class=\"{state}\">{state}</td><td>{}s</td><td class=\"detail\">{}</td></tr>",
+                    xml_escape(&test.name),
+                    secs(test.duration_ms),
+                    xml_escape(test.message.as_deref().unwrap_or(""))
+                );
+            }
+            html.push_str("</tbody></table></div>");
+        }
+        html.push_str("</div></details>");
+    }
+    html.push_str("<footer>Keep this file with its folder to preserve links to the suite reports and logs.</footer></main></body></html>\n");
+    html
+}
+
+fn outcome_class(outcome: Outcome) -> &'static str {
+    match outcome {
+        Outcome::Passed => "passed",
+        Outcome::Failed => "failed",
+        Outcome::Error => "error",
+        Outcome::Skipped => "skipped",
+    }
+}
+
+fn url(path: &str) -> String {
+    let mut encoded = String::new();
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 fn slug(name: &str) -> String {
@@ -627,5 +726,39 @@ mod tests {
         let log = step_log(&t);
         assert!(log.contains("FAIL  1. assert.status  nope"), "{log}");
         assert!(log.contains("Reason: why"));
+    }
+
+    #[test]
+    fn combined_report_lists_every_suite_and_links_its_logs() {
+        let ok = report(vec![test("Opens app", Outcome::Passed, 0, vec![])]);
+        let bad = report(vec![test("Starts run", Outcome::Failed, 7, vec![])]);
+        let html = to_combined_html(
+            &[
+                SuiteEntry {
+                    name: "drivers",
+                    exit_code: 0,
+                    error: None,
+                    report: Some(&ok),
+                },
+                SuiteEntry {
+                    name: "robotaxi",
+                    exit_code: 7,
+                    error: None,
+                    report: Some(&bad),
+                },
+                SuiteEntry {
+                    name: "models",
+                    exit_code: 1,
+                    error: Some("no APK"),
+                    report: None,
+                },
+            ],
+            false,
+        );
+        assert!(html.contains("<h1>Failed</h1>"));
+        assert!(html.contains("2 tests"));
+        assert!(html.contains("robotaxi/logs/01-starts-run.log"));
+        assert!(html.contains("drivers/results.html"));
+        assert!(html.contains("no APK"));
     }
 }

@@ -102,8 +102,11 @@ Each required AVD is reused across suites and stays locked for the run. Emulator
 runner stop after all suites finish or the run is interrupted; pre-existing emulators stay running.
 Backend services, app setup and projection sessions are still created and cleaned up per suite.
 With `--filter`, suites without matching tests are skipped; no matches anywhere is an argument error.
-Each suite gets its own directory under `build/test-results/all-<timestamp>/`, or under the directory
-given by `--artifacts-dir`. A failed suite does not prevent later suites from running; the command
+Each suite gets its own directory under `build/test-results/`, or under the directory given by
+`--artifacts-dir`, and one consolidated `results.html` (plus `results.json`) at the top lists every
+suite and test with links to the per-suite reports and logs. Without `--artifacts-dir` the folder holds
+only the latest run: it is cleared of earlier reports, logs, suite folders and old `run-*`/`all-*`
+folders first. An explicit `--artifacts-dir` is never cleared. A failed suite does not prevent later suites from running; the command
 returns the first nonzero exit code. Ctrl+C cleans up the active suite, skips the rest, and exits 130.
 With `--json`, progress stays on stderr and stdout contains one summary of suite outcomes and report
 locations. `all --validate` validates the selected YAML without requiring APKs or devices.
@@ -272,12 +275,12 @@ After cleanup, terminal output ends with one summary and the report and artifact
 ```text
 PASS  3 tests · 1 suite
 
-Report:     build/test-results/all-<run>/sample/results.html
-Artifacts:  build/test-results/all-<run>
+Report:     build/test-results/results.html
+Artifacts:  build/test-results
 ```
 
 Failures, errors and skipped tests appear in the summary only when nonzero. Failed tests include
-their names and log paths. Each suite gets a report link; HTML is preferred, falling back to JSON or
+their names and log paths. A run of several suites gets one report link; a single suite links its own report. HTML is preferred, falling back to JSON or
 JUnit when HTML was not requested. Paths within the current directory are shown relative to it.
 Use `aa test --verbose` (or `-v`) to list report files, metadata and per-test logs, and repeat full failure details.
 Terminal status labels use green for passes, red for failures and yellow for skips or interruption,
@@ -329,7 +332,7 @@ aa test e2e/suite.yaml --artifacts-dir build/test-results/run-001
 
 ```yaml
 version: 1
-artifactsDir: ../build/test-results  # optional; relative to this YAML, with a run-* folder per run
+artifactsDir: ../build/test-results  # optional; relative to this YAML, replaced on each run
 environment:
   emulator: medium_phone
   headless: true
@@ -422,9 +425,9 @@ legible text and should not be used to assert map pixels, clocks, or animation t
 Each suite restarts Android Auto on its dedicated AVD before starting the head-unit server, to
 discard projection threads restored by Quick Boot.
 
-Suites default to fresh `build/test-results/run-*` directories and HTML, JSON and JUnit reports.
+Suites default to `build/test-results`, replaced on each run, with HTML, JSON and JUnit reports.
 Set top-level `artifactsDir: ../build/test-results` in a suite YAML to choose its base directory
-relative to that YAML file. Each run gets a fresh `run-*` subdirectory there. An explicit
+relative to that YAML file. Each run replaces the contents there. An explicit
 `--artifacts-dir` (or configured `test.artifacts_dir`) overrides this with the exact directory supplied.
 The included Android sample uses this setting to keep reports in `samples/android/build/test-results/`.
 

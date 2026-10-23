@@ -448,6 +448,7 @@ pub(crate) fn run_with_emulators(
         }
     }
 
+    output.record_run(&report, &dir);
     if opts.json && !opts.batch {
         println!("{}", opendhu_test::report::to_json(&report));
     } else if !opts.json {
@@ -512,6 +513,125 @@ fn list_tests(opts: &Options) -> Result<u8> {
     Ok(0)
 }
 
+/// Removes what an earlier default-folder run left behind: its reports, logs and per-suite folders,
+/// plus the `run-*` and `all-*` folders older versions created. Nothing else in the folder is touched.
+pub(crate) fn reset_artifacts(dir: &Path, suites: &[&str]) {
+    const OWNED: [&str; 10] = [
+        "results.html",
+        "results.json",
+        "results.xml",
+        "metadata.json",
+        "suite.json",
+        "head-unit.log",
+        "emulator.log",
+        "logcat.txt",
+        "logs",
+        "screenshots",
+    ];
+    let timestamped = |name: &str| {
+        ["run-", "all-"].iter().any(|prefix| {
+            name.strip_prefix(prefix)
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if OWNED.contains(&&*name) || suites.contains(&&*name) || timestamped(&name) {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+        }
+    }
+}
+
+/// One `results.html` and `results.json` next to the per-suite folders, so a run reads as one report.
+fn write_combined(
+    opts: &Options,
+    artifacts: &Path,
+    results: &[serde_json::Value],
+    interrupted: bool,
+) {
+    let runs = opts.output.take_runs();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let abs = |p: &Path| {
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            cwd.join(p)
+        }
+    };
+    let entries: Vec<_> = results
+        .iter()
+        .map(|r| {
+            let name = r["name"].as_str().unwrap_or_default();
+            let dir = abs(&artifacts.join(name));
+            let report = runs
+                .iter()
+                .find(|(d, _)| abs(d) == dir)
+                .map(|(_, report)| report);
+            (
+                name,
+                r["exitCode"].as_u64().unwrap_or(1) as u8,
+                r["error"].as_str(),
+                report,
+            )
+        })
+        .collect();
+    let suites: Vec<_> = entries
+        .iter()
+        .map(
+            |&(name, exit_code, error, report)| opendhu_test::report::SuiteEntry {
+                name,
+                exit_code,
+                error,
+                report,
+            },
+        )
+        .collect();
+    let formats = if opts.report.is_empty() {
+        vec![ReportFormat::Json, ReportFormat::Html]
+    } else {
+        opts.report.clone()
+    };
+    let abs_dir = abs(artifacts);
+    let mut html = None;
+    for (format, file) in [
+        (ReportFormat::Html, "results.html"),
+        (ReportFormat::Json, "results.json"),
+    ] {
+        let path = abs_dir.join(file);
+        if !formats.contains(&format) {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        let body = match format {
+            ReportFormat::Html => opendhu_test::report::to_combined_html(&suites, interrupted),
+            _ => serde_json::to_string_pretty(&serde_json::json!({
+                "suites": results,
+                "reports": suites.iter().map(|s| serde_json::json!({"name": s.name, "report": s.report})).collect::<Vec<_>>(),
+                "interrupted": interrupted,
+            }))
+            .unwrap_or_default(),
+        };
+        if std::fs::create_dir_all(&abs_dir).is_ok()
+            && std::fs::write(&path, body).is_ok()
+            && format == ReportFormat::Html
+        {
+            html = Some(path);
+        }
+    }
+    if let Some(path) = html {
+        opts.output.combined_report(path);
+    }
+}
+
 fn run_all(opts: Options) -> Result<u8> {
     let suites = crate::test_selection::registered()?;
     if suites.is_empty() {
@@ -563,14 +683,16 @@ fn run_all(opts: Options) -> Result<u8> {
     }
     let cancel = Arc::new(AtomicBool::new(false));
     install_interrupt_handler(&cancel)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let artifacts = opts
-        .artifacts_dir
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("build/test-results").join(format!("all-{nonce}")));
+    // The default folder holds only the latest run; an explicit --artifacts-dir is never cleared.
+    let artifacts = match opts.artifacts_dir.clone() {
+        Some(dir) => dir,
+        None => {
+            let dir = PathBuf::from("build/test-results");
+            let names: Vec<&str> = selected.iter().map(|(s, _)| s.name.as_str()).collect();
+            reset_artifacts(&dir, &names);
+            dir
+        }
+    };
     opts.output.artifacts(&artifacts);
     let mut results = Vec::new();
     let mut exit_code = 0;
@@ -610,6 +732,7 @@ fn run_all(opts: Options) -> Result<u8> {
     if interrupted {
         exit_code = INTERRUPTED;
     }
+    write_combined(&opts, &artifacts, &results, interrupted);
     if opts.json {
         println!(
             "{}",
@@ -619,4 +742,30 @@ fn run_all(opts: Options) -> Result<u8> {
         progress(&opts.output, "Interrupted; remaining suites were not run.");
     }
     Ok(exit_code)
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::reset_artifacts;
+
+    #[test]
+    fn reset_clears_only_what_runs_own() {
+        let dir = std::env::temp_dir().join(format!("aa-reset-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for sub in ["logs", "robotaxi", "run-123", "all-456", "keep-me"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        for file in ["results.html", "notes.txt"] {
+            std::fs::write(dir.join(file), "x").unwrap();
+        }
+        reset_artifacts(&dir, &["robotaxi"]);
+        assert!(!dir.join("logs").exists());
+        assert!(!dir.join("robotaxi").exists());
+        assert!(!dir.join("run-123").exists());
+        assert!(!dir.join("all-456").exists());
+        assert!(!dir.join("results.html").exists());
+        assert!(dir.join("keep-me").exists());
+        assert!(dir.join("notes.txt").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

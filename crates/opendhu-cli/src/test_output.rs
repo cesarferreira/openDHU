@@ -15,6 +15,7 @@ struct Footer {
     failed_suites: usize,
     artifacts: Option<PathBuf>,
     reports: Vec<PathBuf>,
+    combined: Option<PathBuf>,
     written: Vec<PathBuf>,
     failures: Vec<(String, PathBuf, String)>,
 }
@@ -48,6 +49,7 @@ pub(crate) struct Output {
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
     footer: Mutex<Footer>,
+    runs: Mutex<Vec<(PathBuf, RunReport)>>,
     viewer: Mutex<Option<Viewer>>,
 }
 
@@ -189,6 +191,7 @@ impl Output {
             shared,
             worker,
             footer: Mutex::new(Footer::default()),
+            runs: Mutex::new(Vec::new()),
             viewer: Mutex::new(None),
         }
     }
@@ -247,6 +250,26 @@ impl Output {
         let mut footer = self.footer.lock().unwrap_or_else(|e| e.into_inner());
         footer.suites += 1;
         footer.failed_suites += usize::from(code != 0);
+    }
+
+    /// Keeps each suite's report for the consolidated one, whatever the output mode.
+    pub(crate) fn record_run(&self, report: &RunReport, dir: &Path) {
+        self.runs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((dir.into(), report.clone()));
+    }
+
+    pub(crate) fn take_runs(&self) -> Vec<(PathBuf, RunReport)> {
+        std::mem::take(&mut *self.runs.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Replaces the per-suite report lines with the one report that covers every suite.
+    pub(crate) fn combined_report(&self, path: PathBuf) {
+        self.footer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .combined = Some(path);
     }
 
     pub(crate) fn report(&self, report: &RunReport, dir: &Path, written: Vec<PathBuf>) {
@@ -337,8 +360,13 @@ impl Output {
                 self.line(details.trim_end());
             }
         }
-        for report in &footer.reports {
-            self.line(format!("Report:     {}", display_path(report)));
+        match &footer.combined {
+            Some(report) => self.line(format!("Report:     {}", display_path(report))),
+            None => {
+                for report in &footer.reports {
+                    self.line(format!("Report:     {}", display_path(report)));
+                }
+            }
         }
         if let Some(dir) = &footer.artifacts {
             self.line(format!("Artifacts:  {}", display_path(dir)));

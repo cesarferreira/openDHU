@@ -660,12 +660,9 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     }
 }
 
-fn artifact_path(explicit: Option<PathBuf>, suite_base: Option<PathBuf>, nonce: u128) -> PathBuf {
-    explicit.unwrap_or_else(|| {
-        suite_base
-            .unwrap_or_else(|| PathBuf::from("build/test-results"))
-            .join(format!("run-{nonce}"))
-    })
+/// Without `--artifacts-dir` a suite reports into one fixed folder that each run replaces.
+fn artifact_path(explicit: Option<PathBuf>, suite_base: Option<PathBuf>) -> PathBuf {
+    explicit.unwrap_or_else(|| suite_base.unwrap_or_else(|| PathBuf::from("build/test-results")))
 }
 
 fn run_prepared(
@@ -691,16 +688,16 @@ fn run_prepared(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let artifacts = artifact_path(
-        opts.artifacts_dir.take(),
-        suite.artifacts_dir.clone(),
-        nonce,
-    );
+    let default_dir = opts.artifacts_dir.is_none();
+    let artifacts = artifact_path(opts.artifacts_dir.take(), suite.artifacts_dir.clone());
     let artifacts = if artifacts.is_absolute() {
         artifacts
     } else {
         cwd.join(artifacts)
     };
+    if default_dir {
+        test_cmd::reset_artifacts(&artifacts, &[]);
+    }
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
     output.artifacts(&artifacts);
     let adb = adb_program();
@@ -1198,17 +1195,14 @@ mod tests {
         let (suite, _) = load(&path).unwrap();
         let base = path.parent().unwrap().join("../build/test-results");
         assert_eq!(suite.artifacts_dir, Some(base.clone()));
+        assert_eq!(artifact_path(None, suite.artifacts_dir.clone()), base);
         assert_eq!(
-            artifact_path(None, suite.artifacts_dir.clone(), 42),
-            base.join("run-42")
-        );
-        assert_eq!(
-            artifact_path(Some("custom".into()), suite.artifacts_dir, 42),
+            artifact_path(Some("custom".into()), suite.artifacts_dir),
             PathBuf::from("custom")
         );
         assert_eq!(
-            artifact_path(None, None, 42),
-            PathBuf::from("build/test-results/run-42")
+            artifact_path(None, None),
+            PathBuf::from("build/test-results")
         );
     }
 }
