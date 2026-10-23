@@ -159,6 +159,10 @@ enum Command {
         /// Hide the head-unit window while running tests
         #[arg(long)]
         headless: bool,
+        /// Show the head unit and the test progress in this terminal (kitty graphics; requires
+        /// opendhu-tui)
+        #[arg(long, conflicts_with_all = ["headless", "show_head_unit", "interactive"])]
+        tui: bool,
         /// Animate terminal progress (enabled by default)
         #[arg(long, conflicts_with = "no_interactive")]
         interactive: bool,
@@ -393,12 +397,31 @@ fn run(cli: Cli) -> Result<u8> {
             no_phone_setup,
             show_head_unit,
             headless,
+            tui,
             interactive,
             no_interactive,
             verbose,
             filter,
         } => {
             let cfg = load()?;
+            if tui && json {
+                return Err(Error::InvalidArgs(
+                    "--tui draws on the terminal and cannot be combined with --json".into(),
+                ));
+            }
+            let output = std::sync::Arc::new(test_output::Output::new(
+                json,
+                !tui && (interactive || !no_interactive),
+            ));
+            // Kept for the whole run: it ends the viewer's feed and waits for it to close on drop.
+            let _tui = if tui && !list && !validate {
+                Some(viewer::TuiViewer::start(
+                    None,
+                    std::sync::Arc::clone(&output),
+                )?)
+            } else {
+                None
+            };
             test_cmd::run(test_cmd::Options {
                 paths,
                 list,
@@ -411,11 +434,8 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
-                show_head_unit: show_head_unit || !headless,
-                output: std::sync::Arc::new(test_output::Output::new(
-                    json,
-                    interactive || !no_interactive,
-                )),
+                show_head_unit: !tui && (show_head_unit || !headless),
+                output,
                 filter,
                 usb,
                 validate,

@@ -55,6 +55,10 @@ Run individual YAML tests against a session you started with `aa start`:
 aa test examples/native-phone-confirms.yaml
 ```
 
+Add `--tui` to watch the run in your terminal instead of a window: the live head unit on top and the test
+progress below (kitty graphics: kitty, Ghostty, WezTerm). When the run ends the viewer waits for `q`,
+then the full output is printed into your scrollback. Closing it early lets the test carry on in the shell.
+
 ```yaml
 name: Restore video focus
 backend: native

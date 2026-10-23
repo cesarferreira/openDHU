@@ -20,10 +20,13 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn new(term: Size, screen: (u32, u32)) -> Self {
+    pub fn new(term: Size, screen: (u32, u32), log_rows: u32) -> Self {
         let (cw, ch) = term.cell();
         let area_w = term.cols * cw;
-        let area_h = term.rows.saturating_sub(HEADER_ROWS + FOOTER_ROWS) * ch;
+        let area_h = term
+            .rows
+            .saturating_sub(HEADER_ROWS + FOOTER_ROWS + log_rows)
+            * ch;
         let (sw, sh) = (screen.0.max(1), screen.1.max(1));
         // Compare area_w/sw with area_h/sh without division, so no precision is lost.
         let (w, h) = if u64::from(area_w) * u64::from(sh) <= u64::from(area_h) * u64::from(sw) {
@@ -102,6 +105,11 @@ impl Layout {
     }
 }
 
+/// How many rows of the terminal go to the log pane under the picture: a third, within reason.
+pub fn log_rows(term: Size) -> u32 {
+    (term.rows.saturating_sub(2) / 3).clamp(3, 14)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +126,7 @@ mod tests {
     #[test]
     fn a_wide_terminal_is_limited_by_height_and_centred() {
         // 200x50 cells = 2000x1000 px; the picture area is 2000x960, so 800x480 scales to 1600x960.
-        let l = Layout::new(term(200, 50), (800, 480));
+        let l = Layout::new(term(200, 50), (800, 480), 0);
         assert_eq!(l.image, (1600, 960));
         assert_eq!(l.decode_size(), (960, 576));
         assert_eq!(l.origin, (200, 20));
@@ -134,8 +142,16 @@ mod tests {
     }
 
     #[test]
+    fn a_log_pane_takes_rows_from_the_picture() {
+        let with = Layout::new(term(200, 50), (800, 480), 10);
+        // 38 rows (760 px) remain: height limits, 760 px tall is 1266 wide, cut to whole cells.
+        assert_eq!(with.image, (1260, 760));
+        assert_eq!(with.placement().row, 1);
+    }
+
+    #[test]
     fn a_narrow_terminal_is_limited_by_width() {
-        let l = Layout::new(term(40, 40), (800, 480));
+        let l = Layout::new(term(40, 40), (800, 480), 0);
         assert_eq!(l.image, (400, 240));
         assert_eq!(l.origin.0, 0);
         assert_eq!(l.origin.1, 20 + (38 * 20 - 240) / 2);
@@ -162,7 +178,7 @@ mod tests {
 
     #[test]
     fn terminal_pixels_map_to_phone_pixels() {
-        let l = Layout::new(term(200, 50), (800, 480));
+        let l = Layout::new(term(200, 50), (800, 480), 0);
         assert_eq!(l.screen_at(l.origin, false), Some((0, 0)));
         assert_eq!(
             l.screen_at((l.origin.0 + 800, l.origin.1 + 480), false),
@@ -175,7 +191,7 @@ mod tests {
 
     #[test]
     fn cell_mouse_reports_land_in_the_middle_of_the_cell() {
-        let l = Layout::new(term(200, 50), (800, 480));
+        let l = Layout::new(term(200, 50), (800, 480), 0);
         assert_eq!(l.mouse_pixel((1, 1), false), (5, 10));
         assert_eq!(l.mouse_pixel((1, 1), true), (0, 0));
     }

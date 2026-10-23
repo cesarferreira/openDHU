@@ -48,6 +48,14 @@ pub(crate) struct Output {
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
     footer: Mutex<Footer>,
+    viewer: Mutex<Option<Viewer>>,
+}
+
+/// Where progress goes while the terminal viewer owns the screen: its pipe, plus every line sent so
+/// the run can be replayed into the shell's scrollback once the viewer closes.
+struct Viewer {
+    pipe: std::fs::File,
+    transcript: Vec<String>,
 }
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -181,7 +189,40 @@ impl Output {
             shared,
             worker,
             footer: Mutex::new(Footer::default()),
+            viewer: Mutex::new(None),
         }
+    }
+
+    /// Send progress to the terminal viewer's `pipe` instead of stdout until `detach_viewer`.
+    pub(crate) fn attach_viewer(&self, pipe: std::fs::File) {
+        // The viewer owns the screen now; a spinner left on it would only be drawn over.
+        self.shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .active = None;
+        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Viewer {
+            pipe,
+            transcript: Vec::new(),
+        });
+    }
+
+    /// Close the viewer's pipe and return what it showed, for `print` once the viewer has closed.
+    pub(crate) fn detach_viewer(&self) -> Vec<String> {
+        let viewer = self.viewer.lock().unwrap_or_else(|e| e.into_inner()).take();
+        viewer.map_or_else(Vec::new, |v| v.transcript)
+    }
+
+    pub(crate) fn print(&self, lines: &[String]) {
+        let mut out: Box<dyn Write> = if self.json {
+            Box::new(std::io::stderr().lock())
+        } else {
+            Box::new(std::io::stdout().lock())
+        };
+        for line in lines {
+            let _ = writeln!(out, "{}", styled(line, self.shared.color));
+        }
+        let _ = out.flush();
     }
 
     pub(crate) fn artifacts(&self, path: &Path) {
@@ -299,8 +340,32 @@ impl Output {
         }
     }
 
+    /// True when the viewer took the message. If the viewer has gone (the user closed it), its
+    /// transcript is printed and progress goes back to stdout.
+    fn send_to_viewer(&self, message: &str) -> bool {
+        let mut guard = self.viewer.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(viewer) = guard.as_mut() else {
+            return false;
+        };
+        let lines: Vec<String> = message.split('\n').map(str::to_string).collect();
+        let sent = lines
+            .iter()
+            .try_for_each(|l| writeln!(viewer.pipe, "{l}"))
+            .is_ok();
+        if sent {
+            viewer.transcript.extend(lines);
+            return true;
+        }
+        let gone = guard.take().expect("checked above");
+        self.print(&gone.transcript);
+        false
+    }
+
     pub(crate) fn line(&self, message: impl std::fmt::Display) {
         let message = message.to_string();
+        if self.send_to_viewer(&message) {
+            return;
+        }
         let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if self.interactive && state.active.take().is_some() {
             let mut out = std::io::stdout().lock();

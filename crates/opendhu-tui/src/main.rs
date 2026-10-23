@@ -31,6 +31,9 @@ pub enum Msg {
     Frame,
     Status(Option<Status>),
     Note(String),
+    /// One line of the test run's progress, and the end of the run.
+    Log(String),
+    LogEnd,
 }
 
 #[derive(Clone)]
@@ -55,7 +58,8 @@ fn run() -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     spawn_input(tx.clone());
     spawn_status(tx.clone());
-    let mut app = App::new(tx, &terminal);
+    let log = spawn_log(tx.clone());
+    let mut app = App::new(tx, &terminal, log);
     let mut out = io::stdout();
     loop {
         match rx.recv_timeout(Duration::from_millis(30)) {
@@ -87,6 +91,65 @@ fn spawn_input(tx: Sender<Msg>) {
             }
         }
     });
+}
+
+/// `aa test --tui` hands over the run's progress as lines on the descriptor named by
+/// `OPENDHU_TUI_LOG_FD`. Without it there is no log pane.
+fn spawn_log(tx: Sender<Msg>) -> Option<Log> {
+    use std::io::BufRead;
+    use std::os::fd::FromRawFd;
+
+    let fd: i32 = std::env::var("OPENDHU_TUI_LOG_FD").ok()?.parse().ok()?;
+    // SAFETY: the parent passed this descriptor to this process alone, for this purpose.
+    let pipe = unsafe { std::fs::File::from_raw_fd(fd) };
+    thread::spawn(move || {
+        for line in io::BufReader::new(pipe).lines().map_while(Result::ok) {
+            let clean = line
+                .replace('\t', "    ")
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect();
+            if tx.send(Msg::Log(clean)).is_err() {
+                return;
+            }
+        }
+        let _ = tx.send(Msg::LogEnd);
+    });
+    Some(Log::default())
+}
+
+/// The run's progress so far.
+#[derive(Default)]
+struct Log {
+    lines: Vec<String>,
+    ended: bool,
+}
+
+/// Lines kept; older ones are dropped, they are still in the shell's scrollback afterwards.
+const LOG_KEEP: usize = 2000;
+
+/// Colours for the labels the test runner prints, as in its own terminal output.
+fn styled(line: &str, cols: u32) -> String {
+    let text = fit(line, cols);
+    let body = text.trim_start();
+    let code = if body.starts_with("PASS ") || body == "Result: PASSED" {
+        "32"
+    } else if body.starts_with("FAIL ")
+        || body.starts_with("ERROR ")
+        || body == "Result: FAILED"
+        || body == "Result: ERROR"
+    {
+        "31"
+    } else if body.starts_with("SKIP ") || body.starts_with("INTERRUPTED ") {
+        "33"
+    } else if body.starts_with("RUN ") {
+        "36"
+    } else if body.starts_with("Test:") || body.starts_with("Suite:") {
+        "1;36"
+    } else {
+        return text;
+    };
+    format!("\x1b[{code}m{text}\x1b[0m")
 }
 
 fn spawn_status(tx: Sender<Msg>) {
@@ -130,7 +193,8 @@ struct App<'a> {
     pixel_mouse: bool,
     press: Option<(Instant, (u32, u32))>,
     /// What is on screen now, so a change redraws and an unchanged tick draws nothing.
-    drawn: Option<(term::Size, Layout, String)>,
+    drawn: Option<(term::Size, Layout, Chrome)>,
+    log: Option<Log>,
     frame: Option<video::Frame>,
     frame_dirty: bool,
     last_draw: Option<Instant>,
@@ -139,7 +203,7 @@ struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    fn new(tx: Sender<Msg>, terminal: &'a Terminal) -> Self {
+    fn new(tx: Sender<Msg>, terminal: &'a Terminal, log: Option<Log>) -> Self {
         Self {
             video: video::Video::new(tx.clone()),
             tx,
@@ -149,6 +213,7 @@ impl<'a> App<'a> {
             pixel_mouse: false,
             press: None,
             drawn: None,
+            log,
             frame: None,
             frame_dirty: false,
             last_draw: None,
@@ -168,7 +233,19 @@ impl<'a> App<'a> {
     }
 
     fn layout(&self) -> Layout {
-        Layout::new(term::size(), self.screen())
+        self.layout_in(term::size())
+    }
+
+    fn log_rows(&self, size: term::Size) -> u32 {
+        if self.log.is_some() {
+            layout::log_rows(size)
+        } else {
+            0
+        }
+    }
+
+    fn layout_in(&self, size: term::Size) -> Layout {
+        Layout::new(size, self.screen(), self.log_rows(size))
     }
 
     /// Returns true to quit.
@@ -182,6 +259,19 @@ impl<'a> App<'a> {
                 }
             }
             Msg::Status(status) => self.status = status,
+            Msg::Log(line) => {
+                if let Some(log) = &mut self.log {
+                    log.lines.push(line);
+                    if log.lines.len() > LOG_KEEP {
+                        log.lines.drain(..LOG_KEEP / 2);
+                    }
+                }
+            }
+            Msg::LogEnd => {
+                if let Some(log) = &mut self.log {
+                    log.ended = true;
+                }
+            }
             Msg::Note(text) => self.note = Some((text, Instant::now())),
             Msg::Input(event) => return self.input(event),
         }
@@ -304,10 +394,10 @@ impl<'a> App<'a> {
             self.note = None;
         }
         let size = term::size();
-        let layout = Layout::new(size, self.screen());
+        let layout = self.layout_in(size);
         self.video.tick(layout.decode_size());
 
-        let chrome = self.chrome();
+        let chrome = self.chrome(size);
         let changed = self.drawn.as_ref().map(|(s, l, _)| (*s, *l)) != Some((size, layout));
         if changed {
             out.write_all(b"\x1b[2J")?;
@@ -315,16 +405,17 @@ impl<'a> App<'a> {
         }
         if changed || self.drawn.as_ref().is_none_or(|(_, _, c)| *c != chrome) {
             let rows = size.rows.max(1);
-            write!(
-                out,
-                "\x1b[1;1H\x1b[2K{}",
-                fit(chrome_header(&chrome), size.cols)
-            )?;
+            write!(out, "\x1b[1;1H\x1b[2K{}", fit(&chrome.header, size.cols))?;
             write!(
                 out,
                 "\x1b[{rows};1H\x1b[2K{}",
-                fit(chrome_footer(&chrome), size.cols)
+                fit(&chrome.footer, size.cols)
             )?;
+            let pane = self.log_rows(size) as usize;
+            for (i, line) in chrome.log.iter().enumerate() {
+                let row = rows as usize - pane + i;
+                write!(out, "\x1b[{row};1H\x1b[2K{}", styled(line, size.cols))?;
+            }
             out.flush()?;
         }
         // At most ~30 pictures a second: more only queues bytes the terminal must parse.
@@ -343,8 +434,8 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// The header and footer text, joined by a newline so a change to either is one comparison.
-    fn chrome(&self) -> String {
+    /// Everything drawn around the picture, so one comparison says whether it needs redrawing.
+    fn chrome(&self, size: term::Size) -> Chrome {
         let link = self.status.as_ref().map_or_else(
             || "no session; start one with `aa start`".to_string(),
             |s| s.summary.clone(),
@@ -362,17 +453,33 @@ impl<'a> App<'a> {
         } else {
             "cell mouse"
         };
-        let footer = self.note.as_ref().map_or(HINTS, |(n, _)| n.as_str());
-        format!(" openDHU · {link} · {video} · {pointer}\n {footer}")
+        let finished = self.log.as_ref().is_some_and(|l| l.ended);
+        let footer = match (&self.note, finished) {
+            (Some((n, _)), _) => n.as_str(),
+            (None, true) => "test run finished; press q to close",
+            (None, false) => HINTS,
+        };
+        let pane = self.log_rows(size) as usize;
+        let log = self.log.as_ref().map_or_else(Vec::new, |l| {
+            let mut tail = l.lines.iter().rev().take(pane).cloned().collect::<Vec<_>>();
+            tail.reverse();
+            // Pad so the pane always rewrites every row it owns.
+            tail.resize(pane, String::new());
+            tail
+        });
+        Chrome {
+            header: format!(" openDHU · {link} · {video} · {pointer}"),
+            footer: format!(" {footer}"),
+            log,
+        }
     }
 }
 
-fn chrome_header(chrome: &str) -> &str {
-    chrome.split_once('\n').map_or(chrome, |(h, _)| h)
-}
-
-fn chrome_footer(chrome: &str) -> &str {
-    chrome.split_once('\n').map_or("", |(_, f)| f)
+#[derive(PartialEq)]
+struct Chrome {
+    header: String,
+    footer: String,
+    log: Vec<String>,
 }
 
 /// `text` cut to `cols` characters.
@@ -414,7 +521,12 @@ mod tests {
     #[test]
     fn header_and_footer_are_cut_to_the_terminal_width() {
         assert_eq!(fit("héllo wörld", 5), "héllo");
-        assert_eq!(chrome_header("a\nb"), "a");
-        assert_eq!(chrome_footer("a\nb"), "b");
+    }
+
+    #[test]
+    fn runner_labels_are_coloured_and_cut_to_width() {
+        assert_eq!(styled("  PASS tap", 80), "\x1b[32m  PASS tap\x1b[0m");
+        assert_eq!(styled("FAIL xyz", 6), "\x1b[31mFAIL x\x1b[0m");
+        assert_eq!(styled("plain text", 5), "plain");
     }
 }

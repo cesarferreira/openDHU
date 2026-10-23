@@ -50,3 +50,61 @@ impl Drop for Viewer {
         let _ = self.0.wait();
     }
 }
+
+/// The terminal viewer for `aa test --tui`: `opendhu-tui` on this terminal, fed the run's progress
+/// through a pipe. Dropping it ends the feed, waits for the user to close the viewer, then prints
+/// the run into the scrollback.
+pub(crate) struct TuiViewer {
+    child: Child,
+    output: std::sync::Arc<crate::test_output::Output>,
+}
+
+impl TuiViewer {
+    pub(crate) fn start(
+        runtime: Option<&Path>,
+        output: std::sync::Arc<crate::test_output::Output>,
+    ) -> Result<Self> {
+        use std::os::fd::FromRawFd;
+
+        let mut fds = [0i32; 2];
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            return Err(Error::Other(std::io::Error::last_os_error().to_string()));
+        }
+        let (read, write) = (fds[0], fds[1]);
+        // SAFETY: `write` is a fresh descriptor nothing else owns.
+        let pipe = unsafe { std::fs::File::from_raw_fd(write) };
+        let mut command = Command::new(sibling("opendhu-tui"));
+        command.env("OPENDHU_TUI_LOG_FD", read.to_string());
+        if let Some(runtime) = runtime {
+            command.env("OPENDHU_RUNTIME_DIR", runtime);
+        }
+        // Only the viewer inherits the read end; the write end stays here so closing it is the
+        // viewer's end-of-run signal.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(read, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let spawned = command.spawn();
+        unsafe { libc::close(read) };
+        let child = spawned.map_err(|e| {
+            Error::BackendUnavailable(format!(
+                "cannot show the head unit in the terminal: {e}; install it with `make install-tui`"
+            ))
+        })?;
+        output.attach_viewer(pipe);
+        Ok(Self { child, output })
+    }
+}
+
+impl Drop for TuiViewer {
+    fn drop(&mut self) {
+        // Closing the pipe tells the viewer the run is over; it stays until the user closes it.
+        let transcript = self.output.detach_viewer();
+        let _ = self.child.wait();
+        self.output.print(&transcript);
+    }
+}
