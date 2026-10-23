@@ -1,11 +1,9 @@
-//! The kitty graphics protocol: one RGB frame as a single image that each new frame replaces.
+//! The kitty graphics protocol: each RGB frame is a new image, shown before the last one is removed.
 
 use std::io::{self, Write};
 
 /// The protocol caps each escape's payload at 4096 base64 bytes.
 const CHUNK: usize = 4096;
-/// The image id every frame reuses, so the terminal keeps one image rather than a pile of them.
-const IMAGE_ID: u32 = 1;
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -36,41 +34,58 @@ pub struct Placement {
     pub rows: u32,
 }
 
-/// Draw `rgb` (`width` x `height`, 3 bytes a pixel), scaled to the placement's cell box. Cursor movement is off, so
-/// the picture never scrolls the screen.
-pub fn draw(
-    out: &mut impl Write,
-    rgb: &[u8],
-    (width, height): (u32, u32),
-    at: Placement,
-) -> io::Result<()> {
-    write!(out, "\x1b[?2026h\x1b[{};{}H", at.row + 1, at.col + 1)?;
-    let data = base64(rgb);
-    let mut chunks = data.chunks(CHUNK).peekable();
-    let mut first = true;
-    while let Some(chunk) = chunks.next() {
-        let more = u8::from(chunks.peek().is_some());
-        if first {
-            write!(
-                out,
-                "\x1b_Ga=T,f=24,s={width},v={height},i={IMAGE_ID},p=1,c={},r={},C=1,q=2,m={more};",
-                at.cols, at.rows
-            )?;
-            first = false;
-        } else {
-            write!(out, "\x1b_Gm={more};")?;
-        }
-        out.write_all(chunk)?;
-        out.write_all(b"\x1b\\")?;
-    }
-    out.write_all(b"\x1b[?2026l")?;
-    out.flush()
+/// The picture on screen. Every frame gets a fresh image id and the previous frame is deleted once
+/// the new one is placed, so there is never a gap, and no terminal has to replace an image in place.
+#[derive(Default)]
+pub struct Canvas {
+    last_id: u32,
+    shown: Option<u32>,
 }
 
-/// Remove every image this program drew.
-pub fn clear(out: &mut impl Write) -> io::Result<()> {
-    out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\")?;
-    out.flush()
+impl Canvas {
+    /// Draw `rgb` (`width` x `height`, 3 bytes a pixel), scaled to the placement's cell box. Cursor
+    /// movement is off, so the picture never scrolls the screen.
+    pub fn draw(
+        &mut self,
+        out: &mut impl Write,
+        rgb: &[u8],
+        (width, height): (u32, u32),
+        at: Placement,
+    ) -> io::Result<()> {
+        self.last_id = self.last_id % (u32::MAX - 1) + 1;
+        let id = self.last_id;
+        write!(out, "\x1b[?2026h\x1b[{};{}H", at.row + 1, at.col + 1)?;
+        let data = base64(rgb);
+        let mut chunks = data.chunks(CHUNK).peekable();
+        let mut first = true;
+        while let Some(chunk) = chunks.next() {
+            let more = u8::from(chunks.peek().is_some());
+            if first {
+                write!(
+                    out,
+                    "\x1b_Ga=T,f=24,s={width},v={height},i={id},c={},r={},C=1,q=2,m={more};",
+                    at.cols, at.rows
+                )?;
+                first = false;
+            } else {
+                write!(out, "\x1b_Gm={more};")?;
+            }
+            out.write_all(chunk)?;
+            out.write_all(b"\x1b\\")?;
+        }
+        if let Some(old) = self.shown.replace(id) {
+            write!(out, "\x1b_Ga=d,d=I,i={old},q=2\x1b\\")?;
+        }
+        out.write_all(b"\x1b[?2026l")?;
+        out.flush()
+    }
+
+    /// Remove every image this program drew.
+    pub fn clear(&mut self, out: &mut impl Write) -> io::Result<()> {
+        self.shown = None;
+        out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\")?;
+        out.flush()
+    }
 }
 
 #[cfg(test)]
@@ -102,10 +117,12 @@ mod tests {
             cols: 7,
             rows: 4,
         };
-        draw(&mut out, &rgb, (40, 40), at).unwrap();
+        Canvas::default()
+            .draw(&mut out, &rgb, (40, 40), at)
+            .unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\x1b[4;3H"));
-        assert!(text.contains("a=T,f=24,s=40,v=40,i=1,p=1,c=7,r=4,C=1,q=2,m=1;"));
+        assert!(text.contains("a=T,f=24,s=40,v=40,i=1,c=7,r=4,C=1,q=2,m=1;"));
         assert!(text.contains("\x1b_Gm=1;"));
         assert_eq!(text.matches("\x1b_Gm=0;").count(), 1);
         assert!(text.ends_with("\x1b[?2026l"));
@@ -128,20 +145,42 @@ mod tests {
     #[test]
     fn a_small_frame_is_one_final_chunk() {
         let mut out = Vec::new();
-        draw(
-            &mut out,
-            &[1, 2, 3],
-            (1, 1),
-            Placement {
-                col: 0,
-                row: 0,
-                cols: 1,
-                rows: 1,
-            },
-        )
-        .unwrap();
+        Canvas::default()
+            .draw(
+                &mut out,
+                &[1, 2, 3],
+                (1, 1),
+                Placement {
+                    col: 0,
+                    row: 0,
+                    cols: 1,
+                    rows: 1,
+                },
+            )
+            .unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("m=0;AQID\x1b\\"));
         assert!(!text.contains("m=1"));
+    }
+
+    #[test]
+    fn each_frame_is_a_new_image_and_the_previous_one_is_deleted_after_it() {
+        let at = Placement {
+            col: 0,
+            row: 0,
+            cols: 1,
+            rows: 1,
+        };
+        let (mut canvas, mut out) = (Canvas::default(), Vec::new());
+        canvas.draw(&mut out, &[1, 2, 3], (1, 1), at).unwrap();
+        assert!(!String::from_utf8_lossy(&out).contains("a=d"));
+        out.clear();
+        canvas.draw(&mut out, &[1, 2, 3], (1, 1), at).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let (put, delete) = (
+            text.find("i=2,").unwrap(),
+            text.find("a=d,d=I,i=1,").unwrap(),
+        );
+        assert!(put < delete);
     }
 }

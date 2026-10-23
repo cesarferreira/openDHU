@@ -206,6 +206,7 @@ struct App<'a> {
     /// What is on screen now, so a change redraws and an unchanged tick draws nothing.
     drawn: Option<(term::Size, Layout, Chrome)>,
     log: Option<Log>,
+    canvas: kitty::Canvas,
     frame: Option<video::Frame>,
     frame_dirty: bool,
     last_draw: Option<Instant>,
@@ -225,6 +226,7 @@ impl<'a> App<'a> {
             press: None,
             drawn: None,
             log,
+            canvas: kitty::Canvas::default(),
             frame: None,
             frame_dirty: false,
             last_draw: None,
@@ -419,7 +421,7 @@ impl<'a> App<'a> {
         let changed = self.drawn.as_ref().map(|(s, l, _)| (*s, *l)) != Some((size, layout));
         if changed {
             out.write_all(b"\x1b[2J")?;
-            kitty::clear(out)?;
+            self.canvas.clear(out)?;
         }
         if changed || self.drawn.as_ref().is_none_or(|(_, _, c)| *c != chrome) {
             let rows = size.rows.max(1);
@@ -444,7 +446,8 @@ impl<'a> App<'a> {
                 .as_ref()
                 .filter(|f| f.size == layout.decode_size())
         {
-            kitty::draw(out, &frame.rgb, frame.size, layout.placement())?;
+            self.canvas
+                .draw(out, &frame.rgb, frame.size, layout.placement())?;
             self.last_draw = Some(Instant::now());
             self.frame_dirty = false;
         }
