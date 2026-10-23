@@ -4,7 +4,7 @@
 # Targets marked [phone] need a real phone with Android Auto, unlocked, on USB. They stop with an
 # error if a DHU or openDHU daemon is already running, so they never touch someone else's session.
 
-.PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui \
+.PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui install-tui \
         clean test check fmt lint run daemon gui doctor stop demo vendor-check validate-examples \
         hw hw-dhu hw-native
 
@@ -40,10 +40,10 @@ help:
 	@echo "    sample-validate     validate sample YAML without an SDK or emulator"
 	@echo
 	@echo "  Install"
-	@echo "    install             aa, opendhu-native-hu and opendhu-gui (release)"
+	@echo "    install             aa, opendhu-native-hu, opendhu-gui and opendhu-tui (release)"
 	@echo "    install-release     alias for install"
 	@echo "    install-debug       the same, debug (development only)"
-	@echo "    install-cli | install-native | install-gui   one of them"
+	@echo "    install-cli | install-native | install-gui | install-tui   one of them"
 	@echo
 	@echo "  Run (usage: make run ARGS=\"status\")"
 	@echo "    run                 aa \$$(ARGS)"
@@ -95,7 +95,7 @@ validate-examples: build
 		if [ $$code -eq 2 ]; then echo "validate-examples: $$f does not parse"; exit 1; fi; \
 	done; echo "validate-examples: all examples parse"
 
-install: install-cli install-native install-gui
+install: install-cli install-native install-gui install-tui
 
 install-release: install
 
@@ -117,6 +117,11 @@ install-gui:
 	@mkdir -p "$(INSTALL_BIN_DIR)"
 	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/opendhu-gui" "$(INSTALL_BIN_DIR)/opendhu-gui"
 
+install-tui:
+	CARGO_INCREMENTAL=0 cargo build --locked --bins -p opendhu-tui $(INSTALL_BUILD_FLAG)
+	@mkdir -p "$(INSTALL_BIN_DIR)"
+	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/opendhu-tui" "$(INSTALL_BIN_DIR)/opendhu-tui"
+
 clean:
 	cargo clean
 
@@ -129,6 +134,9 @@ daemon:
 
 gui:
 	cargo run -p opendhu-gui
+
+tui:
+	cargo run -p opendhu-tui
 
 doctor:
 	cargo run -q -p opendhu-cli -- doctor

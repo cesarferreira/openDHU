@@ -22,7 +22,7 @@ aa doctor
 aa doctor sample  # Check a registered suite before running it
 ```
 
-Installs `aa`, `opendhu-native-hu`, and `opendhu-gui` into `~/.cargo/bin`; add it to your `PATH`.
+Installs `aa`, `opendhu-native-hu`, `opendhu-gui`, and `opendhu-tui` into `~/.cargo/bin`; add it to your `PATH`.
 `make install` builds optimized release binaries. Use `make install-debug` for development builds.
 For development apps, see [native head-unit credentials](docs/native-backend.md#debugging-knobs).
 
@@ -31,6 +31,7 @@ For development apps, see [native head-unit credentials](docs/native-backend.md#
 ```bash
 aa start                       # Native USB head unit; add --serial SERIAL to select the ADB device
 aa gui                         # Live display with mouse input and session controls
+aa tui                         # The same in your terminal, drawn with kitty graphics (kitty, Ghostty, WezTerm)
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa screenshot screen.png

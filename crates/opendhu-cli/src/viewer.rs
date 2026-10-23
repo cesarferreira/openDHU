@@ -5,11 +5,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 pub(crate) fn program() -> PathBuf {
+    sibling("opendhu-gui")
+}
+
+/// `name` installed next to `aa`, or else whatever `PATH` finds.
+pub(crate) fn sibling(name: &str) -> PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("opendhu-gui")))
+        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
         .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("opendhu-gui"))
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 pub(crate) struct Viewer(Child);

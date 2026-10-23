@@ -2253,6 +2253,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "opendhu-tui"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "opendhu-core",
+ "opendhu-daemon",
+ "opendhu-native",
+]
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"

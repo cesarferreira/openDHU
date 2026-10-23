@@ -73,6 +73,8 @@ enum Command {
     },
     /// Open the desktop window
     Gui,
+    /// Show the head unit in this terminal (needs kitty graphics: kitty, Ghostty, WezTerm)
+    Tui,
     /// Stop the running session
     Stop,
     /// Show the running session
@@ -234,12 +236,16 @@ fn main() -> ExitCode {
 
 /// Replace the launcher so the GUI owns its exit status and receives terminal signals directly.
 fn launch_gui() -> Result<u8> {
+    launch("opendhu-gui", "install-gui")
+}
+
+fn launch(binary: &str, target: &str) -> Result<u8> {
     use std::os::unix::process::CommandExt;
 
-    let program = viewer::program();
+    let program = viewer::sibling(binary);
     let error = std::process::Command::new(&program).exec();
     Err(Error::BackendUnavailable(format!(
-        "cannot launch {}: {error}; install the GUI with `make install-gui`",
+        "cannot launch {}: {error}; install the GUI with `make {target}`",
         program.display()
     )))
 }
@@ -251,6 +257,7 @@ fn run(cli: Cli) -> Result<u8> {
     let dhu_env_set = std::env::var_os("OPENDHU_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
         Command::Gui => launch_gui(),
+        Command::Tui => launch("opendhu-tui", "install-tui"),
         Command::Start {
             backend,
             dhu,

@@ -1,0 +1,18 @@
+[package]
+name = "opendhu-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Terminal head unit for the openDHU daemon, drawn with the kitty graphics protocol"
+
+[[bin]]
+name = "opendhu-tui"
+path = "src/main.rs"
+
+[dependencies]
+opendhu-core = { path = "../opendhu-core" }
+opendhu-daemon = { path = "../opendhu-daemon" }
+opendhu-native = { path = "../opendhu-native" }
+libc = "0.2"
