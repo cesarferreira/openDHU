@@ -331,8 +331,20 @@ Optional `environment.dnsServers` lists up to four DNS server IP addresses passe
 emulator at startup, for example `[8.8.8.8]` when host DNS auto-detection fails with a local or VPN
 resolver. Omitting it preserves SDK auto-detection. An already-running AVD keeps its current DNS.
 
-openDHU reuses a matching running AVD or starts the SDK emulator with `-no-window` and
-`-no-snapshot`. A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
+openDHU reuses a matching running AVD or starts the SDK emulator with `-no-snapshot`,
+`-no-audio` and `-no-boot-anim`; headless suites also pass `-no-window -gpu swiftshader_indirect`.
+Once an emulator it booted reports boot complete, it sets the window, transition and animator
+animation scales to 0. An already-running AVD is left untouched. Tune this per suite, which matters
+on hosts without a GPU or with nested virtualization:
+
+```yaml
+environment:
+  gpu: host                 # -gpu mode; default swiftshader_indirect when headless, else the AVD's
+  animations: true          # keep Android animations on (default false)
+  emulatorArgs: [-cores, "6", -memory, "3072"]  # extra emulator arguments, one per entry
+```
+
+A per-AVD lock rejects simultaneous suites. It installs the APK, starts Android
 Auto's head-unit server through its Settings UI if needed, allocates a device-scoped ADB forward,
 and starts a private daemon. This does not replace an existing physical-phone session. Cleanup
 removes the forward and private daemon. A standalone suite stops the emulator it started; an

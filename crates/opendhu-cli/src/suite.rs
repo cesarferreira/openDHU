@@ -32,6 +32,15 @@ pub(crate) struct Environment {
     headless: bool,
     #[serde(default)]
     dns_servers: Vec<std::net::IpAddr>,
+    /// `-gpu` mode for an emulator openDHU boots. Defaults to `swiftshader_indirect` when headless.
+    gpu: Option<String>,
+    /// Keep Android's window/transition/animator animations on. Off by default: they dominate
+    /// cost under software rendering and make OCR frames flaky.
+    #[serde(default)]
+    animations: bool,
+    /// Extra emulator arguments, one per entry, e.g. `["-cores", "6", "-memory", "3072"]`.
+    #[serde(default)]
+    emulator_args: Vec<String>,
     pub(crate) apk: PathBuf,
     package: String,
     app_label: String,
@@ -140,6 +149,13 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     if env.dns_servers.len() > 4 {
         return Err(Error::InvalidArgs(
             "suite dnsServers must contain at most four IP addresses".into(),
+        ));
+    }
+    if env.gpu.as_deref().is_some_and(|gpu| {
+        gpu.is_empty() || !gpu.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }) {
+        return Err(Error::InvalidArgs(
+            "suite gpu must be an emulator -gpu mode such as swiftshader_indirect or host".into(),
         ));
     }
     if suite.version != 1 {
@@ -770,7 +786,13 @@ fn run_prepared(
                 let file = std::fs::File::create(artifacts.join("emulator.log"))
                     .map_err(|e| Error::Other(e.to_string()))?;
                 let mut command = Command::new(emulator);
-                command.args(["-avd", &suite.environment.emulator, "-no-snapshot"]);
+                command.args([
+                    "-avd",
+                    &suite.environment.emulator,
+                    "-no-snapshot",
+                    "-no-audio",
+                    "-no-boot-anim",
+                ]);
                 if !suite.environment.dns_servers.is_empty() {
                     command.arg("-dns-server").arg(
                         suite
@@ -785,6 +807,17 @@ fn run_prepared(
                 if suite.environment.headless {
                     command.arg("-no-window");
                 }
+                // Headless has no display or GPU: render in software explicitly instead of
+                // letting `auto` probe.
+                let gpu = suite
+                    .environment
+                    .gpu
+                    .as_deref()
+                    .or(suite.environment.headless.then_some("swiftshader_indirect"));
+                if let Some(gpu) = gpu {
+                    command.args(["-gpu", gpu]);
+                }
+                command.args(&suite.environment.emulator_args);
                 lease.emulator_child = Some(
                     command
                         .stdin(Stdio::null())
@@ -810,6 +843,21 @@ fn run_prepared(
                         )
                         .is_ok_and(|value| value.trim() == "1")
                         {
+                            // A failure here is only a slowdown, so it is ignored.
+                            for key in [
+                                "window_animation_scale",
+                                "transition_animation_scale",
+                                "animator_duration_scale",
+                            ]
+                            .into_iter()
+                            .filter(|_| !suite.environment.animations)
+                            {
+                                let _ = device::adb(
+                                    &lease.adb,
+                                    &serial,
+                                    &["shell", "settings", "put", "global", key, "0"],
+                                );
+                            }
                             break serial;
                         }
                     }
