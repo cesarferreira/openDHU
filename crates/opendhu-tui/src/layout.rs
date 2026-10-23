@@ -6,8 +6,6 @@ use crate::term::Size;
 /// Rows kept for the header above the picture and the key hints below it.
 const HEADER_ROWS: u32 = 1;
 const FOOTER_ROWS: u32 = 1;
-/// Widest frame sent to the terminal, in pixels.
-const MAX_DECODE_WIDTH: u32 = 960;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Layout {
@@ -65,8 +63,8 @@ impl Layout {
 
     /// The size to decode at: the picture's shape, capped so a huge terminal doesn't mean huge
     /// frames. The terminal scales it up to fill the cell box.
-    pub fn decode_size(&self) -> (u32, u32) {
-        let w = self.image.0.min(MAX_DECODE_WIDTH);
+    pub fn decode_size(&self, max_width: u32) -> (u32, u32) {
+        let w = self.image.0.min(max_width);
         (
             w,
             (u64::from(self.image.1) * u64::from(w) / u64::from(self.image.0)) as u32 & !1,
@@ -128,7 +126,7 @@ mod tests {
         // 200x50 cells = 2000x1000 px; the picture area is 2000x960, so 800x480 scales to 1600x960.
         let l = Layout::new(term(200, 50), (800, 480), 0);
         assert_eq!(l.image, (1600, 960));
-        assert_eq!(l.decode_size(), (960, 576));
+        assert_eq!(l.decode_size(960), (960, 576));
         assert_eq!(l.origin, (200, 20));
         assert_eq!(
             l.placement(),

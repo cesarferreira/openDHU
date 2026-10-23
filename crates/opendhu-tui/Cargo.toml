@@ -16,3 +16,4 @@ opendhu-core = { path = "../opendhu-core" }
 opendhu-daemon = { path = "../opendhu-daemon" }
 opendhu-native = { path = "../opendhu-native" }
 libc = "0.2"
+flate2 = "1"

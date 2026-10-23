@@ -2,6 +2,9 @@
 
 use std::io::{self, Write};
 
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
+
 /// The protocol caps each escape's payload at 4096 base64 bytes.
 const CHUNK: usize = 4096;
 
@@ -34,6 +37,14 @@ pub struct Placement {
     pub rows: u32,
 }
 
+/// zlib at its fastest level: a UI is mostly flat colour, so this is a large saving over a slow link
+/// for little time.
+fn deflate(rgb: &[u8]) -> io::Result<Vec<u8>> {
+    let mut z = ZlibEncoder::new(Vec::with_capacity(rgb.len() / 8), Compression::fast());
+    z.write_all(rgb)?;
+    z.finish()
+}
+
 /// The picture on screen. Every frame gets a fresh image id and the previous frame is deleted once
 /// the new one is placed, so there is never a gap, and no terminal has to replace an image in place.
 #[derive(Default)]
@@ -55,7 +66,7 @@ impl Canvas {
         self.last_id = self.last_id % (u32::MAX - 1) + 1;
         let id = self.last_id;
         write!(out, "\x1b[?2026h\x1b[{};{}H", at.row + 1, at.col + 1)?;
-        let data = base64(rgb);
+        let data = base64(&deflate(rgb)?);
         let mut chunks = data.chunks(CHUNK).peekable();
         let mut first = true;
         while let Some(chunk) = chunks.next() {
@@ -63,7 +74,7 @@ impl Canvas {
             if first {
                 write!(
                     out,
-                    "\x1b_Ga=T,f=24,s={width},v={height},i={id},c={},r={},C=1,q=2,m={more};",
+                    "\x1b_Ga=T,f=24,o=z,s={width},v={height},i={id},c={},r={},C=1,q=2,m={more};",
                     at.cols, at.rows
                 )?;
                 first = false;
@@ -109,7 +120,14 @@ mod tests {
 
     #[test]
     fn a_large_frame_is_split_into_chunks_with_a_continuation_flag() {
-        let rgb = vec![7u8; 10_000];
+        // Noise does not compress, so the payload stays several chunks long.
+        let mut seed = 12345u32;
+        let rgb: Vec<u8> = (0..10_000)
+            .map(|_| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 24) as u8
+            })
+            .collect();
         let mut out = Vec::new();
         let at = Placement {
             col: 2,
@@ -122,7 +140,7 @@ mod tests {
             .unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\x1b[4;3H"));
-        assert!(text.contains("a=T,f=24,s=40,v=40,i=1,c=7,r=4,C=1,q=2,m=1;"));
+        assert!(text.contains("a=T,f=24,o=z,s=40,v=40,i=1,c=7,r=4,C=1,q=2,m=1;"));
         assert!(text.contains("\x1b_Gm=1;"));
         assert_eq!(text.matches("\x1b_Gm=0;").count(), 1);
         assert!(text.ends_with("\x1b[?2026l"));
@@ -139,7 +157,7 @@ mod tests {
                     .len()
             })
             .sum();
-        assert_eq!(payload, rgb.len().div_ceil(3) * 4);
+        assert_eq!(payload, base64(&deflate(&rgb).unwrap()).len());
     }
 
     #[test]
@@ -159,7 +177,8 @@ mod tests {
             )
             .unwrap();
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("m=0;AQID\x1b\\"));
+        let payload = String::from_utf8(base64(&deflate(&[1, 2, 3]).unwrap())).unwrap();
+        assert!(text.contains(&format!("m=0;{payload}\x1b\\")));
         assert!(!text.contains("m=1"));
     }
 
@@ -182,5 +201,11 @@ mod tests {
             text.find("a=d,d=I,i=1,").unwrap(),
         );
         assert!(put < delete);
+    }
+
+    #[test]
+    fn a_flat_picture_shrinks_a_lot() {
+        let flat = vec![30u8; 960 * 576 * 3];
+        assert!(deflate(&flat).unwrap().len() < flat.len() / 50);
     }
 }

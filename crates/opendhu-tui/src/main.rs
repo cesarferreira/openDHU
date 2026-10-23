@@ -22,7 +22,6 @@ use term::{Arrow, Event, Mouse, Terminal};
 
 /// A press that moves less than this many phone pixels before release is a tap.
 const TAP_SLOP: u32 = 24;
-const MIN_FRAME_GAP: Duration = Duration::from_millis(33);
 const NOTE_FOR: Duration = Duration::from_secs(3);
 const HINTS: &str = "click/drag: touch  wheel: scroll  esc: back  h: home  arrows/enter: dpad  \
                      s: search  space: play  n/p: track  f: video focus  S: screenshot  q: quit";
@@ -129,6 +128,40 @@ fn spawn_log(tx: Sender<Msg>) -> Option<Log> {
     Some(Log::default())
 }
 
+/// How much picture the connection to the terminal can carry.
+struct Link {
+    /// Widest frame sent, in pixels.
+    max_width: u32,
+    /// Shortest time between two pictures.
+    frame_gap: Duration,
+}
+
+impl Link {
+    /// Over SSH every picture crosses the network, so send smaller and fewer. `OPENDHU_TUI_REMOTE`
+    /// forces the choice (`1` or `0`) where SSH is hidden, such as inside a multiplexer.
+    fn detect() -> Self {
+        let remote = match std::env::var("OPENDHU_TUI_REMOTE").as_deref() {
+            Ok("1") => true,
+            Ok("0") => false,
+            _ => {
+                std::env::var_os("SSH_CONNECTION").is_some()
+                    || std::env::var_os("SSH_TTY").is_some()
+            }
+        };
+        if remote {
+            Self {
+                max_width: 640,
+                frame_gap: Duration::from_millis(100),
+            }
+        } else {
+            Self {
+                max_width: 960,
+                frame_gap: Duration::from_millis(33),
+            }
+        }
+    }
+}
+
 /// The run's progress so far.
 #[derive(Default)]
 struct Log {
@@ -207,6 +240,7 @@ struct App<'a> {
     drawn: Option<(term::Size, Layout, Chrome)>,
     log: Option<Log>,
     canvas: kitty::Canvas,
+    link: Link,
     frame: Option<video::Frame>,
     frame_dirty: bool,
     last_draw: Option<Instant>,
@@ -227,6 +261,7 @@ impl<'a> App<'a> {
             drawn: None,
             log,
             canvas: kitty::Canvas::default(),
+            link: Link::detect(),
             frame: None,
             frame_dirty: false,
             last_draw: None,
@@ -267,8 +302,15 @@ impl<'a> App<'a> {
             Msg::Frame => {
                 if let Some(frame) = self.video.take() {
                     self.frames += 1;
-                    self.frame = Some(frame);
-                    self.frame_dirty = true;
+                    // A still screen decodes to identical frames; sending one again is wasted bytes.
+                    let same = self
+                        .frame
+                        .as_ref()
+                        .is_some_and(|f| f.size == frame.size && f.rgb == frame.rgb);
+                    if !same {
+                        self.frame = Some(frame);
+                        self.frame_dirty = true;
+                    }
                 }
             }
             Msg::Status(status) => self.status = status,
@@ -415,7 +457,7 @@ impl<'a> App<'a> {
         }
         let size = term::size();
         let layout = self.layout_in(size);
-        self.video.tick(layout.decode_size());
+        self.video.tick(layout.decode_size(self.link.max_width));
 
         let chrome = self.chrome(size);
         let changed = self.drawn.as_ref().map(|(s, l, _)| (*s, *l)) != Some((size, layout));
@@ -439,12 +481,14 @@ impl<'a> App<'a> {
             out.flush()?;
         }
         // At most ~30 pictures a second: more only queues bytes the terminal must parse.
-        let due = self.last_draw.is_none_or(|t| t.elapsed() >= MIN_FRAME_GAP);
+        let due = self
+            .last_draw
+            .is_none_or(|t| t.elapsed() >= self.link.frame_gap);
         if (changed || (self.frame_dirty && due))
             && let Some(frame) = self
                 .frame
                 .as_ref()
-                .filter(|f| f.size == layout.decode_size())
+                .filter(|f| f.size == layout.decode_size(self.link.max_width))
         {
             self.canvas
                 .draw(out, &frame.rgb, frame.size, layout.placement())?;

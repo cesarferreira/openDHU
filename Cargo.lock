@@ -2256,6 +2256,7 @@ dependencies = [
 name = "opendhu-tui"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "libc",
  "opendhu-core",
  "opendhu-daemon",
