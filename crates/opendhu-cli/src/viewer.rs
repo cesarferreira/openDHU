@@ -67,8 +67,19 @@ impl TuiViewer {
         use std::os::fd::FromRawFd;
 
         let mut fds = [0i32; 2];
-        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        // `pipe2` does not exist on macOS, so create the pipe and set close-on-exec separately.
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(Error::Other(std::io::Error::last_os_error().to_string()));
+        }
+        for fd in fds {
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+                let err = std::io::Error::last_os_error().to_string();
+                unsafe {
+                    libc::close(fds[0]);
+                    libc::close(fds[1]);
+                }
+                return Err(Error::Other(err));
+            }
         }
         let (read, write) = (fds[0], fds[1]);
         // SAFETY: `write` is a fresh descriptor nothing else owns.

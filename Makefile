@@ -13,7 +13,7 @@ OPENDHU_BIN ?= aa
 SAMPLE_TEST_ARGS ?=
 INSTALL_PROFILE = $(if $(filter --debug,$(INSTALL_FLAGS)),debug,release)
 INSTALL_BUILD_FLAG = $(if $(filter --debug,$(INSTALL_FLAGS)),,--release)
-INSTALL_TARGET_DIR = $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),target)
+INSTALL_TARGET_DIR = $(shell cargo metadata --format-version 1 --no-deps --offline 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
 INSTALL_BIN_DIR = $(if $(CARGO_INSTALL_ROOT),$(CARGO_INSTALL_ROOT),$(if $(CARGO_HOME),$(CARGO_HOME),$(HOME)/.cargo))/bin
 
 # Default target: everything that needs no hardware.
