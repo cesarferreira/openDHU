@@ -45,6 +45,19 @@ fn resolve_inner(path: &Path, stack: &mut Vec<PathBuf>) -> Result<Value> {
     if let Some(apk) = value.get_mut("environment").and_then(|e| e.get_mut("apk")) {
         resolve_path(apk, base);
     }
+    if let Some(build) = value
+        .get_mut("environment")
+        .and_then(|e| e.get_mut("build"))
+        .and_then(Value::as_mapping_mut)
+    {
+        let cwd = build
+            .entry(Value::String("cwd".into()))
+            .or_insert_with(|| Value::String(base.to_string_lossy().into_owned()));
+        if cwd.is_null() {
+            *cwd = Value::String(base.to_string_lossy().into_owned());
+        }
+        resolve_path(cwd, base);
+    }
     if let Some(dir) = value.get_mut("artifactsDir") {
         resolve_path(dir, base);
     }

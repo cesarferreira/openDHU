@@ -42,6 +42,8 @@ pub(crate) struct Environment {
     #[serde(default)]
     emulator_args: Vec<String>,
     pub(crate) apk: PathBuf,
+    /// Run before every install so the APK always matches the checked-out branch.
+    build: Option<Build>,
     package: String,
     app_label: String,
     #[serde(default)]
@@ -51,6 +53,14 @@ pub(crate) struct Environment {
     reverse_ports: Vec<ReversePort>,
     /// App preferences to set before launch, e.g. a developer feature flag a journey needs.
     preferences: Option<Preferences>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Build {
+    /// Program and arguments, e.g. `["./gradlew", ":app:assembleDebug"]`.
+    command: Vec<String>,
+    /// Defaults to the directory of the suite file that declares `build`.
+    cwd: Option<PathBuf>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -192,6 +202,15 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
     }) {
         return Err(Error::InvalidArgs(
             "suite permissions must be Android permission names".into(),
+        ));
+    }
+    if env
+        .build
+        .as_ref()
+        .is_some_and(|b| b.command.is_empty() || b.command[0].is_empty())
+    {
+        return Err(Error::InvalidArgs(
+            "suite build requires a nonempty command".into(),
         ));
     }
     if env.launch_activity.as_ref().is_some_and(|activity| {
@@ -665,6 +684,34 @@ fn artifact_path(explicit: Option<PathBuf>, suite_base: Option<PathBuf>) -> Path
     explicit.unwrap_or_else(|| suite_base.unwrap_or_else(|| PathBuf::from("build/test-results")))
 }
 
+/// Build the APK before installing it, so switching branches never installs a stale one.
+fn run_build(
+    build: &Build,
+    artifacts: &Path,
+    output: &Arc<crate::test_output::Output>,
+    cancel: &AtomicBool,
+) -> Result<()> {
+    check_cancel(cancel)?;
+    test_cmd::progress(output, format!("Building: {}...", build.command.join(" ")));
+    let log_path = artifacts.join("build.log");
+    let log = std::fs::File::create(&log_path).map_err(|e| Error::Other(e.to_string()))?;
+    let status = Command::new(&build.command[0])
+        .args(&build.command[1..])
+        .current_dir(build.cwd.as_deref().unwrap_or(Path::new(".")))
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().map_err(|e| Error::Other(e.to_string()))?)
+        .stderr(log)
+        .status()
+        .map_err(|e| Error::Other(format!("cannot run build {}: {e}", build.command[0])))?;
+    if !status.success() {
+        return Err(Error::Other(format!(
+            "suite build failed ({status}); see {}",
+            log_path.display()
+        )));
+    }
+    check_cancel(cancel)
+}
+
 fn run_prepared(
     mut opts: test_cmd::Options,
     suite: Suite,
@@ -674,12 +721,6 @@ fn run_prepared(
 ) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     check_cancel(&cancel)?;
-    if !suite.environment.apk.is_file() {
-        return Err(Error::InvalidArgs(format!(
-            "suite APK not found: {}; build it before running the suite",
-            suite.environment.apk.display()
-        )));
-    }
     test_cmd::progress(&output, "Checking test tools...");
     // Fail before starting hardware when a required tool is missing.
     crate::suite_doctor::preflight()?;
@@ -700,6 +741,15 @@ fn run_prepared(
     }
     std::fs::create_dir_all(&artifacts).map_err(|e| Error::Other(e.to_string()))?;
     output.artifacts(&artifacts);
+    if let Some(build) = &suite.environment.build {
+        run_build(build, &artifacts, &output, &cancel)?;
+    }
+    if !suite.environment.apk.is_file() {
+        return Err(Error::InvalidArgs(format!(
+            "suite APK not found: {}; build it before running the suite, or set environment.build",
+            suite.environment.apk.display()
+        )));
+    }
     let adb = adb_program();
     let usb_serial = if opts.usb {
         test_cmd::progress(&output, "Finding a USB phone...");
@@ -1148,6 +1198,26 @@ mod tests {
             std::fs::write(&path, text).unwrap();
             assert!(load(&path).is_err());
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn build_command_defaults_its_cwd_to_the_suite_directory() {
+        let dir = std::env::temp_dir().join(format!("aa-suite-build-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("e2e")).unwrap();
+        let path = dir.join("e2e/suite.yaml");
+        std::fs::write(
+            dir.join("e2e/test.yaml"),
+            "name: t\nbackend: native\nsteps:\n  - action: app.open\n",
+        )
+        .unwrap();
+        std::fs::write(&path, "version: 1\nenvironment: {emulator: medium_phone, apk: app.apk, package: test.app, appLabel: Test, build: {command: [./gradlew, assembleDebug], cwd: ..}}\ntests: [test.yaml]\n").unwrap();
+        let (suite, _) = load(&path).unwrap();
+        let build = suite.environment.build.unwrap();
+        assert_eq!(build.command, ["./gradlew", "assembleDebug"]);
+        assert_eq!(build.cwd, Some(dir.join("e2e/..")));
+        std::fs::write(&path, "version: 1\nenvironment: {emulator: medium_phone, apk: app.apk, package: test.app, appLabel: Test, build: {command: []}}\ntests: [test.yaml]\n").unwrap();
+        assert!(load(&path).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -3,6 +3,9 @@ artifactsDir: ../build/test-results
 environment:
   emulator: medium_phone
   headless: true
+  build:
+    command: [./gradlew, ":app:assembleDebug"]
+    cwd: ..
   apk: ../app/build/outputs/apk/debug/app-debug.apk
   package: dev.opendhu.demo
   appLabel: openDHU Demo
