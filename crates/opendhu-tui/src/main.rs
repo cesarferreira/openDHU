@@ -23,8 +23,20 @@ use term::{Arrow, Event, Mouse, Terminal};
 /// A press that moves less than this many phone pixels before release is a tap.
 const TAP_SLOP: u32 = 24;
 const NOTE_FOR: Duration = Duration::from_secs(3);
-const HINTS: &str = "click/drag: touch  wheel: scroll  esc: back  h: home  arrows/enter: dpad  \
-                     s: search  space: play  n/p: track  f: video focus  S: screenshot  q: quit";
+/// Keys the viewer answers, as (key, what it does), most useful first.
+const HINTS: &[(&str, &str)] = &[
+    ("click/drag", "touch"),
+    ("wheel", "scroll"),
+    ("esc", "back"),
+    ("h", "home"),
+    ("arrows/enter", "dpad"),
+    ("s", "search"),
+    ("space", "play"),
+    ("n/p", "track"),
+    ("f", "video focus"),
+    ("S", "screenshot"),
+    ("q", "quit"),
+];
 
 pub enum Msg {
     Input(Event),
@@ -468,11 +480,7 @@ impl<'a> App<'a> {
         if changed || self.drawn.as_ref().is_none_or(|(_, _, c)| *c != chrome) {
             let rows = size.rows.max(1);
             write!(out, "\x1b[1;1H\x1b[2K{}", fit(&chrome.header, size.cols))?;
-            write!(
-                out,
-                "\x1b[{rows};1H\x1b[2K{}",
-                fit(&chrome.footer, size.cols)
-            )?;
+            write!(out, "\x1b[{rows};1H\x1b[2K{}", chrome.footer)?;
             let pane = self.log_rows(size) as usize;
             for (i, line) in chrome.log.iter().enumerate() {
                 let row = rows as usize - pane + i;
@@ -501,11 +509,15 @@ impl<'a> App<'a> {
 
     /// Everything drawn around the picture, so one comparison says whether it needs redrawing.
     fn chrome(&self, size: term::Size) -> Chrome {
-        let link = self.status.as_ref().map_or_else(
-            || "no session; start one with `aa start`".to_string(),
-            |s| s.summary.clone(),
-        );
-        let video = match (self.video.problem(), self.frames) {
+        let running = self.log.as_ref().is_some_and(|l| !l.ended);
+        let link = match &self.status {
+            Some(s) => s.summary.clone(),
+            // `aa test` boots its own device after building, so there is nothing to start by hand.
+            None if running => "waiting for the test run to start a session".to_string(),
+            None => "no session; start one with `aa start`".to_string(),
+        };
+        // Without a session the video cannot connect; its error would only repeat that.
+        let video = match (self.status.as_ref().and(self.video.problem()), self.frames) {
             (Some(p), _) => p,
             (None, 0) => "waiting for video".to_string(),
             (None, n) => format!(
@@ -519,10 +531,16 @@ impl<'a> App<'a> {
             "cell mouse"
         };
         let finished = self.log.as_ref().is_some_and(|l| l.ended);
+        let right = format!("{video} · {pointer}");
         let footer = match (&self.note, finished) {
-            (Some((n, _)), _) => n.as_str(),
-            (None, true) => "test run finished; press q to close",
-            (None, false) => HINTS,
+            (Some((n, _)), _) => footer_line(&[], Some(n), &right, size.cols),
+            (None, true) => footer_line(
+                &[("q", "close")],
+                Some("test run finished"),
+                &right,
+                size.cols,
+            ),
+            (None, false) => footer_line(HINTS, None, &right, size.cols),
         };
         let pane = self.log_rows(size) as usize;
         let log = self.log.as_ref().map_or_else(Vec::new, |l| {
@@ -533,11 +551,51 @@ impl<'a> App<'a> {
             tail
         });
         Chrome {
-            header: format!(" openDHU · {link} · {video} · {pointer}"),
-            footer: format!(" {footer}"),
+            header: format!(" openDHU · {link}"),
+            footer,
             log,
         }
     }
+}
+
+/// One footer row of `key label` chips, then `right` flush to the edge. Chips that do not fit are
+/// dropped whole, never cut in half. The result carries colour codes, so it is already `cols` wide.
+fn footer_line(hints: &[(&str, &str)], message: Option<&str>, right: &str, cols: u32) -> String {
+    let cols = cols as usize;
+    let right_w = right.chars().count();
+    let show_right = right_w + 2 < cols / 2;
+    let budget = cols.saturating_sub(if show_right { right_w + 2 } else { 0 });
+    let mut out = String::from(" ");
+    let mut used = 1;
+    if let Some(m) = message {
+        let m: String = m.chars().take(budget.saturating_sub(used + 1)).collect();
+        used += m.chars().count() + 2;
+        out.push_str(&format!("{m}  "));
+    }
+    let chip_width = |(key, label): &(&str, &str)| key.chars().count() + label.chars().count() + 5;
+    // The last hint (quit) is pinned: the others give way to it.
+    let (pinned, rest) = match hints.split_last() {
+        Some((last, rest)) => (Some(last), rest),
+        None => (None, hints),
+    };
+    let reserved = pinned.map_or(0, chip_width);
+    let chip = |(key, label): &(&str, &str)| format!("\x1b[30;48;5;86m {key} \x1b[0m {label}  ");
+    for hint in rest {
+        if used + chip_width(hint) + reserved > budget {
+            break;
+        }
+        out.push_str(&chip(hint));
+        used += chip_width(hint);
+    }
+    if let Some(hint) = pinned {
+        out.push_str(&chip(hint));
+        used += chip_width(hint);
+    }
+    if show_right {
+        out.push_str(&" ".repeat(cols.saturating_sub(used + right_w + 1)));
+        out.push_str(&format!("\x1b[2m{right}\x1b[0m"));
+    }
+    out
 }
 
 #[derive(PartialEq)]
@@ -586,6 +644,31 @@ mod tests {
     #[test]
     fn header_and_footer_are_cut_to_the_terminal_width() {
         assert_eq!(fit("héllo wörld", 5), "héllo");
+    }
+
+    #[test]
+    fn footer_drops_whole_chips_and_keeps_the_stats_at_the_right_edge() {
+        let plain = |s: String| {
+            let mut out = String::new();
+            let mut skip = false;
+            for c in s.chars() {
+                match (skip, c) {
+                    (_, '\x1b') => skip = true,
+                    (true, 'm') => skip = false,
+                    (false, c) => out.push(c),
+                    _ => {}
+                }
+            }
+            out
+        };
+        let wide = plain(footer_line(HINTS, None, "30 fps · cell mouse", 160));
+        assert!(wide.contains(" q  quit"), "{wide:?}");
+        assert!(wide.ends_with("30 fps · cell mouse"));
+        let narrow = plain(footer_line(HINTS, None, "30 fps · cell mouse", 60));
+        assert!(narrow.chars().count() <= 60);
+        assert!(narrow.contains("touch") && !narrow.contains("screenshot"));
+        assert!(narrow.contains(" q  quit"));
+        assert!(narrow.trim_end().ends_with("cell mouse"));
     }
 
     #[test]
