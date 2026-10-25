@@ -103,7 +103,10 @@ impl Layout {
     }
 }
 
-/// How many rows of the terminal go to the log pane under the picture: a third, within reason.
+/// Rows around the log text: a titled rule above it and a blank row between it and the key hints.
+pub const LOG_CHROME_ROWS: u32 = 2;
+
+/// How many rows of the terminal go to the log text under the picture: a third, within reason.
 pub fn log_rows(term: Size) -> u32 {
     (term.rows.saturating_sub(2) / 3).clamp(3, 14)
 }

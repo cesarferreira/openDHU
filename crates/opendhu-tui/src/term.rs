@@ -108,6 +108,8 @@ pub enum Event {
     Arrow(Arrow),
     Enter,
     Escape,
+    /// Page Up (`true`) or Page Down.
+    Page(bool),
     /// 1-based cell, or pixel when the terminal reports pixels (`PixelMouse(true)`).
     Mouse {
         kind: Mouse,
@@ -199,6 +201,8 @@ fn csi(params: &[u8], last: u8) -> Option<Event> {
         b'B' => Some(Event::Arrow(Arrow::Down)),
         b'C' => Some(Event::Arrow(Arrow::Right)),
         b'D' => Some(Event::Arrow(Arrow::Left)),
+        b'~' if params == b"5" => Some(Event::Page(true)),
+        b'~' if params == b"6" => Some(Event::Page(false)),
         b'M' | b'm' if params.first() == Some(&b'<') => {
             let text = std::str::from_utf8(&params[1..]).ok()?;
             let mut parts = text.split(';').map(|p| p.parse::<u32>().ok());
@@ -238,6 +242,10 @@ mod tests {
             [Event::Char('h'), Event::Arrow(Arrow::Up), Event::Enter]
         );
         assert_eq!(parse(b"\x1b"), [Event::Escape]);
+        assert_eq!(
+            parse(b"\x1b[5~\x1b[6~"),
+            [Event::Page(true), Event::Page(false)]
+        );
         assert_eq!(parse(b"\x03"), [Event::Char('q')]);
     }
 

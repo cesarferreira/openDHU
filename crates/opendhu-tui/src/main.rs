@@ -33,6 +33,7 @@ const HINTS: &[(&str, &str)] = &[
     ("s", "search"),
     ("space", "play"),
     ("n/p", "track"),
+    ("PgUp/PgDn", "log"),
     ("f", "video focus"),
     ("S", "screenshot"),
     ("q", "quit"),
@@ -179,6 +180,8 @@ impl Link {
 struct Log {
     lines: Vec<String>,
     ended: bool,
+    /// Lines the view is scrolled up from the newest; 0 follows the run.
+    scroll: usize,
 }
 
 /// Lines kept; older ones are dropped, they are still in the shell's scrollback afterwards.
@@ -305,7 +308,24 @@ impl<'a> App<'a> {
     }
 
     fn layout_in(&self, size: term::Size) -> Layout {
-        Layout::new(size, self.screen(), self.log_rows(size))
+        let reserved = match self.log_rows(size) {
+            0 => 0,
+            rows => rows + layout::LOG_CHROME_ROWS,
+        };
+        Layout::new(size, self.screen(), reserved)
+    }
+
+    /// Scroll the log view up (`true`) or down by `lines`, within what has been logged.
+    fn scroll_log(&mut self, up: bool, lines: usize) {
+        let pane = self.log_rows(term::size()) as usize;
+        if let Some(log) = &mut self.log {
+            let most = log.lines.len().saturating_sub(pane);
+            log.scroll = if up {
+                (log.scroll + lines).min(most)
+            } else {
+                log.scroll.saturating_sub(lines)
+            };
+        }
     }
 
     /// Returns true to quit.
@@ -335,6 +355,10 @@ impl<'a> App<'a> {
             }
             Msg::Log(line) => {
                 if let Some(log) = &mut self.log {
+                    // Keep what the reader is looking at in place while the run moves on.
+                    if log.scroll > 0 {
+                        log.scroll += 1;
+                    }
                     log.lines.push(line);
                     if log.lines.len() > LOG_KEEP {
                         log.lines.drain(..LOG_KEEP / 2);
@@ -377,6 +401,12 @@ impl<'a> App<'a> {
                     self.key(key);
                 }
             }
+            Event::Page(up) => {
+                let page = (self.log_rows(term::size()) as usize)
+                    .saturating_sub(1)
+                    .max(1);
+                self.scroll_log(up, page);
+            }
             Event::Escape => self.key(Key::Back),
             Event::Enter => self.key(Key::Enter),
             Event::Arrow(a) => self.key(match a {
@@ -397,6 +427,17 @@ impl<'a> App<'a> {
     fn mouse(&mut self, kind: Mouse, at: (u32, u32)) {
         let layout = self.layout();
         let px = layout.mouse_pixel(at, self.pixel_mouse);
+        if matches!(kind, Mouse::WheelUp | Mouse::WheelDown) && self.log.is_some() {
+            let size = term::size();
+            let row = px.1 / layout.cell.1.max(1);
+            let rule = size
+                .rows
+                .saturating_sub(self.log_rows(size) + layout::LOG_CHROME_ROWS + 1);
+            if row >= rule && row + 1 < size.rows {
+                self.scroll_log(kind == Mouse::WheelUp, 3);
+                return;
+            }
+        }
         match kind {
             Mouse::Press => {
                 self.press = layout.screen_at(px, false).map(|p| (Instant::now(), p));
@@ -482,8 +523,12 @@ impl<'a> App<'a> {
             write!(out, "\x1b[1;1H\x1b[2K{}", fit(&chrome.header, size.cols))?;
             write!(out, "\x1b[{rows};1H\x1b[2K{}", chrome.footer)?;
             let pane = self.log_rows(size) as usize;
+            if pane > 0 {
+                let rule = rows as usize - pane - 2;
+                write!(out, "\x1b[{rule};1H\x1b[2K{}", chrome.rule)?;
+            }
             for (i, line) in chrome.log.iter().enumerate() {
-                let row = rows as usize - pane + i;
+                let row = rows as usize - pane - 1 + i;
                 write!(out, "\x1b[{row};1H\x1b[2K{}", styled(line, size.cols))?;
             }
             out.flush()?;
@@ -543,8 +588,20 @@ impl<'a> App<'a> {
             (None, false) => footer_line(HINTS, None, &right, size.cols),
         };
         let pane = self.log_rows(size) as usize;
+        let behind = self
+            .log
+            .as_ref()
+            .map_or(0, |l| l.scroll.min(l.lines.len().saturating_sub(pane)));
+        let rule = log_rule(behind, size.cols);
         let log = self.log.as_ref().map_or_else(Vec::new, |l| {
-            let mut tail = l.lines.iter().rev().take(pane).cloned().collect::<Vec<_>>();
+            let mut tail = l
+                .lines
+                .iter()
+                .rev()
+                .skip(behind)
+                .take(pane)
+                .cloned()
+                .collect::<Vec<_>>();
             tail.reverse();
             // Pad so the pane always rewrites every row it owns.
             tail.resize(pane, String::new());
@@ -553,9 +610,24 @@ impl<'a> App<'a> {
         Chrome {
             header: format!(" openDHU · {link}"),
             footer,
+            rule,
             log,
         }
     }
+}
+
+/// `── Test log ───…`, saying how far up the view is when it is not following the run.
+fn log_rule(behind: usize, cols: u32) -> String {
+    let title = if behind == 0 {
+        " Test log ".to_string()
+    } else {
+        format!(" Test log · {behind} lines up · PgDn/wheel to follow ")
+    };
+    let rest = (cols as usize).saturating_sub(title.chars().count() + 2);
+    format!(
+        "\x1b[2m{}\x1b[0m",
+        fit(&format!("──{title}{}", "─".repeat(rest)), cols)
+    )
 }
 
 /// One footer row of `key label` chips, then `right` flush to the edge. Chips that do not fit are
@@ -602,6 +674,8 @@ fn footer_line(hints: &[(&str, &str)], message: Option<&str>, right: &str, cols:
 struct Chrome {
     header: String,
     footer: String,
+    /// The titled line above the log text.
+    rule: String,
     log: Vec<String>,
 }
 
@@ -669,6 +743,13 @@ mod tests {
         assert!(narrow.contains("touch") && !narrow.contains("screenshot"));
         assert!(narrow.contains(" q  quit"));
         assert!(narrow.trim_end().ends_with("cell mouse"));
+    }
+
+    #[test]
+    fn log_rule_is_titled_and_reports_how_far_up_the_view_is() {
+        assert!(log_rule(0, 40).contains(" Test log "));
+        assert!(!log_rule(0, 40).contains("lines up"));
+        assert!(log_rule(12, 80).contains("12 lines up"));
     }
 
     #[test]
