@@ -15,6 +15,7 @@ mod suite_doctor;
 mod test_cmd;
 mod test_output;
 mod test_selection;
+mod timings;
 mod viewer;
 
 use std::path::PathBuf;

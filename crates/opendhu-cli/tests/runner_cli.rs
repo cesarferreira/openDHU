@@ -499,3 +499,41 @@ fn footer_paths_are_relative_and_verbose_lists_artifacts_without_linking_unwritt
         assert_eq!(shown.contains("art/logs/01-footer.log"), verbose, "{shown}");
     }
 }
+
+#[test]
+fn a_second_run_estimates_the_time_left_from_the_first() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let dir = s.scratch("timed");
+    write(
+        &dir,
+        "a.yaml",
+        "name: First\nsteps:\n  - action: wait\n    duration: 50ms\n",
+    );
+    write(
+        &dir,
+        "b.yaml",
+        "name: Second\nsteps:\n  - action: wait\n    duration: 50ms\n",
+    );
+    let run = |art: &str| {
+        let art = s.scratch(art);
+        s.opendhu(&[
+            "test",
+            dir.to_str().unwrap(),
+            "--artifacts-dir",
+            art.to_str().unwrap(),
+        ])
+    };
+    let first = text(&run("art1"));
+    assert!(first.contains("Test: First [1/2]"), "{first}");
+    assert!(!first.contains(" left"), "no history yet: {first}");
+    let second = text(&run("art2"));
+    assert!(
+        second.contains("Test: First [1/2] · under a minute left"),
+        "{second}"
+    );
+    assert!(
+        second.contains("Test: Second [2/2] · under a minute left"),
+        "{second}"
+    );
+}

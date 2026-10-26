@@ -71,6 +71,13 @@ the whole run (`Test: Robotaxi ride ... [6/14]`, counted across every suite of `
 suite header with its place among the suites (`[suite 2/4]`), and each step with its place in the test
 (`PASS 8/19. save Harbour Cafe as favorite`).
 
+After a run has passed once, test headers also show a rough estimate of the time left
+(`Test: Robotaxi ride ... [6/14] · ~5m left`). The estimate comes from the median of the last five
+passing durations of each test and of each suite's setup, kept in `opendhu/timings.json` under
+`$XDG_CONFIG_HOME` (default `~/.config`). Tests with no history count at the average of the others,
+and nothing is shown until there is some history. The file is advisory: delete it any time, and a
+missing or unreadable one is ignored.
+
 Register convenient names in a project `opendhu.yaml` without duplicating suite setup:
 
 ```yaml

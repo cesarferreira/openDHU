@@ -801,6 +801,8 @@ fn run_prepared(
     cancel: Arc<AtomicBool>,
     mut emulators: Option<&mut EmulatorPool>,
 ) -> Result<u8> {
+    let setup_started = Instant::now();
+    let suite_path = opts.paths[0].clone();
     let output = Arc::clone(&opts.output);
     check_cancel(&cancel)?;
     phase(&output, "Checking test tools...");
@@ -1191,6 +1193,12 @@ fn run_prepared(
         serde_json::to_vec_pretty(&metadata).unwrap(),
     )
     .map_err(|e| Error::Other(e.to_string()))?;
+    let mut timings = crate::timings::Timings::load();
+    timings.record_setup(
+        &suite_path,
+        u64::try_from(setup_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    );
+    timings.save();
     opts.cancel = Some(Arc::clone(&cancel));
     opts.usb = false; // Device setup is complete; ordinary tests use the leased session.
     opts.paths = tests;

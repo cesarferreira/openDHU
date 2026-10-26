@@ -34,6 +34,10 @@ pub struct Position {
     /// Tests already run in earlier suites, and the total across all of them (0 = just this run).
     pub tests_before: usize,
     pub tests_total: usize,
+    /// Expected time for the suites after this one, from earlier runs.
+    pub later_ms: Option<u64>,
+    /// Average expected test time across the whole run, for tests with no history.
+    pub avg_test_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -322,16 +326,30 @@ pub(crate) fn run_with_emulators(
     } else {
         tests.len()
     };
+    let mut timings = crate::timings::Timings::load();
     for (n, (file, test)) in tests.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
+        let remaining: Vec<Option<u64>> = tests[n..]
+            .iter()
+            .map(|(file, test)| timings.expected_test(file, &test.name))
+            .collect();
+        let left = crate::timings::total(&remaining)
+            .or_else(|| {
+                position
+                    .avg_test_ms
+                    .map(|average| average * remaining.len() as u64)
+            })
+            .map(|ms| ms + position.later_ms.unwrap_or(0));
         progress(
             &output,
             format!(
-                "Test: {} [{}/{tests_total}]",
+                "Test: {} [{}/{tests_total}]{}",
                 test.name,
-                position.tests_before + n + 1
+                position.tests_before + n + 1,
+                left.map(|ms| format!(" · {} left", crate::timings::left(ms)))
+                    .unwrap_or_default()
             ),
         );
         if let Some(app) = &opts.app {
@@ -391,6 +409,10 @@ pub(crate) fn run_with_emulators(
                 r.duration_ms as f64 / 1000.0
             ),
         );
+        if r.outcome == Outcome::Passed {
+            timings.record_test(file, &test.name, r.duration_ms);
+            timings.save();
+        }
         results.push(r);
     }
 
@@ -644,6 +666,7 @@ fn run_all(opts: Options) -> Result<u8> {
         ));
     }
     // Validate every suite before installing apps or acquiring a device.
+    let timings = crate::timings::Timings::load();
     let mut selected = Vec::new();
     for suite in suites {
         let managed = crate::suite::is_suite(&suite.path)?;
@@ -664,7 +687,12 @@ fn run_all(opts: Options) -> Result<u8> {
                 suite.path.display(),
             )));
         }
-        selected.push((suite, tests.len()));
+        let known: Vec<Option<u64>> = tests
+            .iter()
+            .map(|(file, test)| timings.expected_test(file, &test.name))
+            .collect();
+        let setup = timings.expected_setup(&suite.path);
+        selected.push((suite, tests.len(), known, setup));
     }
     if selected.is_empty() {
         return Err(Error::InvalidArgs(match &opts.filter {
@@ -673,9 +701,9 @@ fn run_all(opts: Options) -> Result<u8> {
         }));
     }
     if opts.validate {
-        let total: usize = selected.iter().map(|(_, count)| count).sum();
+        let total: usize = selected.iter().map(|(_, count, ..)| count).sum();
         if opts.json {
-            let suites: Vec<_> = selected.iter().map(|(s, count)| serde_json::json!({"name": s.name, "path": s.path, "tests": count})).collect();
+            let suites: Vec<_> = selected.iter().map(|(s, count, ..)| serde_json::json!({"name": s.name, "path": s.path, "tests": count})).collect();
             println!(
                 "{}",
                 serde_json::json!({"valid": true, "suites": suites, "tests": total})
@@ -692,7 +720,7 @@ fn run_all(opts: Options) -> Result<u8> {
         Some(dir) => dir,
         None => {
             let dir = PathBuf::from("build/test-results");
-            let names: Vec<&str> = selected.iter().map(|(s, _)| s.name.as_str()).collect();
+            let names: Vec<&str> = selected.iter().map(|(s, ..)| s.name.as_str()).collect();
             reset_artifacts(&dir, &names);
             dir
         }
@@ -702,9 +730,24 @@ fn run_all(opts: Options) -> Result<u8> {
     let mut exit_code = 0;
     let mut emulators = crate::suite::EmulatorPool::default();
     let suite_count = selected.len();
-    let tests_total: usize = selected.iter().map(|(_, count)| count).sum();
+    let tests_total: usize = selected.iter().map(|(_, count, ..)| count).sum();
+    let all_known: Vec<Option<u64>> = selected
+        .iter()
+        .flat_map(|(_, _, known, _)| known.iter().copied())
+        .collect();
+    let avg_test_ms = crate::timings::total(&all_known).map(|sum| sum / all_known.len() as u64);
+    // Expected time of each suite: its tests (unknown ones at the average) plus its setup.
+    let suite_ms: Vec<u64> = selected
+        .iter()
+        .map(|(_, count, known, setup)| {
+            let tests = crate::timings::total(known)
+                .or_else(|| avg_test_ms.map(|average| average * *count as u64))
+                .unwrap_or(0);
+            tests + setup.unwrap_or(0)
+        })
+        .collect();
     let mut tests_before = 0;
-    for (n, (suite, count)) in selected.into_iter().enumerate() {
+    for (n, (suite, count, ..)) in selected.into_iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
@@ -716,6 +759,8 @@ fn run_all(opts: Options) -> Result<u8> {
             suite: Some((n + 1, suite_count)),
             tests_before,
             tests_total,
+            later_ms: avg_test_ms.map(|_| suite_ms[n + 1..].iter().sum()),
+            avg_test_ms,
         };
         tests_before += count;
         child.cancel = Some(Arc::clone(&cancel));
