@@ -694,7 +694,12 @@ fn phase(output: &crate::test_output::Output, message: impl std::fmt::Display) {
     {
         test_cmd::progress(
             output,
-            format!("  took {:.1}s: {previous}", started.elapsed().as_secs_f64()),
+            // A trailing "..." would make the output layer draw this as a transient spinner.
+            format!(
+                "  took {:.1}s: {}",
+                started.elapsed().as_secs_f64(),
+                previous.trim_end_matches('.')
+            ),
         );
     }
     let message = message.to_string();
