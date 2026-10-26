@@ -117,10 +117,14 @@ pub fn step_log(t: &TestResult) -> String {
 }
 
 fn label(s: &StepResult) -> String {
+    let name = match &s.label {
+        Some(label) => format!("{} [{label}]", s.action),
+        None => s.action.clone(),
+    };
     if s.index == 0 {
-        s.action.clone()
+        name
     } else {
-        format!("{}. {}", s.index, s.action)
+        format!("{}. {name}", s.index)
     }
 }
 
@@ -514,6 +518,7 @@ mod tests {
         StepResult {
             index,
             action: action.into(),
+            label: None,
             outcome,
             detail: detail.into(),
             duration_ms: 1500,

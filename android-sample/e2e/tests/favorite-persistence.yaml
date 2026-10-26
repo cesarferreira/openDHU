@@ -3,39 +3,53 @@ backend: native
 requirements: [touchInput, screenshots]
 steps:
   - action: app.open
+    as: launch the app on the car screen
   - action: ui.tap
+    as: clear any saved favorite
     text: Reset favorite
     timeout: 20s
   - action: ui.expect
+    as: nothing is saved yet
     text: No favorite saved
     timeout: 20s
   - action: ui.tap
+    as: open the places list
     text: Browse places
     timeout: 20s
   - action: ui.expect
+    as: places list is showing
     text: Riverside Park
     timeout: 20s
   - action: ui.tap
+    as: open Harbour Cafe
     text: Harbour Cafe
     timeout: 20s
   - action: ui.expect
+    as: cafe details are shown
     text: Coffee by the water
     timeout: 20s
   - action: ui.tap
+    as: save Harbour Cafe as favorite
     text: Save favorite
     timeout: 10s
   - action: ui.expect
+    as: favorite shows Harbour Cafe
     text: "Saved place: Harbour Cafe"
     timeout: 20s
   - action: app.restart
+    as: restart the app
   - action: ui.expect
+    as: favorite survived the restart
     text: "Saved place: Harbour Cafe"
     timeout: 30s
   - action: ui.tap
+    as: open the saved favorite
     text: "Saved place: Harbour Cafe"
     timeout: 20s
   - action: ui.expect
+    as: cafe details are shown again
     text: Coffee by the water
     timeout: 20s
   - action: screenshot
+    as: capture the restored favorite
     path: screenshots/favorite-restored.png

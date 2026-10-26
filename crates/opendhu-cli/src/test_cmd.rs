@@ -145,31 +145,9 @@ pub(crate) fn progress(output: &crate::test_output::Output, message: impl std::f
     output.line(message);
 }
 
-fn step_description(step: &opendhu_test::schema::Step) -> String {
-    use opendhu_test::schema::Step;
-    match step {
-        Step::UiTap { text, until, .. } => format!(
-            " {text:?}{}",
-            until
-                .as_ref()
-                .map(|text| format!(" until {text:?}"))
-                .unwrap_or_default()
-        ),
-        Step::UiWaitFor { text, .. } | Step::UiExpect { text, .. } => format!(" {text:?}"),
-        Step::HttpRequest { method, url, .. } => format!(" {method:?} {url}"),
-        Step::Wait { duration } => format!(" ({})", opendhu_test::runner::fmt_dur(duration.0)),
-        Step::Screenshot { path } => format!(" {path}"),
-        _ => String::new(),
-    }
-}
-
-fn print_step(
-    output: &crate::test_output::Output,
-    s: &opendhu_test::StepResult,
-    step: Option<&opendhu_test::schema::Step>,
-) {
-    use opendhu_test::schema::Step;
-
+/// One line per step: the label says what the step is for. Mechanics (status codes, poll counts,
+/// artifact paths) are shown only when the step did not pass, or with `--verbose`.
+fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult, verbose: bool) {
     let tag = match s.outcome {
         Outcome::Passed => "PASS",
         Outcome::Failed => "FAIL",
@@ -179,21 +157,23 @@ fn print_step(
     let name = if s.index == 0 {
         s.action.clone()
     } else {
-        format!("{}. {}", s.index, s.action)
+        format!("{}.", s.index)
     };
-    let detail = match (s.outcome, step) {
-        (Outcome::Passed, Some(Step::UiExpect { text, .. } | Step::UiWaitFor { text, .. })) => {
-            format!("projected text {text:?} visible")
-        }
-        _ => s.detail.clone(),
+    let what = s.label.as_deref().unwrap_or(&s.action);
+    let what = if s.index == 0 { "preflight" } else { what };
+    let time = format!("({:.1}s)", s.duration_ms as f64 / 1000.0);
+    if s.outcome == Outcome::Passed && !verbose {
+        progress(output, format!("  {tag} {name} {what} {time}"));
+        return;
+    }
+    let label = if s.label.is_some() {
+        format!("{what} [{}]", s.action)
+    } else {
+        what.to_string()
     };
     progress(
         output,
-        format!(
-            "  {tag} {name}: {} ({:.1}s)",
-            detail,
-            s.duration_ms as f64 / 1000.0
-        ),
+        format!("  {tag} {name} {label}: {} {time}", s.detail),
     );
 }
 
@@ -318,6 +298,7 @@ pub(crate) fn run_with_emulators(
         skip_unsupported: opts.skip_unsupported,
         clock: &clock,
     };
+    let verbose = opts.verbose;
     let mut results = Vec::new();
     for (file, test) in &tests {
         if cancel.load(Ordering::SeqCst) {
@@ -331,23 +312,15 @@ pub(crate) fn run_with_emulators(
         let mut r =
             run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
                 Progress::Started { index, action } => {
-                    let description = index
-                        .checked_sub(1)
-                        .and_then(|n| test.steps.get(n))
-                        .map(step_description)
-                        .unwrap_or_default();
-                    let name = if index == 0 {
-                        action.to_string()
-                    } else {
-                        format!("{index}. {action}")
+                    let label = index.checked_sub(1).and_then(|n| test.step_label(n));
+                    let name = match (index, label) {
+                        (0, _) => action.to_string(),
+                        (_, Some(label)) => format!("{index}. {label}"),
+                        (_, None) => format!("{index}. {action}"),
                     };
-                    progress(&output, format!("  RUN {name}{description}"));
+                    progress(&output, format!("  RUN {name}"));
                 }
-                Progress::Finished(step) => print_step(
-                    &output,
-                    step,
-                    step.index.checked_sub(1).and_then(|n| test.steps.get(n)),
-                ),
+                Progress::Finished(step) => print_step(&output, step, verbose),
             });
         if let Some(app) = &opts.app {
             let health = app.monitor.finish();
@@ -364,12 +337,13 @@ pub(crate) fn run_with_emulators(
                 let step = opendhu_test::model::StepResult {
                     index: r.steps.last().map_or(0, |step| step.index) + 1,
                     action: "app.health".into(),
+                    label: None,
                     outcome,
                     detail: detail.clone(),
                     duration_ms: 0,
                     exit_code: Some(code),
                 };
-                print_step(&output, &step, None);
+                print_step(&output, &step, verbose);
                 r.steps.push(step);
                 r.message = Some(match r.message.take() {
                     Some(message) => format!("{message}; {detail}"),

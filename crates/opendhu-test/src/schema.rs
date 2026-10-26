@@ -20,6 +20,21 @@ pub struct TestFile {
     #[serde(default)]
     pub requirements: Vec<Requirement>,
     pub steps: Vec<Step>,
+    /// Author-written `as:` label per step, parallel to `steps`. Filled in by `parse`.
+    #[serde(skip)]
+    pub labels: Vec<Option<String>>,
+}
+
+impl TestFile {
+    /// What step `index` (0-based) is for: the author's `as:` label, else a description derived
+    /// from the step's arguments.
+    pub fn step_label(&self, index: usize) -> Option<String> {
+        let step = self.steps.get(index)?;
+        Some(match self.labels.get(index).and_then(Option::as_ref) {
+            Some(label) => label.clone(),
+            None => step.describe(),
+        })
+    }
 }
 
 /// Capabilities a test needs. Only ones the backend trait can report are accepted.
@@ -127,6 +142,41 @@ impl Step {
             Self::Swipe { .. } => "swipe",
             Self::AssertStatus { .. } => "assert.status",
             Self::WaitFor { .. } => "waitFor",
+        }
+    }
+}
+
+impl Step {
+    /// Default human description of the step, used when the test gives no `as:` label.
+    pub fn describe(&self) -> String {
+        use crate::runner::fmt_dur;
+        match self {
+            Self::HttpRequest { method, url, .. } => format!("{method:?} {url}"),
+            Self::AppOpen => "open the app".into(),
+            Self::AppRestart => "restart the app".into(),
+            Self::KeyboardType { text, .. } | Self::DeviceInputText { text } => {
+                format!("type {text:?}")
+            }
+            Self::UiWaitFor { text, .. } => format!("wait for {text:?}"),
+            Self::UiExpect { text, .. } => format!("expect {text:?} visible"),
+            Self::UiTap { text, until, .. } => match until {
+                Some(until) => format!("tap {text:?} until {until:?}"),
+                None => format!("tap {text:?}"),
+            },
+            Self::FocusVideo { value } => {
+                format!("video focus {}", if value.0 { "on" } else { "off" })
+            }
+            Self::Wait { duration } => format!("wait {}", fmt_dur(duration.0)),
+            Self::Screenshot { path } => format!("screenshot {path}"),
+            Self::Tap { x, y } => format!("tap at ({x}, {y})"),
+            Self::Swipe { from, to, .. } => {
+                format!("swipe ({}, {}) to ({}, {})", from[0], from[1], to[0], to[1])
+            }
+            Self::Key { value, long } => {
+                format!("press {value}{}", if *long { " (long)" } else { "" })
+            }
+            Self::AssertStatus { .. } => "assert status".into(),
+            Self::WaitFor { .. } => "wait for status condition".into(),
         }
     }
 }
@@ -326,10 +376,35 @@ pub fn word(s: FocusState) -> &'static str {
 
 /// Parse and validate a test file. Every failure is an `InvalidArgs` error (exit code 2).
 pub fn parse(text: &str) -> Result<TestFile> {
-    let file: TestFile = serde_norway::from_str(text)
-        .map_err(|e| Error::InvalidArgs(format!("invalid test file: {e}")))?;
+    let invalid = |e: serde_norway::Error| Error::InvalidArgs(format!("invalid test file: {e}"));
+    let mut value: serde_norway::Value = serde_norway::from_str(text).map_err(invalid)?;
+    let labels = take_labels(&mut value)?;
+    let mut file: TestFile = serde_norway::from_value(value).map_err(invalid)?;
+    file.labels = labels;
     validate(&file)?;
     Ok(file)
+}
+
+/// Remove each step's optional `as:` label so the strict step schema never sees it.
+fn take_labels(value: &mut serde_norway::Value) -> Result<Vec<Option<String>>> {
+    let Some(steps) = value.get_mut("steps").and_then(|s| s.as_sequence_mut()) else {
+        return Ok(Vec::new());
+    };
+    let mut labels = Vec::with_capacity(steps.len());
+    for (n, step) in steps.iter_mut().enumerate() {
+        let label = match step.as_mapping_mut().and_then(|m| m.remove("as")) {
+            None => None,
+            Some(serde_norway::Value::String(s)) if !s.trim().is_empty() => Some(s),
+            Some(_) => {
+                return Err(Error::InvalidArgs(format!(
+                    "step {}: `as` must be a non-empty string",
+                    n + 1
+                )));
+            }
+        };
+        labels.push(label);
+    }
+    Ok(labels)
 }
 
 fn bad(step: usize, action: &str, msg: impl fmt::Display) -> Error {
@@ -488,6 +563,23 @@ steps:
 
     fn err(text: &str) -> String {
         parse(text).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn steps_use_their_as_label_or_a_derived_description() {
+        let t = parse(
+            "name: t\nsteps:\n  - action: ui.tap\n    as: save the cafe\n    text: Save\n    timeout: 1s\n  - action: tap\n    x: 5\n    y: 6\n",
+        )
+        .unwrap();
+        assert_eq!(t.step_label(0).unwrap(), "save the cafe");
+        assert_eq!(t.step_label(1).unwrap(), "tap at (5, 6)");
+        assert!(t.step_label(2).is_none());
+    }
+
+    #[test]
+    fn an_empty_or_non_string_label_is_rejected() {
+        let bad = "name: t\nsteps:\n  - action: wait\n    as: \"\"\n    duration: 1s\n";
+        assert!(err(bad).contains("`as` must be a non-empty string"));
     }
 
     #[test]

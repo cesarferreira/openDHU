@@ -209,6 +209,7 @@ pub fn run_test_with_progress(
     steps.push(StepResult {
         index: 0,
         action: "preflight".into(),
+        label: None,
         outcome: pre_outcome,
         detail: pre_detail,
         duration_ms: ms(cfg.clock.now() - pre_started),
@@ -240,6 +241,7 @@ pub fn run_test_with_progress(
                 steps.push(StepResult {
                     index,
                     action: step.action().into(),
+                    label: test.step_label(n),
                     outcome: Outcome::Skipped,
                     detail: "not run: an earlier step did not pass".into(),
                     duration_ms: 0,
@@ -277,6 +279,7 @@ pub fn run_test_with_progress(
             steps.push(StepResult {
                 index,
                 action: step.action().into(),
+                label: test.step_label(n),
                 outcome: end.outcome,
                 detail: end.detail.clone(),
                 duration_ms: ms(cfg.clock.now() - t0),
@@ -301,6 +304,7 @@ pub fn run_test_with_progress(
         steps.push(StepResult {
             index: test.steps.len() + 1,
             action: "cleanup.focus.video".into(),
+            label: None,
             outcome: end.outcome,
             detail: end.detail.clone(),
             duration_ms: ms(cfg.clock.now() - t0),

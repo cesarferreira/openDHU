@@ -85,7 +85,7 @@ while True:
         if not data: break
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
-        if os.environ.get("OPENDHU_TEST_INTERRUPT_PTY") == "1" and b"wait (10s)" in data and not sent:
+        if os.environ.get("OPENDHU_TEST_INTERRUPT_PTY") == "1" and b"wait 10s" in data and not sent:
             p.send_signal(signal.SIGTERM)
             sent = True
     except OSError:
@@ -189,7 +189,7 @@ fn interactive_defaults_animate_a_wait_then_leave_its_result_and_preserve_json()
         "wait did not animate: {shown}"
     );
     assert!(
-        shown.contains("wait (500ms)") && shown.contains("\x1b[32mPASS\x1b[0m  1 test"),
+        shown.contains("wait 500ms") && shown.contains("\x1b[32mPASS\x1b[0m  1 test"),
         "{shown}"
     );
     let mut static_args = args.to_vec();

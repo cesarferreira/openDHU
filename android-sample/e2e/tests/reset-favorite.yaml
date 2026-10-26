@@ -3,33 +3,45 @@ backend: native
 requirements: [touchInput, screenshots]
 steps:
   - action: app.open
+    as: launch the app on the car screen
   - action: ui.tap
+    as: open the places list
     text: Browse places
     timeout: 30s
   - action: ui.expect
+    as: places list is showing
     text: Riverside Park
     timeout: 30s
   - action: ui.tap
+    as: open Central Library
     text: Central Library
     timeout: 20s
   - action: ui.expect
+    as: library details are shown
     text: Books and a quiet corner
     timeout: 20s
   - action: ui.tap
+    as: save Central Library as favorite
     text: Save favorite
     timeout: 10s
   - action: ui.expect
+    as: favorite shows Central Library
     text: "Saved place: Central Library"
     timeout: 20s
   - action: ui.tap
+    as: reset the favorite
     text: Reset favorite
     timeout: 10s
   - action: ui.expect
+    as: nothing is saved
     text: No favorite saved
     timeout: 20s
   - action: app.restart
+    as: restart the app
   - action: ui.expect
+    as: favorite is still cleared after restart
     text: No favorite saved
     timeout: 30s
   - action: screenshot
+    as: capture the cleared state
     path: screenshots/favorite-cleared.png

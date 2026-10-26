@@ -202,6 +202,24 @@ requirements, an empty `steps` list, durations without a unit or above 10 minute
 all rejected with exit code 2. YAML files are read with `serde_norway`, a maintained fork of the deprecated
 `serde_yaml`. It accepts `off` as a word, a boolean or a quoted string.
 
+### Step labels
+
+Any step may carry an optional `as:` label saying what the step is for, like the GIVEN/WHEN/THEN
+name of a unit test:
+
+```yaml
+  - action: ui.tap
+    as: save Harbour Cafe as favorite
+    text: Save favorite
+    timeout: 10s
+```
+
+The run prints the label instead of the mechanics, so a passing step reads
+`PASS 8. save Harbour Cafe as favorite (0.4s)`. Without `as:`, openDHU derives a description from the
+step's arguments (`tap "Save favorite"`, `GET /health`, `tap at (159, 383)`). A step that does not pass
+also prints its detail (status codes, poll counts, artifact paths); `--verbose` prints that detail for
+passing steps too. Labels appear in `logs/`, JUnit and JSON reports. `as:` must be a non-empty string.
+
 | Action | Keys | Passes when |
 |---|---|---|
 | `focus.video` | `value: on\|off` | the backend accepted the command and its readback does not contradict it |

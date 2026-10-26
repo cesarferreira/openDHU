@@ -17,6 +17,9 @@ pub struct StepResult {
     /// 1-based position in the test. `0` is the preflight check.
     pub index: usize,
     pub action: String,
+    /// What the step is for: the test's `as:` label, else a description of its arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub outcome: Outcome,
     pub detail: String,
     pub duration_ms: u64,
