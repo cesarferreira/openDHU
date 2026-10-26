@@ -558,6 +558,7 @@ impl<'a> App<'a> {
         let link = match &self.status {
             Some(s) => s.summary.clone(),
             // `aa test` boots its own device after building, so there is nothing to start by hand.
+            None if self.log.is_some() && !running => "test run finished; no session".to_string(),
             None if running => "waiting for the test run to start a session".to_string(),
             None => "no session; start one with `aa start`".to_string(),
         };

@@ -226,6 +226,17 @@ impl Output {
         viewer.map_or_else(Vec::new, |v| v.transcript)
     }
 
+    /// Show `message` in the viewer's log only. The run's error is printed again by `main` once the
+    /// viewer closes, so it stays out of the transcript replayed then.
+    pub(crate) fn show_in_viewer(&self, message: &str) {
+        let mut guard = self.viewer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(viewer) = guard.as_mut() {
+            for line in message.split('\n') {
+                let _ = writeln!(viewer.pipe, "{line}");
+            }
+        }
+    }
+
     pub(crate) fn print(&self, lines: &[String]) {
         let mut out: Box<dyn Write> = if self.json {
             Box::new(std::io::stderr().lock())

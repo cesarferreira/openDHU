@@ -98,7 +98,7 @@ preferences or inject test state. Each case opens its own app session and establ
 needs through normal controls. Assertions follow one-shot navigation, save and reset actions; a sent touch alone is
 not success. These are local UI/persistence journeys, not network integration tests.
 
-Reports, screenshots, OCR and host/logcat logs go under `samples/android/build/test-results/` (replaced on each run)
+Reports, screenshots, OCR and host/logcat logs go under `android-sample/build/test-results/` (replaced on each run)
 (relative to the repository root), covered by the Android project's existing build ignore rule.
 Open `results.html` in the run folder for a summary, expandable steps, test logs and screenshots.
 JSON and JUnit reports are also generated. Override the location with `--artifacts-dir PATH`.

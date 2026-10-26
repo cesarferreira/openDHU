@@ -1261,7 +1261,7 @@ mod tests {
     #[test]
     fn suite_artifacts_are_relative_to_yaml_and_cli_override_is_exact() {
         let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/android/e2e/suite.yaml");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../android-sample/e2e/suite.yaml");
         let (suite, _) = load(&path).unwrap();
         let base = path.parent().unwrap().join("../build/test-results");
         assert_eq!(suite.artifacts_dir, Some(base.clone()));

@@ -435,7 +435,7 @@ Suites default to `build/test-results`, replaced on each run, with HTML, JSON an
 Set top-level `artifactsDir: ../build/test-results` in a suite YAML to choose its base directory
 relative to that YAML file. Each run replaces the contents there. An explicit
 `--artifacts-dir` (or configured `test.artifacts_dir`) overrides this with the exact directory supplied.
-The included Android sample uses this setting to keep reports in `samples/android/build/test-results/`.
+The included Android sample uses this setting to keep reports in `android-sample/build/test-results/`.
 
 Suites also save `suite.json`, `logcat.txt`, `head-unit.log`, and `ui/` screenshots, scaled images, OCR TSVs and
 OCR diagnostics. The private daemon authentication file is removed rather than archived. Inspect

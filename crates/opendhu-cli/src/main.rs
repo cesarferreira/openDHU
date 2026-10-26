@@ -422,7 +422,8 @@ fn run(cli: Cli) -> Result<u8> {
             } else {
                 None
             };
-            test_cmd::run(test_cmd::Options {
+            let shown = std::sync::Arc::clone(&output);
+            let result = test_cmd::run(test_cmd::Options {
                 paths,
                 list,
                 batch: false,
@@ -444,7 +445,14 @@ fn run(cli: Cli) -> Result<u8> {
                 app: None,
                 runtime_dir: None,
                 json,
-            })
+            });
+            // Without this the viewer shows an empty log until it is closed and the error is printed.
+            if let Err(e) = &result
+                && _tui.is_some()
+            {
+                shown.show_in_viewer(&format!("ERROR {e}"));
+            }
+            result
         }
         Command::Doctor {
             dhu_path,

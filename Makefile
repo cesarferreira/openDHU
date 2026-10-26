@@ -171,10 +171,10 @@ hw: hw-dhu hw-native
 # The sample is standalone; ordinary Rust build/test targets never require an Android SDK.
 .PHONY: sample-build sample-check sample-test sample-validate
 sample-build:
-	cd samples/android && ./gradlew :app:assembleDebug
+	cd android-sample && ./gradlew :app:assembleDebug
 
 sample-check:
-	cd samples/android && ./gradlew :app:testDebugUnitTest :app:lintDebug
+	cd android-sample && ./gradlew :app:testDebugUnitTest :app:lintDebug
 	$(MAKE) sample-validate
 
 sample-test: sample-build

@@ -75,7 +75,7 @@ steps:
 ```
 
 Managed suites handle device setup, APK installation, and cleanup. Try the included
-[Android demo](samples/android/README.md), which tests browsing, favorite persistence, and reset:
+[Android demo](android-sample/README.md), which tests browsing, favorite persistence, and reset:
 
 ```bash
 make sample-build                       # Requires Android SDK and JDK 17+
@@ -90,7 +90,7 @@ aa test all --usb                       # Run every registered suite on the USB 
 ```
 
 OCR tests require Tesseract with English language data. Provision Android Auto on the phone or
-emulator first; see the [sample setup](samples/android/README.md#try-android-auto).
+emulator first; see the [sample setup](android-sample/README.md#try-android-auto).
 Open `results.html` in the reported artifacts directory for steps, screenshots, and logs.
 Use `--validate` to check YAML without starting devices or sessions.
 
