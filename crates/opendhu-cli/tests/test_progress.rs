@@ -40,7 +40,7 @@ fn progress_is_flushed_before_a_long_step_finishes() {
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut observed = Vec::new();
     while let Ok(line) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-        let ready = line.contains("RUN 2. wait");
+        let ready = line.contains("RUN 2/2. wait");
         observed.push(line);
         if ready {
             break;
@@ -53,11 +53,11 @@ fn progress_is_flushed_before_a_long_step_finishes() {
     let _ = child.wait();
     reader.join().unwrap();
     assert!(
-        observed.iter().any(|s| s.contains("RUN 2. wait")),
+        observed.iter().any(|s| s.contains("RUN 2/2. wait")),
         "no live step progress: {observed:?}"
     );
     assert!(
-        observed.iter().any(|s| s.contains("PASS 1. wait")),
+        observed.iter().any(|s| s.contains("PASS 1/2. wait")),
         "completed step was not reported before the next wait: {observed:?}"
     );
     assert!(running, "progress arrived only after the test exited");
@@ -200,7 +200,7 @@ fn interactive_defaults_animate_a_wait_then_leave_its_result_and_preserve_json()
         !text(&static_output).contains("\x1b[2K"),
         "spinner must be disabled"
     );
-    assert!(text(&static_output).contains("RUN 1. wait"));
+    assert!(text(&static_output).contains("RUN 1/1. wait"));
     let plain = s.opendhu(&args);
     assert_eq!(code(&plain), 0, "{}", text(&plain));
     assert!(

@@ -445,6 +445,7 @@ fn run(cli: Cli) -> Result<u8> {
                 app: None,
                 runtime_dir: None,
                 json,
+                position: Default::default(),
             });
             // Without this the viewer shows an empty log until it is closed and the error is printed.
             if let Err(e) = &result

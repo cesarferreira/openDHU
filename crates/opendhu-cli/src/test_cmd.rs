@@ -26,6 +26,16 @@ pub enum ReportFormat {
     Html,
 }
 
+/// Where this run sits in a larger one, so progress can say "test 6 of 14, suite 2 of 4".
+#[derive(Clone, Default)]
+pub struct Position {
+    /// 1-based suite number and the number of suites, when running several.
+    pub suite: Option<(usize, usize)>,
+    /// Tests already run in earlier suites, and the total across all of them (0 = just this run).
+    pub tests_before: usize,
+    pub tests_total: usize,
+}
+
 #[derive(Clone)]
 pub struct Options {
     pub paths: Vec<PathBuf>,
@@ -46,6 +56,7 @@ pub struct Options {
     pub artifacts_dir: Option<PathBuf>,
     pub skip_unsupported: bool,
     pub json: bool,
+    pub position: Position,
 }
 
 /// Expand files and directories (recursively, sorted) into test files.
@@ -147,7 +158,12 @@ pub(crate) fn progress(output: &crate::test_output::Output, message: impl std::f
 
 /// One line per step: the label says what the step is for. Mechanics (status codes, poll counts,
 /// artifact paths) are shown only when the step did not pass, or with `--verbose`.
-fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult, verbose: bool) {
+fn print_step(
+    output: &crate::test_output::Output,
+    s: &opendhu_test::StepResult,
+    total: usize,
+    verbose: bool,
+) {
     let tag = match s.outcome {
         Outcome::Passed => "PASS",
         Outcome::Failed => "FAIL",
@@ -157,7 +173,7 @@ fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult,
     let name = if s.index == 0 {
         s.action.clone()
     } else {
-        format!("{}.", s.index)
+        format!("{}/{total}.", s.index)
     };
     let what = s.label.as_deref().unwrap_or(&s.action);
     let what = if s.index == 0 { "preflight" } else { what };
@@ -300,11 +316,24 @@ pub(crate) fn run_with_emulators(
     };
     let verbose = opts.verbose;
     let mut results = Vec::new();
-    for (file, test) in &tests {
+    let position = opts.position.clone();
+    let tests_total = if position.tests_total > 0 {
+        position.tests_total
+    } else {
+        tests.len()
+    };
+    for (n, (file, test)) in tests.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
-        progress(&output, format!("Test: {}", test.name));
+        progress(
+            &output,
+            format!(
+                "Test: {} [{}/{tests_total}]",
+                test.name,
+                position.tests_before + n + 1
+            ),
+        );
         if let Some(app) = &opts.app {
             progress(&output, format!("  Resetting application {}...", app.label));
             app.reset()?;
@@ -313,14 +342,15 @@ pub(crate) fn run_with_emulators(
             run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
                 Progress::Started { index, action } => {
                     let label = index.checked_sub(1).and_then(|n| test.step_label(n));
+                    let total = test.steps.len();
                     let name = match (index, label) {
                         (0, _) => action.to_string(),
-                        (_, Some(label)) => format!("{index}. {label}"),
-                        (_, None) => format!("{index}. {action}"),
+                        (_, Some(label)) => format!("{index}/{total}. {label}"),
+                        (_, None) => format!("{index}/{total}. {action}"),
                     };
                     progress(&output, format!("  RUN {name}"));
                 }
-                Progress::Finished(step) => print_step(&output, step, verbose),
+                Progress::Finished(step) => print_step(&output, step, test.steps.len(), verbose),
             });
         if let Some(app) = &opts.app {
             let health = app.monitor.finish();
@@ -343,7 +373,7 @@ pub(crate) fn run_with_emulators(
                     duration_ms: 0,
                     exit_code: Some(code),
                 };
-                print_step(&output, &step, verbose);
+                print_step(&output, &step, step.index, verbose);
                 r.steps.push(step);
                 r.message = Some(match r.message.take() {
                     Some(message) => format!("{message}; {detail}"),
@@ -671,7 +701,10 @@ fn run_all(opts: Options) -> Result<u8> {
     let mut results = Vec::new();
     let mut exit_code = 0;
     let mut emulators = crate::suite::EmulatorPool::default();
-    for (suite, count) in selected {
+    let suite_count = selected.len();
+    let tests_total: usize = selected.iter().map(|(_, count)| count).sum();
+    let mut tests_before = 0;
+    for (n, (suite, count)) in selected.into_iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
@@ -679,6 +712,12 @@ fn run_all(opts: Options) -> Result<u8> {
         let mut child = opts.clone();
         child.paths = vec![suite.path.clone()];
         child.batch = true;
+        child.position = Position {
+            suite: Some((n + 1, suite_count)),
+            tests_before,
+            tests_total,
+        };
+        tests_before += count;
         child.cancel = Some(Arc::clone(&cancel));
         let dir = artifacts.join(&suite.name);
         child.artifacts_dir = Some(dir.clone());

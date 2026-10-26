@@ -653,7 +653,14 @@ pub fn run(mut opts: test_cmd::Options, emulators: Option<&mut EmulatorPool>) ->
     }
     test_cmd::progress(
         &output,
-        format!("Suite: {} ({} tests)", opts.paths[0].display(), tests.len()),
+        match opts.position.suite {
+            Some((n, of)) => format!(
+                "Suite: {} ({} tests) [suite {n}/{of}]",
+                opts.paths[0].display(),
+                tests.len()
+            ),
+            None => format!("Suite: {} ({} tests)", opts.paths[0].display(), tests.len()),
+        },
     );
     let cancel = match &opts.cancel {
         Some(cancel) => Arc::clone(cancel),
