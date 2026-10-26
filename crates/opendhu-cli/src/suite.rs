@@ -733,6 +733,55 @@ fn run_build(
     check_cancel(cancel)
 }
 
+/// Identity of the APK file on the host: its size and modification time change on every rebuild.
+fn apk_identity(apk: &Path) -> Option<(u64, String)> {
+    let meta = std::fs::metadata(apk).ok()?;
+    let modified = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some((
+        meta.len(),
+        format!("{}-{}", meta.len(), modified.as_nanos()),
+    ))
+}
+
+fn apk_marker(environment: &Environment) -> String {
+    format!("/data/local/tmp/opendhu-apk-{}", environment.package)
+}
+
+/// Installing a large debug APK takes many seconds, so a device that already runs exactly this
+/// build (same size and modification time as when it was last installed by a suite, and the
+/// package still installed at that size) keeps it. Any doubt means a normal install.
+fn apk_is_installed(adb: &Path, serial: &str, environment: &Environment) -> bool {
+    let Some((size, identity)) = apk_identity(&environment.apk) else {
+        return false;
+    };
+    let recorded = device::adb(adb, serial, &["shell", "cat", &apk_marker(environment)]);
+    if !recorded.is_ok_and(|text| text.trim() == identity) {
+        return false;
+    }
+    let Ok(path) = device::adb(adb, serial, &["shell", "pm", "path", &environment.package]) else {
+        return false;
+    };
+    let Some(path) = path
+        .lines()
+        .next()
+        .and_then(|l| l.trim().strip_prefix("package:"))
+    else {
+        return false;
+    };
+    device::adb(adb, serial, &["shell", "stat", "-c", "%s", path.trim()])
+        .is_ok_and(|text| text.trim().parse::<u64>() == Ok(size))
+}
+
+fn record_installed_apk(adb: &Path, serial: &str, environment: &Environment) {
+    if let Some((_, identity)) = apk_identity(&environment.apk) {
+        let _ = device::adb(
+            adb,
+            serial,
+            &["shell", "echo", &identity, ">", &apk_marker(environment)],
+        );
+    }
+}
+
 fn run_prepared(
     mut opts: test_cmd::Options,
     suite: Suite,
@@ -970,7 +1019,21 @@ fn run_prepared(
             suite.environment.apk.display()
         ),
     );
-    device::adb(&lease.adb, &serial, &["install", "-r", "-t", apk])?;
+    if apk_is_installed(&lease.adb, &serial, &suite.environment) {
+        phase(
+            &output,
+            "APK unchanged since the last install; skipping it...",
+        );
+        // Installing stops the app; do the same so it starts fresh.
+        device::adb(
+            &lease.adb,
+            &serial,
+            &["shell", "am", "force-stop", &suite.environment.package],
+        )?;
+    } else {
+        device::adb(&lease.adb, &serial, &["install", "-r", "-t", apk])?;
+        record_installed_apk(&lease.adb, &serial, &suite.environment);
+    }
     check_cancel(&cancel)?;
     for permission in &suite.environment.permissions {
         check_cancel(&cancel)?;
@@ -1135,6 +1198,20 @@ fn run_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apk_identity_changes_whenever_the_file_does() {
+        let dir = std::env::temp_dir().join(format!("aa-apk-identity-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let apk = dir.join("app.apk");
+        std::fs::write(&apk, b"one").unwrap();
+        let (size, first) = apk_identity(&apk).unwrap();
+        assert_eq!(size, 3);
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&apk, b"three").unwrap();
+        assert_ne!(apk_identity(&apk).unwrap().1, first);
+        assert!(apk_identity(&dir.join("missing.apk")).is_none());
+    }
 
     #[test]
     fn preferences_are_parsed_and_validated() {

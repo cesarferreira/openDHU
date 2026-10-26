@@ -367,7 +367,10 @@ tests:
 APK and test paths resolve relative to the suite file. `aa test` installs whatever APK is on disk, so after
 switching branches it can install a stale build. Set `environment.build` to rebuild first: the command runs
 before the APK check and install, output goes to `build.log` in the artifacts folder, and a nonzero exit
-stops the run before any device is touched. Gradle's incremental build keeps repeat runs cheap. The emulator must be a dedicated, provisioned
+stops the run before any device is touched. Gradle's incremental build keeps repeat runs cheap. The install itself is skipped when the device
+already runs this exact APK (same size and modification time as the last suite install, recorded in
+`/data/local/tmp/opendhu-apk-<package>`); the app is force-stopped instead, and any doubt means a normal
+install. The emulator must be a dedicated, provisioned
 Google Play phone AVD with Android Auto installed, developer mode enabled, and initial projection
 consent accepted. `adb`, `ffmpeg`, and `tesseract` with English data must be on PATH. Set `ANDROID_HOME`
 or `ANDROID_SDK_ROOT` to locate the Android SDK emulator, or put `emulator` on PATH.
