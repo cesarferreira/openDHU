@@ -668,6 +668,7 @@ fn screen_text(
     let mut last = String::new();
     let mut pending: Option<(u32, u32)> = None;
     let mut frames = 0u32;
+    let mut previous: Option<(Option<u64>, Vec<crate::screen::Word>)> = None;
     let mut taps: Vec<(u32, u32)> = Vec::new();
     let mut last_tap_at: Option<Duration> = None;
     loop {
@@ -693,11 +694,27 @@ fn screen_text(
                     || crate::screen::locate(words, text).is_some()
             }
         };
-        let words = match crate::screen::recognize_until(&image, || cfg.clock.cancelled(), answered)
+        // A screen that has not changed since the last frame reads the same, so reuse that result
+        // instead of running OCR again (steady-frame confirmation and idle polling hit this).
+        let fingerprint = std::fs::read(&image).ok().map(|bytes| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&bytes, &mut hasher);
+            std::hash::Hasher::finish(&hasher)
+        });
+        let words = match previous
+            .as_ref()
+            .filter(|(seen, _)| fingerprint.is_some() && *seen == fingerprint)
         {
-            Ok(words) => words,
-            Err(e) => return End::error(&e),
+            Some((_, words)) => words.clone(),
+            None => {
+                match crate::screen::recognize_until(&image, || cfg.clock.cancelled(), answered) {
+                    Ok(words) => words,
+                    Err(e) => return End::error(&e),
+                }
+            }
         };
+        previous = Some((fingerprint, words.clone()));
+
         frames += 1;
         // Completion wins over another tap, including when the desired screen was already open.
         if let Some(result) = until
