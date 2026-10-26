@@ -369,7 +369,14 @@ impl Shared {
         }
         let mut evidence = vec![format!("sent VideoFocusIndication {mode:?} (unrequested)")];
 
-        let deadline = Instant::now() + CONFIRM_WAIT;
+        // A phone that already reports the requested state sends nothing new, so waiting out the
+        // confirmation window would only delay the answer. Take one look and move on.
+        let deadline = Instant::now()
+            + if already {
+                Duration::ZERO
+            } else {
+                CONFIRM_WAIT
+            };
         let confirmed = loop {
             {
                 let i = self.lock();
@@ -917,7 +924,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
         let current = home.join(".config/opendhu/credentials");
         let cert = b"-----BEGIN CERTIFICATE-----\nlegacy\n";
-        assert_eq!(load_home_certificate(None, None, Some(&home)).unwrap(), None);
+        assert_eq!(
+            load_home_certificate(None, None, Some(&home)).unwrap(),
+            None
+        );
         std::fs::create_dir_all(&current).unwrap();
         std::fs::write(current.join("head-unit-cert.pem"), cert).unwrap();
         assert!(load_home_certificate(None, None, Some(&home)).is_err());

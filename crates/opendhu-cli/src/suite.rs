@@ -1077,6 +1077,7 @@ fn run_prepared(
     if !opts.usb {
         lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
+    let mut keep_server = false;
     let endpoint = if opts.usb {
         None
     } else {
@@ -1087,8 +1088,16 @@ fn run_prepared(
                 serial.clone(),
             ));
         }
-        phase(&output, "Restarting the Android Auto head-unit server...");
-        device::restart_head_unit_server(&lease.adb, &serial)?;
+        // The restart discards stale projection state. After a suite of this same run ended cleanly
+        // on this emulator and its server is still up, there is none, so keep it.
+        keep_server = cleanly_used(&serial)
+            && device::head_unit_server_running(&lease.adb, &serial).unwrap_or(false);
+        if keep_server {
+            phase(&output, "Keeping the running Android Auto head-unit server");
+        } else {
+            phase(&output, "Restarting the Android Auto head-unit server...");
+            device::restart_head_unit_server(&lease.adb, &serial)?;
+        }
         check_cancel(&cancel)?;
         let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;
         let port: u16 = port
@@ -1106,7 +1115,19 @@ fn run_prepared(
     if let Some(endpoint) = &endpoint {
         start_args.extend(["--native-tcp", endpoint]);
     }
-    suite_cli(&lease.exe, &lease.runtime, &start_args, Some(&cancel))?;
+    if let Err(error) = suite_cli(&lease.exe, &lease.runtime, &start_args, Some(&cancel)) {
+        if !keep_server {
+            return Err(error);
+        }
+        // The kept server may have been in a bad state after all: restart it once and retry.
+        check_cancel(&cancel)?;
+        phase(
+            &output,
+            "Head unit did not connect; restarting the Android Auto server and retrying...",
+        );
+        device::restart_head_unit_server(&lease.adb, &serial)?;
+        suite_cli(&lease.exe, &lease.runtime, &start_args, Some(&cancel))?;
+    }
     if opts.usb {
         phase(&output, "Waiting for USB phone to return to ADB...");
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -1196,8 +1217,30 @@ fn run_prepared(
         lease.runtime.join("daemon.log"),
         lease.artifacts.join("head-unit.log"),
     );
+    let serial = lease.serial.clone();
     lease.cleanup()?;
+    if let Some(serial) = serial {
+        note_cleanly_used(&serial);
+    }
     result
+}
+
+/// Emulators whose head-unit session an earlier suite of this run ended cleanly.
+static CLEANLY_USED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn cleanly_used(serial: &str) -> bool {
+    CLEANLY_USED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|s| s == serial)
+}
+
+fn note_cleanly_used(serial: &str) {
+    let mut used = CLEANLY_USED.lock().unwrap_or_else(|e| e.into_inner());
+    if !used.iter().any(|s| s == serial) {
+        used.push(serial.to_string());
+    }
 }
 
 #[cfg(test)]

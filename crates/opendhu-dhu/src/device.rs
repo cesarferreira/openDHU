@@ -133,6 +133,11 @@ pub fn command(program: &Path, args: &[&str], limit: Duration) -> Result<String>
     }
 }
 
+/// Whether Android Auto's developer head-unit server is running on the device.
+pub fn head_unit_server_running(program: &Path, serial: &str) -> Result<bool> {
+    server_running(program, serial)
+}
+
 fn server_running(program: &Path, serial: &str) -> Result<bool> {
     let services = adb(
         program,
