@@ -77,15 +77,17 @@ fn tapping_until_observes_completion_retries_and_preserves_timeout_and_cancellat
         );
         std::env::set_var("OPENDHU_TESSERACT", dir.join("tesseract"));
     }
+    // A target is tapped once two consecutive frames agree on it, and a tap is repeated only after
+    // the runner's 5s re-tap guard, so the timeout leaves room for one repeat.
     for (until, ready_after, cancel_after, outcome, taps) in [
         (true, 2, None, Outcome::Passed, 2),
         (true, 0, None, Outcome::Passed, 0),
         (true, usize::MAX, None, Outcome::Failed, 2),
         (false, usize::MAX, None, Outcome::Passed, 1),
-        (true, usize::MAX, Some(1), Outcome::Error, 1),
+        (true, usize::MAX, Some(2), Outcome::Error, 1),
     ] {
         let completion = if until { "\n    until: Exit map" } else { "" };
-        let test = parse(&format!("name: Tap navigation\nsteps:\n  - action: ui.tap\n    text: Active route\n    timeout: 1s{completion}\n")).unwrap();
+        let test = parse(&format!("name: Tap navigation\nsteps:\n  - action: ui.tap\n    text: Active route\n    timeout: 8s{completion}\n")).unwrap();
         let mut projection = Projection {
             inner: MockBackend::new(),
             taps: 0,
@@ -109,7 +111,7 @@ fn tapping_until_observes_completion_retries_and_preserves_timeout_and_cancellat
         assert_eq!(projection.taps, taps);
         if until && ready_after == usize::MAX && cancel_after.is_none() {
             assert_eq!(result.exit_code, 6);
-            assert_eq!(clock.now(), Duration::from_secs(1));
+            assert_eq!(clock.now(), Duration::from_secs(8));
         }
         if cancel_after.is_some() {
             assert_eq!(result.exit_code, 130);

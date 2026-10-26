@@ -111,6 +111,13 @@ esac
 "#.replace("STATE", &dir.to_string_lossy());
             std::fs::write(&program, script).unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // A fork from a parallel test can briefly hold the freshly written script open for
+            // writing, which makes exec fail with ETXTBSY. Run it once until that clears.
+            while let Err(e) = std::process::Command::new(&program).status() {
+                assert_eq!(e.raw_os_error(), Some(26), "cannot run the fake adb: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let _ = std::fs::remove_file(dir.join("calls"));
             Self { dir, program }
         }
         fn mappings(&self) -> String {

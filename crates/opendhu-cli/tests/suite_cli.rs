@@ -286,7 +286,7 @@ exec sleep 120
         ];
         args.extend_from_slice(extra);
         // Successful USB fixtures share the native transport's global lease.
-        let _guard = USB_TEST.lock().unwrap();
+        let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
         self.sandbox.opendhu_with(&args, &self.env)
     }
     fn register_all(&self) {
@@ -465,7 +465,7 @@ fn usb_start_failure_cleans_up_the_private_runtime() {
 
 #[test]
 fn all_usb_runs_suites_sequentially_with_separate_reports_and_one_json_summary() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     for target in [&[][..], &["all"][..]] {
         let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
         s.register_all();
@@ -493,7 +493,7 @@ fn all_usb_runs_suites_sequentially_with_separate_reports_and_one_json_summary()
 
 #[test]
 fn all_usb_continues_after_a_failed_suite_and_returns_failure() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     for target in [&[][..], &["all"][..]] {
         let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
         s.register_all();
@@ -533,7 +533,7 @@ fn all_usb_validates_later_suites_before_starting_any_device() {
 fn interrupting_all_usb_cleans_up_and_skips_remaining_suites() {
     use std::process::Stdio;
     use std::time::Duration;
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
     s.register_all();
     let root = s.suite.parent().unwrap();
@@ -655,7 +655,7 @@ fn a_crash_during_the_configured_launch_is_not_discarded_by_test_reset() {
 
 #[test]
 fn all_emulator_boots_once_across_suites_and_stops_only_at_run_end() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     for failing in [false, true] {
         let s = UsbSuite::emulator_fixture();
         s.register_all();
@@ -694,7 +694,7 @@ fn all_emulator_boots_once_across_suites_and_stops_only_at_run_end() {
 
 #[test]
 fn all_emulator_preserves_a_preexisting_emulator() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::emulator_fixture();
     s.register_all();
     let root = s.suite.parent().unwrap();
@@ -709,7 +709,7 @@ fn all_emulator_preserves_a_preexisting_emulator() {
 
 #[test]
 fn all_emulator_reuses_each_required_avd_and_cleans_up_both() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::emulator_fixture();
     s.register_all();
     let root = s.suite.parent().unwrap();
@@ -741,7 +741,7 @@ fn all_emulator_reuses_each_required_avd_and_cleans_up_both() {
 
 #[test]
 fn standalone_emulator_still_stops_at_suite_end() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::emulator_fixture();
     let output = s
         .registered_command(&["suite.yaml"], &["--json"])
@@ -758,7 +758,7 @@ fn standalone_emulator_still_stops_at_suite_end() {
 fn interrupting_all_emulator_stops_owned_emulator_and_skips_remaining_suites() {
     use std::process::Stdio;
     use std::time::Duration;
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::emulator_fixture();
     s.register_all();
     let root = s.suite.parent().unwrap();
@@ -794,7 +794,7 @@ fn interrupting_all_emulator_stops_owned_emulator_and_skips_remaining_suites() {
 
 #[test]
 fn all_emulator_does_not_stop_a_replacement_after_its_owned_child_exits() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = UsbSuite::emulator_fixture();
     s.env.push(("EMULATOR_REPLACE".into(), "1".into()));
     s.register_all();
@@ -817,7 +817,7 @@ fn all_emulator_does_not_stop_a_replacement_after_its_owned_child_exits() {
 
 #[test]
 fn emulator_uses_configured_dns_servers_on_boot() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::emulator_fixture();
     let source = std::fs::read_to_string(&s.suite).unwrap().replace(
         "  apk:",
@@ -867,7 +867,7 @@ fn invalid_emulator_dns_is_rejected_before_device_setup() {
 
 #[test]
 fn all_suites_print_one_footer_after_cleanup_with_combined_test_counts() {
-    let _guard = USB_TEST.lock().unwrap();
+    let _guard = USB_TEST.lock().unwrap_or_else(|e| e.into_inner());
     let s = UsbSuite::new("List of devices attached\nPHONE device usb:1\n");
     s.register_all();
     let output = s.all_command(&[]).output().unwrap();
@@ -875,7 +875,8 @@ fn all_suites_print_one_footer_after_cleanup_with_combined_test_counts() {
     let shown = text(&output);
     assert!(shown.contains("PASS  2 tests · 2 suites"), "{shown}");
     assert_eq!(shown.matches("Artifacts:").count(), 1, "{shown}");
-    assert_eq!(shown.matches("Report:").count(), 2, "{shown}");
+    // `aa test all` writes one combined report rather than one per suite.
+    assert_eq!(shown.matches("Report:").count(), 1, "{shown}");
     assert!(!shown.contains("Suite cleanup complete"), "{shown}");
     assert!(!shown.contains("metadata.json"), "{shown}");
     assert!(

@@ -795,7 +795,8 @@ fn screen_text(
         // A tap needs the text confirmed in two consecutive frames. A slow host (or a
         // stale first frame after the toggle tap) can use up the window before that happens, and
         // returning then would let the caller's next toggle tap close the grid it just found.
-        let confirming = tap && (frames < 2 || pending.is_some());
+        // Once the tap is sent there is nothing left to confirm; only its result is awaited.
+        let confirming = tap && taps.is_empty() && (frames < 2 || pending.is_some());
         if now >= deadline && !(confirming && now < deadline + Duration::from_secs(10)) {
             return End::timeout(format!(
                 "{}; last OCR: {last}; screenshot: {}",
