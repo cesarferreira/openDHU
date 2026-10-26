@@ -684,6 +684,27 @@ fn artifact_path(explicit: Option<PathBuf>, suite_base: Option<PathBuf>) -> Path
     explicit.unwrap_or_else(|| suite_base.unwrap_or_else(|| PathBuf::from("build/test-results")))
 }
 
+/// Print a setup phase, and how long the previous one took when that was noticeable, so a slow
+/// suite start shows which step to look at.
+fn phase(output: &crate::test_output::Output, message: impl std::fmt::Display) {
+    static LAST: std::sync::Mutex<Option<(String, Instant)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((previous, started)) = last.take()
+        && started.elapsed() >= Duration::from_secs(1)
+    {
+        test_cmd::progress(
+            output,
+            format!("  took {:.1}s: {previous}", started.elapsed().as_secs_f64()),
+        );
+    }
+    let message = message.to_string();
+    if message.is_empty() {
+        return;
+    }
+    *last = Some((message.clone(), Instant::now()));
+    test_cmd::progress(output, message);
+}
+
 /// Build the APK before installing it, so switching branches never installs a stale one.
 fn run_build(
     build: &Build,
@@ -692,7 +713,7 @@ fn run_build(
     cancel: &AtomicBool,
 ) -> Result<()> {
     check_cancel(cancel)?;
-    test_cmd::progress(output, format!("Building: {}...", build.command.join(" ")));
+    phase(output, format!("Building: {}...", build.command.join(" ")));
     let log_path = artifacts.join("build.log");
     let log = std::fs::File::create(&log_path).map_err(|e| Error::Other(e.to_string()))?;
     let status = Command::new(&build.command[0])
@@ -721,7 +742,7 @@ fn run_prepared(
 ) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     check_cancel(&cancel)?;
-    test_cmd::progress(&output, "Checking test tools...");
+    phase(&output, "Checking test tools...");
     // Fail before starting hardware when a required tool is missing.
     crate::suite_doctor::preflight()?;
     let cwd = std::env::current_dir().map_err(|e| Error::Other(e.to_string()))?;
@@ -752,7 +773,7 @@ fn run_prepared(
     }
     let adb = adb_program();
     let usb_serial = if opts.usb {
-        test_cmd::progress(&output, "Finding a USB phone...");
+        phase(&output, "Finding a USB phone...");
         Some(find_usb_phone(&adb)?)
     } else {
         None
@@ -786,7 +807,7 @@ fn run_prepared(
     let base = opts.paths[0].parent().unwrap_or(Path::new("."));
     for spec in &suite.services {
         check_cancel(&cancel)?;
-        test_cmd::progress(
+        phase(
             &output,
             format!(
                 "Starting service {} (waiting for port {})...",
@@ -801,23 +822,23 @@ fn run_prepared(
             .last_mut()
             .unwrap()
             .wait_ready(spec, &cancel)?;
-        test_cmd::progress(&output, format!("Service {} ready", spec.name));
+        phase(&output, format!("Service {} ready", spec.name));
     }
     let serial = if let Some(serial) = usb_serial {
-        test_cmd::progress(&output, format!("Using USB phone {serial}"));
+        phase(&output, format!("Using USB phone {serial}"));
         serial
     } else {
-        test_cmd::progress(
+        phase(
             &output,
             format!("Finding emulator {}...", suite.environment.emulator),
         );
         match find_emulator(&lease.adb, &suite.environment.emulator)? {
             Some(serial) => {
-                test_cmd::progress(&output, format!("Reusing emulator {serial}"));
+                phase(&output, format!("Reusing emulator {serial}"));
                 serial
             }
             None => {
-                test_cmd::progress(
+                phase(
                     &output,
                     format!(
                         "Booting emulator {}{} (up to 180s)...",
@@ -942,7 +963,7 @@ fn run_prepared(
         .to_str()
         .ok_or_else(|| Error::InvalidArgs("APK path is not UTF-8".into()))?;
     check_cancel(&cancel)?;
-    test_cmd::progress(
+    phase(
         &output,
         format!(
             "Installing {} on {serial}...",
@@ -953,7 +974,7 @@ fn run_prepared(
     check_cancel(&cancel)?;
     for permission in &suite.environment.permissions {
         check_cancel(&cancel)?;
-        test_cmd::progress(&output, format!("Granting {permission}..."));
+        phase(&output, format!("Granting {permission}..."));
         device::adb(
             &lease.adb,
             &serial,
@@ -970,7 +991,7 @@ fn run_prepared(
         && !preferences.booleans.is_empty()
     {
         check_cancel(&cancel)?;
-        test_cmd::progress(
+        phase(
             &output,
             format!(
                 "Setting {} app preference(s)...",
@@ -998,7 +1019,7 @@ fn run_prepared(
                 serial.clone(),
             ));
         }
-        test_cmd::progress(&output, "Restarting the Android Auto head-unit server...");
+        phase(&output, "Restarting the Android Auto head-unit server...");
         device::restart_head_unit_server(&lease.adb, &serial)?;
         check_cancel(&cancel)?;
         let port = device::adb(&lease.adb, &serial, &["forward", "tcp:0", "tcp:5277"])?;
@@ -1009,7 +1030,7 @@ fn run_prepared(
         lease.forward = Some(format!("tcp:{port}"));
         Some(format!("127.0.0.1:{port}"))
     };
-    test_cmd::progress(
+    phase(
         &output,
         "Starting the native head unit and waiting for projection...",
     );
@@ -1019,7 +1040,7 @@ fn run_prepared(
     }
     suite_cli(&lease.exe, &lease.runtime, &start_args, Some(&cancel))?;
     if opts.usb {
-        test_cmd::progress(&output, "Waiting for USB phone to return to ADB...");
+        phase(&output, "Waiting for USB phone to return to ADB...");
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             check_cancel(&cancel)?;
@@ -1050,14 +1071,14 @@ fn run_prepared(
     lease.logcat = Some(Arc::clone(&monitor));
     if let Some(activity) = &suite.environment.launch_activity {
         let component = format!("{}/{activity}", suite.environment.package);
-        test_cmd::progress(&output, format!("Launching {component}..."));
+        phase(&output, format!("Launching {component}..."));
         device::adb(
             &lease.adb,
             &serial,
             &["shell", "am", "start", "-W", "-n", &component],
         )?;
     }
-    test_cmd::progress(&output, "Requesting video focus...");
+    phase(&output, "Requesting video focus...");
     suite_cli(
         &lease.exe,
         &lease.runtime,
@@ -1093,6 +1114,7 @@ fn run_prepared(
             test_cmd::ReportFormat::Html,
         ];
     }
+    phase(&output, "");
     let verbose = opts.verbose;
     let result = test_cmd::run_with_emulators(opts, None);
     if verbose {
