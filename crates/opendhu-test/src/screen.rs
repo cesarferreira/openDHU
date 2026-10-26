@@ -1,7 +1,9 @@
 //! OCR of the actual projected image. Text observations never come from app internals.
 use opendhu_core::{Error, Result};
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -188,26 +190,77 @@ pub fn text(words: &[Word]) -> String {
 
 /// Retain TSV next to the screenshot for failure diagnosis. No shell interpolation is used.
 pub fn recognize(image: &Path, cancelled: impl Fn() -> bool) -> Result<Vec<Word>> {
+    recognize_until(image, cancelled, |_| false)
+}
+
+/// Like `recognize`, but stops as soon as `done` is satisfied by the words found so far. The
+/// first pass reads most screens, so a caller that only needs to see one label skips the slower
+/// recovery passes. When `done` never holds, every pass runs and the result equals `recognize`.
+pub fn recognize_until(
+    image: &Path,
+    cancelled: impl Fn() -> bool,
+    done: impl Fn(&[Word]) -> bool,
+) -> Result<Vec<Word>> {
     // Leptonica on macOS can reject symlinked /tmp paths; resolve the existing image first.
     let image = std::fs::canonicalize(image)
         .map_err(|e| Error::Other(format!("cannot resolve screenshot: {e}")))?;
-    let output = image.with_extension("ocr");
     let error_log = image.with_extension("ocr.log");
+    let program = std::env::var_os("OPENDHU_TESSERACT").unwrap_or_else(|| "tesseract".into());
+    let mut words = scaled_pass(&image, &program, &error_log, &cancelled)?;
+    if done(&words) {
+        return Ok(words);
+    }
+    // The remaining passes are independent processes, so run them side by side, one tesseract thread
+    // each: OpenMP threads from concurrent processes spin against each other and stall. Workers watch
+    // `stop`, which this thread sets when the caller cancels (the caller's closure need not be Sync).
+    let stop = AtomicBool::new(false);
+    let halted = || stop.load(Ordering::Relaxed);
+    let passes = std::thread::scope(|scope| {
+        let workers = [
+            scope.spawn(|| original_pass(&image, &program, &error_log, &halted)),
+            scope.spawn(|| {
+                binarized_pass(&image, &program, &error_log, &halted, "contrast", 60, "11")
+            }),
+            scope.spawn(|| {
+                binarized_pass(&image, &program, &error_log, &halted, "segmented", 110, "3")
+            }),
+        ];
+        while !workers.iter().all(|w| w.is_finished()) {
+            if cancelled() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        workers.map(|w| w.join().expect("OCR worker panicked"))
+    });
+    for pass in passes {
+        words.extend(pass?);
+    }
+    Ok(words)
+}
+
+/// Words from a 2x enlargement, where small glyphs read better. Coordinates are mapped back.
+fn scaled_pass(
+    image: &Path,
+    program: &OsStr,
+    error_log: &Path,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<Word>> {
+    let output = image.with_extension("ocr");
     let enlarged = image.with_extension("ocr.png");
     let mut resize = Command::new("ffmpeg");
     resize
         .args(["-v", "error", "-y", "-i"])
-        .arg(&image)
+        .arg(image)
         .args(["-vf", "scale=iw*2:ih*2"])
         .arg(&enlarged);
-    finish_command(resize, &error_log, &cancelled)?;
-    let program = std::env::var_os("OPENDHU_TESSERACT").unwrap_or_else(|| "tesseract".into());
-    let mut command = Command::new(&program);
+    finish_command(resize, error_log, cancelled)?;
+    let mut command = Command::new(program);
     command
         .arg(&enlarged)
         .arg(&output)
         .args(["--psm", "11", "tsv"]);
-    finish_command(command, &error_log, &cancelled)?;
+    finish_command(command, error_log, cancelled)?;
     let tsv = std::fs::read_to_string(output.with_extension("ocr.tsv"))
         .map_err(|e| Error::Other(format!("cannot read OCR output: {e}")))?;
     let mut words = parse_tsv(&tsv)?;
@@ -218,54 +271,69 @@ pub fn recognize(image: &Path, cancelled: impl Fn() -> bool) -> Result<Vec<Word>
         word.width = word.width.div_ceil(2);
         word.height = word.height.div_ceil(2);
     }
-    // Original-size text can distinguish glyphs that interpolation merges (notably UI vs Ul).
+    Ok(words)
+}
+
+/// Original-size text can distinguish glyphs that interpolation merges (notably UI vs Ul).
+fn original_pass(
+    image: &Path,
+    program: &OsStr,
+    error_log: &Path,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<Word>> {
     let original = image.with_extension("original");
-    let mut command = Command::new(&program);
+    let mut command = Command::new(program);
     command
-        .arg(&image)
+        .env("OMP_THREAD_LIMIT", "1")
+        .arg(image)
         .arg(&original)
         .args(["--psm", "11", "tsv"]);
-    finish_command(command, &error_log, &cancelled)?;
+    finish_command(command, error_log, cancelled)?;
     let tsv = std::fs::read_to_string(original.with_extension("original.tsv"))
         .map_err(|e| Error::Other(format!("cannot read original OCR output: {e}")))?;
-    words.extend(parse_tsv(&tsv)?);
-    // Dimmed but visible template status text can disappear in normal OCR. Binarize the
-    // projected pixels and invert to dark text on white, retaining the unmodified passes
-    // above for fine glyphs and keyboard layout checks.
-    // Automatic segmentation at a higher threshold also recovers enclosed control labels
-    // that sparse-text mode omits, without assuming where those controls appear.
-    for (name, threshold, segmentation) in [("contrast", 60, "11"), ("segmented", 110, "3")] {
-        let contrast = image.with_extension(format!("{name}.png"));
-        let mut enhance = Command::new("ffmpeg");
-        enhance
-            .args(["-v", "error", "-y", "-i"])
-            .arg(&image)
-            .args([
-                "-vf",
-                &format!(
-                    "format=gray,lut=y='if(gt(val,{threshold}),255,0)',negate,scale=iw*2:ih*2"
-                ),
-            ])
-            .arg(&contrast);
-        finish_command(enhance, &error_log, &cancelled)?;
-        let contrast_output = image.with_extension(name);
-        let mut command = Command::new(&program);
-        command
-            .arg(&contrast)
-            .arg(&contrast_output)
-            .args(["--psm", segmentation, "tsv"]);
-        finish_command(command, &error_log, &cancelled)?;
-        let tsv = std::fs::read_to_string(image.with_extension(format!("{name}.tsv")))
-            .map_err(|error| Error::Other(format!("cannot read {name} OCR output: {error}")))?;
-        let mut contrast_words = parse_tsv(&tsv)?;
-        for word in &mut contrast_words {
-            word.line.insert_str(0, &format!("{name}:"));
-            word.left /= 2;
-            word.top /= 2;
-            word.width = word.width.div_ceil(2);
-            word.height = word.height.div_ceil(2);
-        }
-        words.extend(contrast_words);
+    parse_tsv(&tsv)
+}
+
+/// Binarize the projected pixels and invert to dark text on white. This recovers dimmed but
+/// visible template status text (threshold 60, sparse text) and, with automatic segmentation at a
+/// higher threshold, enclosed control labels that sparse-text mode omits.
+fn binarized_pass(
+    image: &Path,
+    program: &OsStr,
+    error_log: &Path,
+    cancelled: &impl Fn() -> bool,
+    name: &str,
+    threshold: u32,
+    segmentation: &str,
+) -> Result<Vec<Word>> {
+    let contrast = image.with_extension(format!("{name}.png"));
+    let mut enhance = Command::new("ffmpeg");
+    enhance
+        .args(["-v", "error", "-y", "-i"])
+        .arg(image)
+        .args([
+            "-vf",
+            &format!("format=gray,lut=y='if(gt(val,{threshold}),255,0)',negate,scale=iw*2:ih*2"),
+        ])
+        .arg(&contrast);
+    finish_command(enhance, error_log, cancelled)?;
+    let contrast_output = image.with_extension(name);
+    let mut command = Command::new(program);
+    command
+        .env("OMP_THREAD_LIMIT", "1")
+        .arg(&contrast)
+        .arg(&contrast_output)
+        .args(["--psm", segmentation, "tsv"]);
+    finish_command(command, error_log, cancelled)?;
+    let tsv = std::fs::read_to_string(image.with_extension(format!("{name}.tsv")))
+        .map_err(|error| Error::Other(format!("cannot read {name} OCR output: {error}")))?;
+    let mut words = parse_tsv(&tsv)?;
+    for word in &mut words {
+        word.line.insert_str(0, &format!("{name}:"));
+        word.left /= 2;
+        word.top /= 2;
+        word.width = word.width.div_ceil(2);
+        word.height = word.height.div_ceil(2);
     }
     Ok(words)
 }

@@ -680,7 +680,15 @@ fn screen_text(
         if let Err(e) = backend.screenshot(&image) {
             return End::error(&e);
         }
-        let words = match crate::screen::recognize(&image, || cfg.clock.cancelled()) {
+        // Stop reading the frame once it answers what this step is waiting for. The launcher
+        // also looks for an ANR dialog in the full text, so it always reads every pass.
+        let answered = |words: &[crate::screen::Word]| {
+            !launcher
+                && (until.is_some_and(|result| crate::screen::locate(words, result).is_some())
+                    || crate::screen::locate(words, text).is_some())
+        };
+        let words = match crate::screen::recognize_until(&image, || cfg.clock.cancelled(), answered)
+        {
             Ok(words) => words,
             Err(e) => return End::error(&e),
         };
