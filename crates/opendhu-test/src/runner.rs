@@ -100,6 +100,8 @@ pub struct RunConfig<'a> {
 }
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Gap between projected-UI frames. Each frame already costs a screenshot and an OCR pass.
+const SCREEN_POLL: Duration = Duration::from_millis(100);
 
 /// Exit code for a run stopped by Ctrl+C or SIGTERM (the shell convention for SIGINT).
 pub const INTERRUPTED: u8 = 130;
@@ -807,7 +809,7 @@ fn screen_text(
             ));
         }
         cfg.clock
-            .sleep(POLL_INTERVAL.min(deadline.saturating_sub(now).max(Duration::from_millis(1))));
+            .sleep(SCREEN_POLL.min(deadline.saturating_sub(now).max(Duration::from_millis(1))));
     }
 }
 
@@ -831,7 +833,7 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
             return End::error(&e);
         }
         cfg.clock
-            .sleep(Duration::from_secs(1).min(deadline.saturating_sub(cfg.clock.now())));
+            .sleep(Duration::from_millis(500).min(deadline.saturating_sub(cfg.clock.now())));
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while opening app");
         }
@@ -842,7 +844,7 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
         // A prefix also appears in host errors and another app's similarly named content.
         let result = screen_text(
             label,
-            Duration::from_secs(4).min(deadline.saturating_sub(cfg.clock.now())),
+            Duration::from_secs(3).min(deadline.saturating_sub(cfg.clock.now())),
             true,
             true,
             None,

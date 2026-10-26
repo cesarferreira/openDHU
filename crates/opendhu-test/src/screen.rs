@@ -206,18 +206,20 @@ pub fn recognize_until(
         .map_err(|e| Error::Other(format!("cannot resolve screenshot: {e}")))?;
     let error_log = image.with_extension("ocr.log");
     let program = std::env::var_os("OPENDHU_TESSERACT").unwrap_or_else(|| "tesseract".into());
-    let mut words = scaled_pass(&image, &program, &error_log, &cancelled)?;
-    if done(&words) {
-        return Ok(words);
+    // The original-size read is the cheapest and finds most labels, so it goes first. When it
+    // does not satisfy `done`, the other passes run side by side and the result is ordered as it
+    // always was (2x, original, then the binarized passes).
+    let original = original_pass(&image, &program, &error_log, &cancelled)?;
+    if done(&original) {
+        return Ok(original);
     }
     // The remaining passes are independent processes, so run them side by side, one tesseract thread
-    // each: OpenMP threads from concurrent processes spin against each other and stall. Workers watch
-    // `stop`, which this thread sets when the caller cancels (the caller's closure need not be Sync).
+    // each: OpenMP threads from concurrent processes spin against each other and stall.
     let stop = AtomicBool::new(false);
     let halted = || stop.load(Ordering::Relaxed);
     let passes = std::thread::scope(|scope| {
         let workers = [
-            scope.spawn(|| original_pass(&image, &program, &error_log, &halted)),
+            scope.spawn(|| scaled_pass(&image, &program, &error_log, &halted)),
             scope.spawn(|| {
                 binarized_pass(&image, &program, &error_log, &halted, "contrast", 60, "11")
             }),
@@ -233,9 +235,11 @@ pub fn recognize_until(
         }
         workers.map(|w| w.join().expect("OCR worker panicked"))
     });
-    for pass in passes {
-        words.extend(pass?);
-    }
+    let [scaled, contrast, segmented] = passes;
+    let mut words = scaled?;
+    words.extend(original);
+    words.extend(contrast?);
+    words.extend(segmented?);
     Ok(words)
 }
 
@@ -257,6 +261,7 @@ fn scaled_pass(
     finish_command(resize, error_log, cancelled)?;
     let mut command = Command::new(program);
     command
+        .env("OMP_THREAD_LIMIT", "1")
         .arg(&enlarged)
         .arg(&output)
         .args(["--psm", "11", "tsv"]);
@@ -284,7 +289,6 @@ fn original_pass(
     let original = image.with_extension("original");
     let mut command = Command::new(program);
     command
-        .env("OMP_THREAD_LIMIT", "1")
         .arg(image)
         .arg(&original)
         .args(["--psm", "11", "tsv"]);
