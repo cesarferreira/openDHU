@@ -93,12 +93,6 @@ pub trait ApplicationControl {
             "phone.expect requires a suite application context".into(),
         ))
     }
-    /// The app's openDHU template hook output (`adb shell content query`), for `car.expect`.
-    fn car_template(&self) -> opendhu_core::Result<String> {
-        Err(Error::InvalidArgs(
-            "car.expect requires a suite application context".into(),
-        ))
-    }
     /// Whether the app has a car display on the phone (`None` when it cannot be observed).
     /// A missing display means the app never started projecting, whatever the car screen shows.
     fn car_app_display(&self) -> opendhu_core::Result<Option<bool>> {
@@ -506,19 +500,7 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
         Step::UiWaitFor { text, timeout } | Step::UiExpect { text, timeout } => {
             screen_text(text, timeout.0, false, false, None, backend, cfg)
         }
-        Step::PhoneExpect { text, timeout } => {
-            poll_text("phone", "the phone screen", text, timeout.0, cfg, |app| {
-                Ok(crate::phone_ui::visible_texts(&app.phone_ui_dump()?))
-            })
-        }
-        Step::CarExpect { text, timeout } => poll_text(
-            "car template",
-            "the car template",
-            text,
-            timeout.0,
-            cfg,
-            |app| crate::car_hook::strings(&app.car_template()?),
-        ),
+        Step::PhoneExpect { text, timeout } => phone_text(text, timeout.0, cfg),
         Step::UiTap {
             text,
             timeout,
@@ -844,35 +826,29 @@ fn screen_text(
     }
 }
 
-/// Poll an app-side text source until `text` appears in it. `what` names the source in errors,
-/// `source` in results.
-fn poll_text(
-    what: &str,
-    source: &str,
-    text: &str,
-    timeout: Duration,
-    cfg: &RunConfig,
-    read: impl Fn(&dyn ApplicationControl) -> opendhu_core::Result<Vec<String>>,
-) -> End {
+fn phone_text(text: &str, timeout: Duration, cfg: &RunConfig) -> End {
     let Some(application) = cfg.application else {
-        return End::error(&Error::InvalidArgs(format!(
-            "{what}.expect requires a suite application context"
-        )));
+        return End::error(&Error::InvalidArgs(
+            "phone.expect requires a suite application context".into(),
+        ));
     };
     let deadline = cfg.clock.now() + timeout;
+    let mut seen: Vec<String>;
     loop {
         if let Some(end) = application_health(cfg) {
             return end;
         }
         if cfg.clock.cancelled() {
-            return End::interrupted(format!("interrupted while waiting for {what} text"));
+            return End::interrupted("interrupted while waiting for phone text");
         }
-        let seen = match read(application) {
-            Ok(seen) => seen,
+        match application.phone_ui_dump() {
+            Ok(xml) => {
+                seen = crate::phone_ui::visible_texts(&xml);
+                if let Some(found) = crate::phone_ui::find(&seen, text) {
+                    return End::pass(format!("phone screen shows {found:?}"));
+                }
+            }
             Err(error) => return End::error(&error),
-        };
-        if let Some(found) = crate::phone_ui::find(&seen, text) {
-            return End::pass(format!("{source} shows {found:?}"));
         }
         let now = cfg.clock.now();
         if now >= deadline {
@@ -883,7 +859,7 @@ fn poll_text(
                 .collect::<Vec<_>>()
                 .join(" | ");
             return End::timeout(format!(
-                "{what} text {text:?} not visible; {source} shows: {shown}"
+                "phone text {text:?} not visible; phone screen shows: {shown}"
             ));
         }
         cfg.clock

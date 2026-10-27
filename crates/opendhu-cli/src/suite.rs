@@ -134,19 +134,6 @@ impl opendhu_test::runner::ApplicationControl for Application {
             &["exec-out", "uiautomator", "dump", "/dev/tty"],
         )
     }
-    fn car_template(&self) -> Result<String> {
-        device::adb(
-            &self.adb,
-            &self.serial,
-            &[
-                "shell",
-                "content",
-                "query",
-                "--uri",
-                &format!("content://{}.opendhu/template", self.package),
-            ],
-        )
-    }
     fn car_app_display(&self) -> Result<Option<bool>> {
         let displays = device::adb(&self.adb, &self.serial, &["shell", "dumpsys", "display"])?;
         Ok(Some(has_car_app_display(&displays, &self.package)))

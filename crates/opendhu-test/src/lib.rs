@@ -1,6 +1,5 @@
 //! YAML test runner. Depends only on `opendhu-core`, so it cannot call a head unit directly.
 
-pub mod car_hook;
 pub mod mock;
 pub mod model;
 pub mod phone_ui;

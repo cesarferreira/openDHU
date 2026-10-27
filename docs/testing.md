@@ -460,31 +460,6 @@ items. `app.open` uses the host launcher and a truncated label prefix; this firs
 supports the native 800x480 display profile, which suites explicitly select. OCR requires visible,
 legible text and should not be used to assert map pixels, clocks, or animation timing.
 
-### Exact car-screen assertions from the app (`car.expect`)
-
-OCR is the only way to read the car screen from outside the app: Android Auto draws it into windows
-that accessibility and logcat do not expose (logcat names the template type but not its contents). For
-an app you own, `car.expect` reads the template the app itself reports instead:
-
-```yaml
-- action: car.expect
-  as: the car template reports it too
-  text: "Saved place: Harbour Cafe"
-  timeout: 10s
-```
-
-It passes when any string in the reported template contains the text (case-insensitive), and a timeout
-lists the strings it did see. There is no OCR, so it does not care about fonts, contrast or locale-sized
-text. It checks what the app handed to the host, not what the host managed to draw, so keep a `ui.expect`
-on the journeys where rendering matters.
-
-**The hook.** The app publishes a content provider at `content://<package>.opendhu/template` with one row
-and one `json` column holding the current template as JSON. openDHU reads it with
-`adb shell content query` and matches the strings in it; the shape is up to the app. Ship it in debug
-builds only. The [Android sample](../android-sample/README.md) records each template its screens return
-(`CarState`) and exposes it through a debug-only provider (`CarStateProvider`); copy those two files.
-Without the hook the step fails with an error saying so.
-
 ### Phone-side assertions
 
 `phone.expect` waits for text in the phone's own screen, read from its accessibility tree with
