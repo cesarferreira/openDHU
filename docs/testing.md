@@ -547,6 +547,13 @@ reverse mappings without replacing existing ones, and optionally opens `launchAc
 projection. It removes its own reverse mappings during cleanup. These operations affect the dedicated
 test AVD only. They do not clear application data.
 
+After `launchActivity`, the suite waits until 10 seconds have passed since the launch before the first
+test runs. Launching the app makes Android Auto start its car session about five seconds later, and the
+first test begins by force-stopping the app. Killing the app within a few tens of milliseconds of that
+session being created leaves Android Auto's host unable to show the app for a few minutes (the app's
+sessions start, but the host never asks for a template; restarting the app or Android Auto does not
+help). Without this wait that coincidence caused about 7% of fresh-session runs to fail.
+
 `preferences` sets boolean entries in one of the app's SharedPreferences files (`file` is the name
 without `.xml`) after install and before launch, so a journey can turn on a developer flag instead of
 relying on a manually provisioned AVD. The app is stopped first, other entries in the file are kept,

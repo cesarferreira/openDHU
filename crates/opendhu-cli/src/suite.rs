@@ -1202,9 +1202,11 @@ fn run_prepared(
         &artifacts.join("logcat.txt"),
     )?);
     lease.logcat = Some(Arc::clone(&monitor));
+    let mut launched_at = None;
     if let Some(activity) = &suite.environment.launch_activity {
         let component = format!("{}/{activity}", suite.environment.package);
         phase(&output, format!("Launching {component}..."));
+        launched_at = Some(Instant::now());
         device::adb(
             &lease.adb,
             &serial,
@@ -1218,6 +1220,9 @@ fn run_prepared(
         &["focus", "video", "on"],
         Some(&cancel),
     )?;
+    if let Some(launched_at) = launched_at {
+        settle_after_launch(launched_at, &output, &cancel)?;
+    }
     let metadata = serde_json::json!({
         "emulator": if opts.usb { None } else { Some(&suite.environment.emulator) },
         "serial": serial, "package": suite.environment.package, "apk": suite.environment.apk,
@@ -1273,6 +1278,35 @@ fn run_prepared(
         note_cleanly_used(&serial);
     }
     result
+}
+
+/// How long after the suite launches the app the first test must wait before it may reset the app.
+///
+/// Launching the app makes Android Auto start the app's car session about five seconds later. The
+/// first test begins by force-stopping the app, and that landed within ~60 ms of the session being
+/// created in every one of 5 failures (and in none of 64 passes). Killing the app at that moment
+/// leaves Android Auto's host unable to show the app for a few minutes: the app's later sessions
+/// start and log their home screen, but the host never asks for a template, whatever is restarted.
+/// Killing a session that has finished starting is safe (every test boundary does it), so wait
+/// until it has.
+const LAUNCH_SETTLE: Duration = Duration::from_secs(10);
+
+fn settle_after_launch(
+    launched_at: Instant,
+    output: &Arc<crate::test_output::Output>,
+    cancel: &AtomicBool,
+) -> Result<()> {
+    let wait = LAUNCH_SETTLE.saturating_sub(launched_at.elapsed());
+    if wait.is_zero() {
+        return Ok(());
+    }
+    phase(output, "Letting the launched app's car session settle...");
+    let deadline = Instant::now() + wait;
+    while Instant::now() < deadline {
+        check_cancel(cancel)?;
+        std::thread::sleep(Duration::from_millis(100).min(deadline - Instant::now()));
+    }
+    Ok(())
 }
 
 /// Emulators whose head-unit session an earlier suite of this run ended cleanly.
