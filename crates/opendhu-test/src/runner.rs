@@ -87,6 +87,17 @@ pub trait ApplicationControl {
     /// Stop the application process. The runner opens it through the projected launcher afterward.
     fn restart(&self) -> opendhu_core::Result<()>;
     fn input_text(&self, text: &str) -> opendhu_core::Result<()>;
+    /// A `uiautomator dump` of the phone's own screen.
+    fn phone_ui_dump(&self) -> opendhu_core::Result<String> {
+        Err(Error::InvalidArgs(
+            "phone.expect requires a suite application context".into(),
+        ))
+    }
+    /// Whether the app has a car display on the phone (`None` when it cannot be observed).
+    /// A missing display means the app never started projecting, whatever the car screen shows.
+    fn car_app_display(&self) -> opendhu_core::Result<Option<bool>> {
+        Ok(None)
+    }
 }
 
 pub struct RunConfig<'a> {
@@ -489,6 +500,7 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
         Step::UiWaitFor { text, timeout } | Step::UiExpect { text, timeout } => {
             screen_text(text, timeout.0, false, false, None, backend, cfg)
         }
+        Step::PhoneExpect { text, timeout } => phone_text(text, timeout.0, cfg),
         Step::UiTap {
             text,
             timeout,
@@ -814,6 +826,47 @@ fn screen_text(
     }
 }
 
+fn phone_text(text: &str, timeout: Duration, cfg: &RunConfig) -> End {
+    let Some(application) = cfg.application else {
+        return End::error(&Error::InvalidArgs(
+            "phone.expect requires a suite application context".into(),
+        ));
+    };
+    let deadline = cfg.clock.now() + timeout;
+    let mut seen: Vec<String>;
+    loop {
+        if let Some(end) = application_health(cfg) {
+            return end;
+        }
+        if cfg.clock.cancelled() {
+            return End::interrupted("interrupted while waiting for phone text");
+        }
+        match application.phone_ui_dump() {
+            Ok(xml) => {
+                seen = crate::phone_ui::visible_texts(&xml);
+                if let Some(found) = crate::phone_ui::find(&seen, text) {
+                    return End::pass(format!("phone screen shows {found:?}"));
+                }
+            }
+            Err(error) => return End::error(&error),
+        }
+        let now = cfg.clock.now();
+        if now >= deadline {
+            let shown = seen
+                .iter()
+                .take(12)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" | ");
+            return End::timeout(format!(
+                "phone text {text:?} not visible; phone screen shows: {shown}"
+            ));
+        }
+        cfg.clock
+            .sleep(POLL_INTERVAL.min(deadline.saturating_sub(now)));
+    }
+}
+
 fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     let Some(label) = cfg.app_label else {
         return End::error(&Error::InvalidArgs(
@@ -859,10 +912,18 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     let blocker = cfg
         .application
         .and_then(|app| app.projection_blocker().ok().flatten());
-    End::timeout(match blocker {
-        Some(reason) => {
+    let no_display = cfg
+        .application
+        .is_some_and(|app| matches!(app.car_app_display(), Ok(Some(false))));
+    End::timeout(match (blocker, no_display) {
+        (Some(reason), _) => {
             format!("app {label:?} was not visible in the Android Auto launcher: {reason}")
         }
-        None => format!("app {label:?} was not visible in the Android Auto launcher"),
+        (None, true) => format!(
+            "app {label:?} was not visible in the Android Auto launcher, and the phone has no car \
+             display for it: its car app service never started projecting (check the app is \
+             installed, declares a CarAppService, and was not force-stopped)"
+        ),
+        (None, false) => format!("app {label:?} was not visible in the Android Auto launcher"),
     })
 }

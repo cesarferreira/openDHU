@@ -2,6 +2,7 @@
 
 pub mod mock;
 pub mod model;
+pub mod phone_ui;
 pub mod report;
 pub mod runner;
 pub mod schema;
