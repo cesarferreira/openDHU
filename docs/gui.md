@@ -81,8 +81,7 @@ the existing controls. Saved screenshots use the backend's decoder.
 Color normalization targets limited-range BT.601 before upload. Shader chroma interpolation and
 rounding can differ slightly from the normal viewer. Mac color-bar comparisons covered BT.601,
 BT.709 and full-range input, with mean RGB differences of 0.4–1.1 levels out of 255 and flat-patch
-channel differences up to 3 levels. See [performance results](performance.md#gpu-color-conversion)
-for the measured CPU and RSS comparison.
+channel differences up to 3 levels.
 
 ## Verification and limits
 
@@ -100,9 +99,7 @@ for the measured CPU and RSS comparison.
   --all-targets --target x86_64-unknown-linux-gnu` passed. Linux FFmpeg 5.1.9 also decoded a 60-frame
   800×480 motion fixture with byte-identical RGBA output before and after worker-thread tuning.
   The actual Linux GPU shader window was also checked with a paced H.264 color-bar fixture under
-  Xvfb/Mesa software OpenGL. Physical Linux GPU performance and phone projection remain untested.
-- The performance figures in the [performance doc](performance.md) were measured on macOS and do not
-  establish Linux CPU, memory, or display performance.
+  Xvfb/Mesa software OpenGL. Physical Linux GPU rendering and phone projection remain untested.
 - The GUI dependencies are separate from the `aa` binary.
 
 ## Checking how it looks

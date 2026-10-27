@@ -129,7 +129,6 @@ emulator or phone first; the sample README walks through it.
 | [HTTP API](docs/api.md) | endpoints and live events |
 | [Configuration](docs/configuration.md) | `config.toml` and environment variables |
 | [Architecture](docs/architecture.md) | how the crates fit together |
-| [Performance](docs/performance.md) | CPU and memory measurements against Google's DHU |
 | [Vision](docs/vision.md) / [Feasibility](docs/feasibility.md) | why it exists, and what was proven first |
 
 ## Development
