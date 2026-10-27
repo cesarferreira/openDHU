@@ -11,7 +11,13 @@ import androidx.car.app.model.Template
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 
-abstract class FavoriteScreen(context: CarContext) : Screen(context) {
+/** Records every template it hands to the host, for [CarState]. */
+abstract class DemoScreen(context: CarContext) : Screen(context) {
+    final override fun onGetTemplate(): Template = buildTemplate().also(CarState::record)
+    protected abstract fun buildTemplate(): Template
+}
+
+abstract class FavoriteScreen(context: CarContext) : DemoScreen(context) {
     protected val store = FavoriteStore(context)
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> invalidate() }
 
@@ -29,7 +35,7 @@ abstract class FavoriteScreen(context: CarContext) : Screen(context) {
 }
 
 class HomeScreen(context: CarContext) : FavoriteScreen(context) {
-    override fun onGetTemplate(): Template {
+    override fun buildTemplate(): Template {
         val favorite = store.favorite
         val savedRow = Row.Builder()
             .setTitle(favorite?.let { carContext.getString(R.string.saved_place, it.name) }
@@ -49,8 +55,8 @@ class HomeScreen(context: CarContext) : FavoriteScreen(context) {
     }
 }
 
-class PlacesScreen(context: CarContext) : Screen(context) {
-    override fun onGetTemplate(): Template {
+class PlacesScreen(context: CarContext) : DemoScreen(context) {
+    override fun buildTemplate(): Template {
         val rows = ItemList.Builder()
         Places.all.forEach { place ->
             rows.addItem(Row.Builder().setTitle(place.name)
@@ -62,7 +68,7 @@ class PlacesScreen(context: CarContext) : Screen(context) {
 }
 
 class PlaceScreen(context: CarContext, private val place: Place) : FavoriteScreen(context) {
-    override fun onGetTemplate(): Template {
+    override fun buildTemplate(): Template {
         val rows = ItemList.Builder()
             .addItem(Row.Builder().setTitle(place.description).build())
             .addItem(Row.Builder().setTitle(carContext.getString(R.string.save_favorite))

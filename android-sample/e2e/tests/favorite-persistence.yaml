@@ -36,6 +36,10 @@ steps:
     as: favorite shows Harbour Cafe
     text: "Saved place: Harbour Cafe"
     timeout: 20s
+  - action: car.expect
+    as: the car template reports it too
+    text: "Saved place: Harbour Cafe"
+    timeout: 10s
   - action: phone.expect
     as: the phone screen agrees
     text: Harbour Cafe

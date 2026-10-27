@@ -82,6 +82,10 @@ pub enum Step {
     UiWaitFor { text: String, timeout: Dur },
     #[serde(rename = "ui.expect")]
     UiExpect { text: String, timeout: Dur },
+    /// Wait for text in the template the app reports through its debug-only openDHU hook.
+    /// Exact where `ui.expect` is OCR, but only for apps that publish the hook.
+    #[serde(rename = "car.expect")]
+    CarExpect { text: String, timeout: Dur },
     /// Wait for text in the phone's own UI tree (not the car screen, which only OCR can read).
     #[serde(rename = "phone.expect")]
     PhoneExpect { text: String, timeout: Dur },
@@ -136,6 +140,7 @@ impl Step {
             Self::KeyboardType { .. } => "keyboard.type",
             Self::UiWaitFor { .. } => "ui.waitFor",
             Self::UiExpect { .. } => "ui.expect",
+            Self::CarExpect { .. } => "car.expect",
             Self::PhoneExpect { .. } => "phone.expect",
             Self::UiTap { .. } => "ui.tap",
             Self::FocusVideo { .. } => "focus.video",
@@ -163,6 +168,7 @@ impl Step {
             }
             Self::UiWaitFor { text, .. } => format!("wait for {text:?}"),
             Self::UiExpect { text, .. } => format!("expect {text:?} visible"),
+            Self::CarExpect { text, .. } => format!("expect {text:?} in the car template"),
             Self::PhoneExpect { text, .. } => format!("expect {text:?} on the phone screen"),
             Self::UiTap { text, until, .. } => match until {
                 Some(until) => format!("tap {text:?} until {until:?}"),
@@ -473,6 +479,7 @@ fn validate(t: &TestFile) -> Result<()> {
             Step::UiWaitFor { text, timeout }
             | Step::UiExpect { text, timeout }
             | Step::PhoneExpect { text, timeout }
+            | Step::CarExpect { text, timeout }
             | Step::UiTap { text, timeout, .. } => {
                 check_duration(i, a, "timeout", *timeout)?;
                 if let Step::UiTap {

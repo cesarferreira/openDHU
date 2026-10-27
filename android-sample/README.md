@@ -93,8 +93,9 @@ The suite covers:
   saved destination from the restored home screen.
 - **Reset:** save a different favorite, clear it, restart, and verify that it remains cleared.
 
-Tests drive actual projected touches and assert screenshot/OCR results. They do not inspect app
-preferences or inject test state. Each case opens its own app session and establishes the state it
+Tests drive actual projected touches and assert screenshot/OCR results. They do not inject test state.
+The persistence journey also cross-checks that result two other ways: `car.expect` reads the template the
+app reports through the debug-only `CarStateProvider`, and `phone.expect` reads the phone screen. Each case opens its own app session and establishes the state it
 needs through normal controls. Assertions follow one-shot navigation, save and reset actions; a sent touch alone is
 not success. These are local UI/persistence journeys, not network integration tests.
 
