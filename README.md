@@ -10,11 +10,11 @@ terminal, an HTTP API, or YAML tests. It is Espresso for the car screen.
 $ aa test sample
 Suite: android-sample/e2e/suite.yaml (3 tests)
 Test: Favorite selected in Android Auto survives an app restart [2/3] · ~1m left
-  PASS 1/14. launch the app on the car screen (8.4s)
-  PASS 2/14. clear any saved favorite (3.2s)
-  PASS 8/14. save Harbour Cafe as favorite (1.3s)
-  PASS 10/14. restart the app (8.2s)
-  PASS 11/14. favorite survived the restart (2.9s)
+  PASS 1. launch the app on the car screen (8.4s)
+  PASS 2. clear any saved favorite (3.2s)
+  PASS 8. save Harbour Cafe as favorite (1.3s)
+  PASS 10. restart the app (8.2s)
+  PASS 11. favorite survived the restart (2.9s)
   ...
 PASS  3 tests · 1 suite
 ```
@@ -112,7 +112,7 @@ aa test sample --list            # list tests; `aa test --list` lists suites
 aa test --validate               # parse everything without touching a device
 ```
 
-Progress is numbered (`[6/14]`, `[suite 2/4]`, `PASS 8/19`), and once a run has passed, test headers show an
+Test and suite headers are numbered (`[6/14]`, `[suite 2/4]`), and once a run has passed, test headers show an
 estimate of the time left. Open `results.html` in the artifacts folder for steps, screenshots and logs.
 
 The [Android sample](android-sample/README.md) is a small app with three Android Auto journeys. Try it with

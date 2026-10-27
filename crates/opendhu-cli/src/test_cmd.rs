@@ -162,12 +162,7 @@ pub(crate) fn progress(output: &crate::test_output::Output, message: impl std::f
 
 /// One line per step: the label says what the step is for. Mechanics (status codes, poll counts,
 /// artifact paths) are shown only when the step did not pass, or with `--verbose`.
-fn print_step(
-    output: &crate::test_output::Output,
-    s: &opendhu_test::StepResult,
-    total: usize,
-    verbose: bool,
-) {
+fn print_step(output: &crate::test_output::Output, s: &opendhu_test::StepResult, verbose: bool) {
     let tag = match s.outcome {
         Outcome::Passed => "PASS",
         Outcome::Failed => "FAIL",
@@ -177,7 +172,7 @@ fn print_step(
     let name = if s.index == 0 {
         s.action.clone()
     } else {
-        format!("{}/{total}.", s.index)
+        format!("{}.", s.index)
     };
     let what = s.label.as_deref().unwrap_or(&s.action);
     let what = if s.index == 0 { "preflight" } else { what };
@@ -360,15 +355,14 @@ pub(crate) fn run_with_emulators(
             run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
                 Progress::Started { index, action } => {
                     let label = index.checked_sub(1).and_then(|n| test.step_label(n));
-                    let total = test.steps.len();
                     let name = match (index, label) {
                         (0, _) => action.to_string(),
-                        (_, Some(label)) => format!("{index}/{total}. {label}"),
-                        (_, None) => format!("{index}/{total}. {action}"),
+                        (_, Some(label)) => format!("{index}. {label}"),
+                        (_, None) => format!("{index}. {action}"),
                     };
                     progress(&output, format!("  RUN {name}"));
                 }
-                Progress::Finished(step) => print_step(&output, step, test.steps.len(), verbose),
+                Progress::Finished(step) => print_step(&output, step, verbose),
             });
         if let Some(app) = &opts.app {
             let health = app.monitor.finish();
@@ -391,7 +385,7 @@ pub(crate) fn run_with_emulators(
                     duration_ms: 0,
                     exit_code: Some(code),
                 };
-                print_step(&output, &step, step.index, verbose);
+                print_step(&output, &step, verbose);
                 r.steps.push(step);
                 r.message = Some(match r.message.take() {
                     Some(message) => format!("{message}; {detail}"),

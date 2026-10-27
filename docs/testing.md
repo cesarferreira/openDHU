@@ -68,8 +68,7 @@ without a display or installed GUI; this is independent of progress formatting.
 
 Progress is numbered so you can tell how far along a run is. Each test header ends with its place in
 the whole run (`Test: Robotaxi ride ... [6/14]`, counted across every suite of `aa test all`), each
-suite header with its place among the suites (`[suite 2/4]`), and each step with its place in the test
-(`PASS 8/19. save Harbour Cafe as favorite`).
+suite header with its place among the suites (`[suite 2/4]`).
 
 After a run has passed once, test headers also show a rough estimate of the time left
 (`Test: Robotaxi ride ... [6/14] · ~5m left`). The estimate comes from the median of the last five
