@@ -111,6 +111,33 @@ impl opendhu_test::runner::ApplicationControl for Application {
     fn restart(&self) -> Result<()> {
         self.reset()
     }
+    fn phone_ui_dump(&self) -> Result<String> {
+        // While projecting, the phone sits on an Android Auto screen and `uiautomator` dumps the
+        // active window, so put the app's own phone UI in front first. A no-op if it already is.
+        device::adb(
+            &self.adb,
+            &self.serial,
+            &[
+                "shell",
+                "monkey",
+                "-p",
+                &self.package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ],
+        )?;
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        device::adb(
+            &self.adb,
+            &self.serial,
+            &["exec-out", "uiautomator", "dump", "/dev/tty"],
+        )
+    }
+    fn car_app_display(&self) -> Result<Option<bool>> {
+        let displays = device::adb(&self.adb, &self.serial, &["shell", "dumpsys", "display"])?;
+        Ok(Some(has_car_app_display(&displays, &self.package)))
+    }
     fn input_text(&self, text: &str) -> Result<()> {
         opendhu_test::schema::validate_input_text(text)?;
         device::adb(
@@ -120,6 +147,14 @@ impl opendhu_test::runner::ApplicationControl for Application {
         )?;
         Ok(())
     }
+}
+
+/// Android Auto gives each projecting app a `CarAppService` virtual display owned by its package.
+fn has_car_app_display(dumpsys_display: &str, package: &str) -> bool {
+    let owner = format!("virtual:{package},");
+    dumpsys_display
+        .lines()
+        .any(|l| l.contains(&owner) && l.contains(",CarAppService,"))
 }
 
 /// Android Auto keeps a phone-side setup screen in front until first-run welcome and consent
@@ -1260,6 +1295,19 @@ fn note_cleanly_used(serial: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn car_app_display_is_matched_by_owner_package() {
+        let dump = r#"DisplayDeviceInfo{"CarAppService": uniqueId="virtual:dev.opendhu.demo,10218,CarAppService,15", 1133 x 601}
+DisplayDeviceInfo{"CarAppService": uniqueId="virtual:dev.opendhu.demo.other,10219,CarAppService,16", 1133 x 601}
+DisplayDeviceInfo{"GhFacetBar": uniqueId="virtual:com.google.android.projection.gearhead,10135,GhFacetBar,18"}"#;
+        assert!(super::has_car_app_display(dump, "dev.opendhu.demo"));
+        assert!(!super::has_car_app_display(dump, "dev.opendhu"));
+        assert!(!super::has_car_app_display(
+            dump,
+            "com.google.android.projection.gearhead"
+        ));
+    }
+
     use super::*;
 
     #[test]

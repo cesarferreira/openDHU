@@ -460,6 +460,29 @@ items. `app.open` uses the host launcher and a truncated label prefix; this firs
 supports the native 800x480 display profile, which suites explicitly select. OCR requires visible,
 legible text and should not be used to assert map pixels, clocks, or animation timing.
 
+### Phone-side assertions
+
+`phone.expect` waits for text in the phone's own screen, read from its accessibility tree with
+`uiautomator`. It needs no OCR, so it is exact, and it checks the thing a car app has to get right: the
+phone and the car show the same state.
+
+```yaml
+- action: phone.expect
+  as: the phone screen agrees
+  text: Harbour Cafe
+  timeout: 10s
+```
+
+Matching is a case-insensitive substring of any element's `text` or content description. The step needs a
+suite application context, and it brings the app's phone UI to the foreground first (while projecting, the
+phone otherwise sits on an Android Auto screen), so use it where that is acceptable. It cannot read the car
+screen: Android Auto draws that into windows the accessibility API does not expose, which is why `ui.*`
+steps use OCR. On a timeout the failure lists the text the phone did show.
+
+When `app.open` cannot find the app in the launcher, the failure also says whether the phone has a car
+display for the app. Without one, the app's `CarAppService` never started projecting, and the car screen is
+not the place to look for the cause.
+
 Each suite restarts Android Auto on its dedicated AVD before starting the head-unit server, to
 discard projection threads restored by Quick Boot.
 
