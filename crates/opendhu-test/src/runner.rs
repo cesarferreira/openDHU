@@ -497,9 +497,24 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
                 Err(error) => End::error(&error),
             }
         }
-        Step::UiWaitFor { text, timeout } | Step::UiExpect { text, timeout } => {
-            screen_text(text, timeout.0, false, false, None, backend, cfg)
+        Step::UiWaitFor {
+            text,
+            timeout,
+            reopen,
+            reopen_after,
         }
+        | Step::UiExpect {
+            text,
+            timeout,
+            reopen,
+            reopen_after,
+        } => wait_for_text(
+            text,
+            timeout.0,
+            schema::Reopen::new(*reopen, *reopen_after),
+            backend,
+            cfg,
+        ),
         Step::PhoneExpect { text, timeout } => phone_text(text, timeout.0, cfg),
         Step::UiTap {
             text,
@@ -864,6 +879,72 @@ fn phone_text(text: &str, timeout: Duration, cfg: &RunConfig) -> End {
         }
         cfg.clock
             .sleep(POLL_INTERVAL.min(deadline.saturating_sub(now)));
+    }
+}
+
+/// `ui.waitFor`/`ui.expect`, with the opt-in `reopen` recovery: if the text has not appeared after
+/// `reopen.after`, stop the app, open it again and keep waiting. Only a timeout triggers a reopen;
+/// errors, interruptions and app crashes end the step as usual.
+fn wait_for_text(
+    text: &str,
+    timeout: Duration,
+    reopen: schema::Reopen,
+    backend: &mut dyn HeadUnitBackend,
+    cfg: &RunConfig,
+) -> End {
+    let mut reopened = 0u32;
+    loop {
+        let window = if reopened < reopen.times {
+            reopen.after
+        } else {
+            timeout
+        };
+        let mut end = screen_text(text, window, false, false, None, backend, cfg);
+        let timed_out = end.outcome == Outcome::Failed && end.code == 6;
+        if !timed_out || reopened >= reopen.times {
+            if reopened > 0 {
+                end.detail = format!(
+                    "{}; after reopening the app {}",
+                    end.detail,
+                    times(reopened)
+                );
+            }
+            return end;
+        }
+        let Some(application) = cfg.application else {
+            return End::error(&Error::InvalidArgs(
+                "reopen requires a suite application context".into(),
+            ));
+        };
+        if cfg.app_label.is_none() {
+            return End::error(&Error::InvalidArgs(
+                "reopen requires a suite environment.appLabel".into(),
+            ));
+        }
+        if let Some(end) = application_health(cfg) {
+            return end;
+        }
+        if let Err(error) = application.restart() {
+            return End::error(&error);
+        }
+        let opened = open_app(backend, cfg);
+        if opened.outcome != Outcome::Passed {
+            return End {
+                detail: format!(
+                    "{:?} not seen, and reopening the app failed: {}",
+                    text, opened.detail
+                ),
+                ..opened
+            };
+        }
+        reopened += 1;
+    }
+}
+
+fn times(n: u32) -> String {
+    match n {
+        1 => "once".into(),
+        n => format!("{n} times"),
     }
 }
 

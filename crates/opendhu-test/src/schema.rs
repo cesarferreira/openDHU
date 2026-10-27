@@ -79,9 +79,27 @@ pub enum Step {
     #[serde(rename = "device.inputText")]
     DeviceInputText { text: String },
     #[serde(rename = "ui.waitFor")]
-    UiWaitFor { text: String, timeout: Dur },
+    UiWaitFor {
+        text: String,
+        timeout: Dur,
+        /// Restart and reopen the app up to this many times if the text does not show up.
+        #[serde(default)]
+        reopen: u32,
+        /// How long each attempt before the last waits (default 10s).
+        #[serde(default, rename = "reopenAfter")]
+        reopen_after: Option<Dur>,
+    },
     #[serde(rename = "ui.expect")]
-    UiExpect { text: String, timeout: Dur },
+    UiExpect {
+        text: String,
+        timeout: Dur,
+        /// Restart and reopen the app up to this many times if the text does not show up.
+        #[serde(default)]
+        reopen: u32,
+        /// How long each attempt before the last waits (default 10s).
+        #[serde(default, rename = "reopenAfter")]
+        reopen_after: Option<Dur>,
+    },
     /// Wait for text in the phone's own UI tree (not the car screen, which only OCR can read).
     #[serde(rename = "phone.expect")]
     PhoneExpect { text: String, timeout: Dur },
@@ -125,6 +143,28 @@ pub enum Step {
         timeout: Dur,
     },
 }
+
+/// Opt-in recovery for a wait that follows `app.open`: when the text has not shown up after
+/// `reopenAfter`, restart the app and open it again, up to `reopen` times. The last attempt waits
+/// the step's full `timeout`, so a step takes at most `reopen * (reopenAfter + open time) + timeout`.
+/// Every recovery is named in the step's result, so a flaky launch stays visible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reopen {
+    pub times: u32,
+    pub after: std::time::Duration,
+}
+
+impl Reopen {
+    pub fn new(times: u32, after: Option<Dur>) -> Self {
+        Self {
+            times,
+            after: after.map_or(std::time::Duration::from_secs(10), |d| d.0),
+        }
+    }
+}
+
+/// The most recoveries one step may ask for; more would hide a launch that is plainly broken.
+pub const MAX_REOPEN: u32 = 5;
 
 impl Step {
     pub fn action(&self) -> &'static str {
@@ -470,10 +510,40 @@ fn validate(t: &TestFile) -> Result<()> {
             }
             Step::AppOpen | Step::AppRestart => {}
             Step::DeviceInputText { text } => validate_input_text(text)?,
-            Step::UiWaitFor { text, timeout }
-            | Step::UiExpect { text, timeout }
-            | Step::PhoneExpect { text, timeout }
-            | Step::UiTap { text, timeout, .. } => {
+            Step::UiWaitFor {
+                text,
+                timeout,
+                reopen,
+                reopen_after,
+            }
+            | Step::UiExpect {
+                text,
+                timeout,
+                reopen,
+                reopen_after,
+            } => {
+                check_duration(i, a, "timeout", *timeout)?;
+                if text.trim().is_empty() {
+                    return Err(bad(i, a, "text must not be empty"));
+                }
+                if *reopen > MAX_REOPEN {
+                    return Err(bad(
+                        i,
+                        a,
+                        format!(
+                            "reopen must be at most {MAX_REOPEN}; a launch that needs more is broken"
+                        ),
+                    ));
+                }
+                match reopen_after {
+                    Some(_) if *reopen == 0 => {
+                        return Err(bad(i, a, "reopenAfter needs reopen to be at least 1"));
+                    }
+                    Some(after) => check_duration(i, a, "reopenAfter", *after)?,
+                    None => {}
+                }
+            }
+            Step::PhoneExpect { text, timeout } | Step::UiTap { text, timeout, .. } => {
                 check_duration(i, a, "timeout", *timeout)?;
                 if let Step::UiTap {
                     until: Some(until), ..

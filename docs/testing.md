@@ -460,6 +460,32 @@ items. `app.open` uses the host launcher and a truncated label prefix; this firs
 supports the native 800x480 display profile, which suites explicitly select. OCR requires visible,
 legible text and should not be used to assert map pixels, clocks, or animation timing.
 
+### Recovering from a launch that did not take (`reopen`)
+
+`app.open` taps the app's launcher icon and passes once the tap is sent, so it cannot know whether the
+app actually came up. When a wait right after it keeps failing because the car is on the wrong screen
+(a different app, a stale sub-screen), `reopen` restarts and reopens the app and tries again:
+
+```yaml
+- action: app.open
+- action: ui.expect
+  as: wait for the assignment count
+  text: 1 available
+  timeout: 30s
+  reopen: 2          # at most 2 restarts (maximum 5)
+  reopenAfter: 12s   # how long each earlier attempt waits (default 10s)
+```
+
+Only `ui.waitFor` and `ui.expect` accept it. A tap must not be replayed against a fresh app, so
+`ui.tap` does not. It needs a suite application context (it uses the same restart as `app.restart`),
+and only a timeout triggers a reopen: errors, interruptions and app crashes end the step as usual.
+
+The last attempt waits the step's full `timeout`, so a step takes at most
+`reopen * (reopenAfter + open time) + timeout`. Every recovery is named in the step's result
+("after reopening the app once"), so a flaky launch stays visible in the report instead of being
+retried silently. Use it where a journey starts from a fresh launch, and fix the cause if the
+recovery fires often.
+
 ### Phone-side assertions
 
 `phone.expect` waits for text in the phone's own screen, read from its accessibility tree with
