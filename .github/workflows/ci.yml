@@ -3,7 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # Nothing here builds from docs, so they should not spend minutes.
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**"]
 
 # A newer push to the same PR supersedes the run in progress.
 concurrency:
@@ -39,7 +42,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS minutes bill at 10x Linux's rate, so it is off until it is worth the cost.
+        # os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
