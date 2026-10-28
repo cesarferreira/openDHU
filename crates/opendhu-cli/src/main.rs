@@ -7,6 +7,7 @@ mod doctor;
 mod gearhead;
 mod output_path;
 mod phone_setup;
+mod recording;
 mod reverse;
 mod services;
 mod session_backend;
@@ -109,6 +110,16 @@ enum Command {
         #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=3600))]
         seconds: u64,
     },
+    /// Film the projected screen to an MP4 (native backend; needs ffmpeg with libx264)
+    ///
+    /// The clip follows what the phone sent: a screen that did not change takes no extra frames.
+    Record {
+        /// The MP4 file to write
+        out: PathBuf,
+        /// How long to film, in seconds
+        #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        seconds: u64,
+    },
     /// Touch a pixel of the projected screen (0,0 is the top left of a screenshot)
     Tap { x: u32, y: u32 },
     /// Press one of the car's buttons: home, back, up, down, left, right, enter, search, play_pause,
@@ -177,6 +188,10 @@ enum Command {
         /// Run tests whose name or filename contains this text (case-insensitive)
         #[arg(long)]
         filter: Option<String>,
+        /// Film each test (native backend; needs ffmpeg). Clips go in `videos/` next to the report;
+        /// `--record` keeps those of tests that did not pass, `--record all` keeps every one
+        #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "failures")]
+        record: Option<recording::Mode>,
     },
     /// Check the environment without touching a running session
     Doctor {
@@ -477,6 +492,28 @@ fn run(cli: Cli) -> Result<u8> {
             }
             Ok(0)
         }
+        Command::Record { out, seconds } => {
+            let out = output_path::absolute(&out, &current_dir()?);
+            if !out
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+            {
+                return Err(Error::InvalidArgs(format!(
+                    "output path {} must end in .mp4",
+                    out.display()
+                )));
+            }
+            let ffmpeg = opendhu_native::find_ffmpeg().ok_or_else(|| {
+                Error::BackendUnavailable("ffmpeg not found; install it to record".into())
+            })?;
+            let path = recording::record(&daemon_ctl::connect()?, &ffmpeg, &out, seconds)?;
+            if json {
+                println!("{}", serde_json::json!({"path": path, "seconds": seconds}));
+            } else {
+                println!("Recorded {seconds} s of the car screen: {}", path.display());
+            }
+            Ok(0)
+        }
         Command::Tap { x, y } => {
             let r = daemon_ctl::connect()?.tap(x, y)?;
             print_input(&r, json);
@@ -518,6 +555,7 @@ fn run(cli: Cli) -> Result<u8> {
             no_interactive,
             verbose,
             filter,
+            record,
         } => {
             let cfg = load()?;
             if tui && json {
@@ -557,6 +595,7 @@ fn run(cli: Cli) -> Result<u8> {
                 usb,
                 validate,
                 phone_setup: !no_phone_setup,
+                record,
                 cancel: None,
                 app: None,
                 runtime_dir: None,

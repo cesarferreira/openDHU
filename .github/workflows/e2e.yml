@@ -1,0 +1,26 @@
+name: E2E
+
+# Boots a real emulator, so it is run on demand rather than on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: Film the car screen (failures, all or off)
+        default: failures
+
+jobs:
+  sample:
+    name: Android sample on an emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: ./
+        with:
+          suite: sample
+          record: ${{ inputs.record }}

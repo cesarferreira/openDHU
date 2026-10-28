@@ -57,6 +57,7 @@ aa key home
 aa focus video off
 aa screenshot screen.png
 aa audio recording.wav --seconds 10
+aa record clip.mp4 --seconds 10   # film the car screen (needs ffmpeg)
 aa status --json
 aa stop
 ```
@@ -109,11 +110,25 @@ aa test sample                   # one suite, on the configured emulator
 aa test sample --usb             # on one authorized USB phone instead
 aa test sample --filter persist  # only matching tests
 aa test sample --list            # list tests; `aa test --list` lists suites
+aa test sample --record          # film each test; keeps the clips of failures (`--record all` keeps all)
 aa test --validate               # parse everything without touching a device
 ```
 
 Test and suite headers are numbered (`[6/14]`, `[suite 2/4]`), and once a run has passed, test headers show an
 estimate of the time left. Open `results.html` in the artifacts folder for steps, screenshots and logs.
+
+**In CI.** The repository is a GitHub Action that boots an emulator, installs Android Auto if you ask, runs
+your suites, and uploads the report, screenshots and videos:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: cesarferreira/openDHU@main
+  with:
+    suite: sample
+    record: failures
+```
+
+See [CI](docs/ci.md) for the inputs and what a run needs.
 
 **Android Auto on the emulator.** Managed suites need Android Auto (Gearhead) on the device and stop early
 with a hint if it is missing. In order of preference:
@@ -141,7 +156,8 @@ emulator or phone first; the sample README walks through it.
 
 | | |
 |---|---|
-| [Testing](docs/testing.md) | YAML actions, suites, services, reports, and what a pass does and does not prove |
+| [Testing](docs/testing.md) | YAML actions, suites, services, reports, video, and what a pass does and does not prove |
+| [CI](docs/ci.md) | the GitHub Action: emulator, Android Auto, reports and videos as artifacts |
 | [Native backend](docs/native-backend.md) | credentials, resolution, transports and limits |
 | [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) | the two viewers |
 | [HTTP API](docs/api.md) | endpoints and live events |

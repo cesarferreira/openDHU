@@ -323,6 +323,7 @@ build/test-results/
   metadata.json       # always
   logs/01-<test>.log  # one per test
   screenshots/...     # whatever the tests captured
+  videos/01-<test>.mp4  # with --record
 ```
 
 `results.html`, `results.json` and `results.xml` are the only files cleaned up: reports in unrequested
@@ -338,6 +339,18 @@ formats to write, for example `--report html --report junit`.
 `metadata.json` holds only values that were observed: openDHU version, start time, duration, and the backend's
 name, version, build and device serial. `deviceModel`, `androidVersion`, `androidAutoVersion` and `display`
 are `null` because the backend interface cannot read them today.
+
+### Video (`--record`)
+
+`aa test --record` films the car screen during each test and keeps the clip of every test that did not pass;
+`--record all` keeps every one. Clips are H.264 MP4s in `videos/`, named like the test's log, and
+`results.html` plays them under their test. `aa record clip.mp4 --seconds 10` films a session you started
+yourself.
+
+Recording needs the native backend (the DHU draws its video in its own window) and ffmpeg with libx264. The
+phone only sends a frame when the picture changes, so a clip follows the real pace of the run and a screen that
+sits still adds no size. A failure to record is reported but never fails the test. `videos/` accumulates
+like `logs/` and `screenshots/` across runs, but a default-folder run clears it first.
 
 The artifacts directory must not contain whitespace if any test takes a screenshot, because the path is passed
 to the DHU console, whose handling of quoting is unverified.

@@ -19,6 +19,10 @@ impl DaemonBackend {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
+
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
 }
 
 impl HeadUnitBackend for DaemonBackend {

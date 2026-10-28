@@ -297,6 +297,14 @@ pub fn to_html(report: &RunReport, dir: &Path) -> String {
         if let Some(message) = &test.message {
             let _ = write!(html, "<p class=\"{state}\">{}</p>", xml_escape(message));
         }
+        let video = video_path(index + 1, &test.name);
+        if dir.join(&video).is_file() {
+            let _ = write!(
+                html,
+                "<video controls preload=\"metadata\" src=\"{}\"></video>",
+                url(&video)
+            );
+        }
         html.push_str("<div class=\"table\"><table><thead><tr><th>Step</th><th>Result</th><th>Duration</th><th>Details</th></tr></thead><tbody>");
         for step in &test.steps {
             let state = outcome_class(step.outcome);
@@ -449,6 +457,11 @@ fn url(path: &str) -> String {
         }
     }
     encoded
+}
+
+/// Where the clip of the `index`th (1-based) test of a run goes, relative to the artifacts folder.
+pub fn video_path(index: usize, name: &str) -> String {
+    format!("videos/{index:02}-{}.mp4", slug(name))
 }
 
 fn slug(name: &str) -> String {

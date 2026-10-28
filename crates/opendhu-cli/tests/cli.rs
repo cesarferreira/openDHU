@@ -325,3 +325,13 @@ fn help_uses_the_aa_executable_name() {
     assert!(text(&output).contains("Usage: aa "), "{}", text(&output));
     assert!(text(&output).starts_with("openDHU - "), "{}", text(&output));
 }
+
+#[test]
+fn record_needs_an_mp4_path_and_a_positive_length() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.opendhu(&["record", "clip.avi"])), 2);
+    assert_eq!(
+        code(&s.opendhu(&["record", "clip.mp4", "--seconds", "0"])),
+        2
+    );
+}

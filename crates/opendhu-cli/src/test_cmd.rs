@@ -59,6 +59,8 @@ pub struct Options {
     pub report: Vec<ReportFormat>,
     pub artifacts_dir: Option<PathBuf>,
     pub skip_unsupported: bool,
+    /// Film each test, keeping the clips this says to.
+    pub record: Option<crate::recording::Mode>,
     pub json: bool,
     pub position: Position,
 }
@@ -295,6 +297,18 @@ pub(crate) fn run_with_emulators(
     } else {
         None
     };
+    let ffmpeg = match opts.record {
+        None => None,
+        Some(_) if head.backend != "native" => {
+            return Err(Error::InvalidArgs(
+                "--record needs the native backend; the DHU shows its video in its own window"
+                    .into(),
+            ));
+        }
+        Some(_) => Some(opendhu_native::find_ffmpeg().ok_or_else(|| {
+            Error::BackendUnavailable("--record needs ffmpeg, which was not found".into())
+        })?),
+    };
     let clock = SystemClock::with_cancel(Arc::clone(&cancel));
     let started_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -351,6 +365,16 @@ pub(crate) fn run_with_emulators(
             progress(&output, format!("  Resetting application {}...", app.label));
             app.reset()?;
         }
+        let video = ffmpeg.as_deref().and_then(|ffmpeg| {
+            let path = dir.join(opendhu_test::report::video_path(n + 1, &test.name));
+            match crate::recording::Recorder::start(backend.client(), ffmpeg, &path) {
+                Ok(recorder) => Some(recorder),
+                Err(e) => {
+                    progress(&output, format!("  Not recording this test: {e}"));
+                    None
+                }
+            }
+        });
         let mut r =
             run_test_with_progress(test, file, &mut backend, &cfg, &mut |event| match event {
                 Progress::Started { index, action } => {
@@ -393,6 +417,19 @@ pub(crate) fn run_with_emulators(
                 });
                 r.outcome = outcome;
                 r.exit_code = code;
+            }
+        }
+        if let Some(recorder) = video {
+            if opts
+                .record
+                .is_some_and(|mode| mode.keeps(r.outcome == Outcome::Passed))
+            {
+                match recorder.finish() {
+                    Ok(path) => progress(&output, format!("  Video: {}", path.display())),
+                    Err(e) => progress(&output, format!("  Video failed: {e}")),
+                }
+            } else {
+                recorder.discard();
             }
         }
         progress(
@@ -536,7 +573,7 @@ fn list_tests(opts: &Options) -> Result<u8> {
 /// Removes what an earlier default-folder run left behind: its reports, logs and per-suite folders,
 /// plus the `run-*` and `all-*` folders older versions created. Nothing else in the folder is touched.
 pub(crate) fn reset_artifacts(dir: &Path, suites: &[&str]) {
-    const OWNED: [&str; 10] = [
+    const OWNED: [&str; 11] = [
         "results.html",
         "results.json",
         "results.xml",
@@ -547,6 +584,7 @@ pub(crate) fn reset_artifacts(dir: &Path, suites: &[&str]) {
         "logcat.txt",
         "logs",
         "screenshots",
+        "videos",
     ];
     let timestamped = |name: &str| {
         ["run-", "all-"].iter().any(|prefix| {

@@ -1,0 +1,185 @@
+name: openDHU tests
+description: >
+  Boot an Android emulator, optionally install Android Auto, and run openDHU test suites against it.
+  Runs on Linux runners with KVM (ubuntu-latest).
+author: cesarferreira
+
+inputs:
+  suite:
+    description: Suite name or test path to run. Empty runs every suite in opendhu.yaml.
+    default: ""
+  working-directory:
+    description: Directory to run from; it holds opendhu.yaml or the suite.
+    default: "."
+  avd-name:
+    description: Name of the AVD to create. It must match `environment.emulator` in the suite.
+    default: medium_phone
+  device:
+    description: avdmanager device definition for the AVD.
+    default: pixel_6
+  api-level:
+    description: Android API level of the system image.
+    default: "35"
+  target:
+    description: >
+      System image flavour. Use google_apis_playstore, which ships with Android Auto; the plain
+      google_apis image does not.
+    default: google_apis_playstore
+  arch:
+    description: System image architecture. Only x86_64 runs fast on GitHub's runners.
+    default: x86_64
+  gearhead-apk:
+    description: Path to an Android Auto APK, directory of splits, or .xapk to install on the emulator.
+    default: ""
+  gearhead-version:
+    description: Android Auto version for apkeep to download (needs gearhead-sha256). Ignored with gearhead-apk.
+    default: ""
+  gearhead-sha256:
+    description: Expected SHA-256 of the downloaded Android Auto bundle.
+    default: ""
+  record:
+    description: "Film the car screen: `failures`, `all` or `off`."
+    default: failures
+  args:
+    description: Extra arguments for `aa test`, such as `--filter login`.
+    default: ""
+  artifacts-dir:
+    description: Where reports, logs, screenshots and videos go. Must not contain spaces.
+    default: openDHU-results
+  upload:
+    description: Upload the artifacts folder with actions/upload-artifact.
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded artifact.
+    default: openDHU-results
+
+runs:
+  using: composite
+  steps:
+    - name: Enable KVM
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Install ffmpeg and tesseract
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-eng
+
+    # The vendored android-auto crate compiles its .proto files in build.rs.
+    - uses: arduino/setup-protoc@v3
+      with:
+        version: "28.x"
+        repo-token: ${{ github.token }}
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ github.action_path }} -> target
+
+    - name: Build aa
+      shell: bash
+      run: |
+        cargo build --release --locked --manifest-path "${{ github.action_path }}/Cargo.toml" \
+          -p opendhu-cli -p opendhu-native-hu
+        echo "${{ github.action_path }}/target/release" >> "$GITHUB_PATH"
+
+    - name: Create the AVD
+      shell: bash
+      env:
+        IMAGE: system-images;android-${{ inputs.api-level }};${{ inputs.target }};${{ inputs.arch }}
+        AVD: ${{ inputs.avd-name }}
+        DEVICE: ${{ inputs.device }}
+      run: |
+        SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+        export PATH="$SDK/cmdline-tools/latest/bin:$SDK/platform-tools:$SDK/emulator:$PATH"
+        yes | sdkmanager --licenses >/dev/null || true
+        sdkmanager "emulator" "platform-tools" "$IMAGE" >/dev/null
+        echo no | avdmanager create avd --force -n "$AVD" -k "$IMAGE" -d "$DEVICE"
+        echo "$SDK/emulator" >> "$GITHUB_PATH"
+        echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+    # Started here rather than by `aa test` so Android Auto can be installed before the suite runs.
+    # The suite finds this emulator by its AVD name and reuses it.
+    - name: Boot the emulator
+      shell: bash
+      env:
+        AVD: ${{ inputs.avd-name }}
+      run: |
+        nohup emulator -avd "$AVD" -no-window -no-snapshot -no-audio -no-boot-anim \
+          -gpu swiftshader_indirect -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
+        adb wait-for-device
+        for _ in $(seq 1 100); do
+          [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && exit 0
+          sleep 3
+        done
+        echo "::error::the emulator did not finish booting"; tail -n 50 "$RUNNER_TEMP/emulator.log"; exit 1
+
+    - name: Install Android Auto
+      if: inputs.gearhead-apk != '' || inputs.gearhead-version != ''
+      shell: bash
+      env:
+        APK: ${{ inputs.gearhead-apk }}
+        VERSION: ${{ inputs.gearhead-version }}
+        SHA256: ${{ inputs.gearhead-sha256 }}
+      run: |
+        if [ -n "$APK" ]; then
+          aa setup gearhead --apk "$APK" --force
+        else
+          [ -n "$SHA256" ] || { echo "::error::gearhead-version needs gearhead-sha256"; exit 1; }
+          command -v apkeep >/dev/null || cargo install apkeep --locked
+          aa setup gearhead --download --version "$VERSION" --sha256 "$SHA256" --force
+        fi
+
+    - name: Run openDHU tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SUITE: ${{ inputs.suite }}
+        RECORD: ${{ inputs.record }}
+        ARGS: ${{ inputs.args }}
+        ARTIFACTS: ${{ inputs.artifacts-dir }}
+      run: |
+        flags=(--headless --no-interactive --artifacts-dir "$ARTIFACTS")
+        case "$RECORD" in
+          failures) flags+=(--record failures) ;;
+          all) flags+=(--record all) ;;
+          off) ;;
+          *) echo "::error::record must be failures, all or off"; exit 1 ;;
+        esac
+        # shellcheck disable=SC2086
+        aa test ${SUITE:+"$SUITE"} "${flags[@]}" $ARGS
+
+    - name: Summarize
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ARTIFACTS: ${{ inputs.artifacts-dir }}
+      run: |
+        command -v jq >/dev/null || exit 0
+        {
+          echo "### openDHU results"
+          echo
+          echo "| Suite | Tests | Passed | Failed | Errors | Skipped |"
+          echo "|---|---|---|---|---|---|"
+          find "$ARTIFACTS" -name results.json | sort | while read -r f; do
+            jq -r --arg name "$(dirname "${f#"$ARTIFACTS"}" | sed 's|^/||;s|^\.$|run|')" \
+              '.metadata.summary | "| \($name) | \(.tests) | \(.passed) | \(.failed) | \(.errors) | \(.skipped) |"' "$f"
+          done
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload results
+      if: always() && inputs.upload == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/${{ inputs.artifacts-dir }}
+        if-no-files-found: ignore
+
+    - name: Stop the emulator
+      if: always()
+      shell: bash
+      run: adb emu kill || true
