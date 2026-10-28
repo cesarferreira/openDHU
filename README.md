@@ -1,13 +1,13 @@
 # openDHU
 
-**Drive and test Android Auto from your terminal.**
+**Espresso for the car screen.** Drive and test Android Auto apps from your terminal, a desktop window or CI.
 
 openDHU is a scriptable Android Auto head unit. It connects to a phone or an emulator, shows the projected
-screen, and lets you tap, swipe, change video focus and take screenshots from a CLI, a desktop window, your
-terminal, an HTTP API, or YAML tests. It is Espresso for the car screen.
+screen, and lets a script or a YAML test tap it, read it, film it and assert on it, exactly as a driver would
+see it.
 
 ```text
-$ aa test sample
+$ aa test sample --tui --record
 Suite: android-sample/e2e/suite.yaml (3 tests)
 Test: Favorite selected in Android Auto survives an app restart [2/3] · ~1m left
   PASS 1. launch the app on the car screen (8.4s)
@@ -15,61 +15,27 @@ Test: Favorite selected in Android Auto survives an app restart [2/3] · ~1m lef
   PASS 8. save Harbour Cafe as favorite (1.3s)
   PASS 10. restart the app (8.2s)
   PASS 11. favorite survived the restart (2.9s)
-  ...
+  Video: build/test-results/videos/02-favorite-selected-in-android-auto-survives-an-app-restart.mp4
 PASS  3 tests · 1 suite
 ```
 
-- **Interact:** tap, swipe, press car buttons, toggle video focus, and watch the display live.
-- **Capture:** screenshots, and audio the phone plays through the car.
-- **Test:** find text on the projected screen with OCR, tap it, assert what happened, and get HTML, JSON and
-  JUnit reports.
-- **Automate:** managed suites install the app, start local services and ADB tunnels, and clean up after
-  themselves.
-- **Integrate:** every command has `--json`, and there is an authenticated local HTTP API with live events.
-
-openDHU runs its own native head unit by default, and can also drive Google's Desktop Head Unit (DHU).
-
 ## Install
 
-You need Rust 1.87+, `adb` and `ffmpeg`. Tests that read the screen also need `tesseract` with English
-data. It is tested on macOS and Linux.
+You need Rust 1.87+, `adb` and `ffmpeg`. Tests that read the screen also need `tesseract` with English data.
 
 ```bash
 git clone https://github.com/cesarferreira/openDHU.git
 cd openDHU
 make install     # aa, opendhu-native-hu, opendhu-gui and opendhu-tui into ~/.cargo/bin
-aa doctor        # checks the environment without touching a session
+aa doctor        # checks the environment, including Android Auto on each device
 ```
 
-`make install` builds optimized release binaries; `make install-debug` is for development. For a real phone,
-enable USB debugging, authorize the computer and complete Android Auto setup first. Development apps need
-[head-unit credentials](docs/native-backend.md#debugging-knobs).
+For a real phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
+Development apps need [head-unit credentials](docs/native-backend.md#debugging-knobs).
 
-## Use it
+## Write a test
 
-```bash
-aa start                          # native head unit over USB (--serial SERIAL to pick a device)
-aa gui                            # live display with mouse input and session controls
-aa tui                            # the same in your terminal (kitty graphics: kitty, Ghostty, WezTerm)
-aa tap 400 240
-aa swipe 300 200 100 200 --duration-ms 400
-aa key home
-aa focus video off
-aa screenshot screen.png
-aa audio recording.wav --seconds 10
-aa record clip.mp4 --seconds 10   # film the car screen (needs ffmpeg)
-aa status --json
-aa stop
-```
-
-Touch, live view, audio capture and phone-confirmed video focus need the native backend. Use `aa start --dhu`
-for Google's DHU (install `extras;google;auto` with the Android SDK). `aa start --reverse PORT` restores an ADB
-tunnel after a USB reconnect. `aa --help` lists everything.
-
-## Test Android Auto apps
-
-A test is a YAML file. Each step can carry an `as:` label saying what it is for, and the run prints that
-instead of the mechanics:
+A test is a YAML file. Each step can carry an `as:` label, and the run prints that instead of the mechanics:
 
 ```yaml
 name: Favorite survives an app restart
@@ -91,34 +57,97 @@ steps:
     path: screenshots/places.png
 ```
 
-`ui.tap`, `ui.expect` and `ui.waitFor` find text by OCR on the real projected frame, so tests only see what
-a driver would see. Other actions cover swipes, keys, video focus, HTTP calls to local fixtures and status
-assertions. See [Testing](docs/testing.md) for every action.
+`ui.tap`, `ui.expect` and `ui.waitFor` find text by OCR on the projected frame, so a test only sees what a
+driver would see. Other actions cover swipes, car keys, video focus, HTTP calls to local fixtures and status
+assertions. See [Testing](docs/testing.md) for all of them.
 
-**Run one test** against a session you started with `aa start`:
+## Run tests
+
+A **suite** (see `opendhu.yaml`) builds and installs your APK, boots the emulator, starts your local services
+and ADB tunnels, runs the tests and cleans up. Open `results.html` in the artifacts folder afterwards for steps,
+screenshots, logs and videos. JSON and JUnit reports are written too.
+
+### Basics
 
 ```bash
-aa test examples/video-focus.yaml
-aa test examples/video-focus.yaml --tui    # watch the head unit and the progress together
+aa test                       # every suite registered in opendhu.yaml
+aa test sample                # one suite, on its configured emulator
+aa test sample --filter persist   # only tests whose name or file matches
+aa test sample --list         # list tests; `aa test --list` lists suites
+aa test --validate            # parse everything without touching a device
+aa test examples/video-focus.yaml # one test, against a session you started with `aa start`
 ```
 
-**Run managed suites**, which pick a device, build and install the APK, start services and tear it all down:
+### With recording
 
 ```bash
-aa test                          # every suite registered in opendhu.yaml
-aa test sample                   # one suite, on the configured emulator
-aa test sample --usb             # on one authorized USB phone instead
-aa test sample --filter persist  # only matching tests
-aa test sample --list            # list tests; `aa test --list` lists suites
-aa test sample --record          # film each test; keeps the clips of failures (`--record all` keeps all)
-aa test --validate               # parse everything without touching a device
+aa test sample --record       # film each test, keep the clips of the ones that failed
+aa test sample --record all   # keep every clip
+aa record clip.mp4 --seconds 10   # film a session you started yourself
 ```
 
-Test and suite headers are numbered (`[6/14]`, `[suite 2/4]`), and once a run has passed, test headers show an
-estimate of the time left. Open `results.html` in the artifacts folder for steps, screenshots and logs.
+Clips are MP4s in `videos/` next to the report, and `results.html` plays them under their test. They follow the
+real pace of the run, since the phone only sends a frame when the picture changes. Needs ffmpeg with libx264
+and the native backend.
 
-**In CI.** The repository is a GitHub Action that boots an emulator, installs Android Auto if you ask, runs
-your suites, and uploads the report, screenshots and videos:
+### Headless
+
+```bash
+aa test sample --headless     # no head-unit window
+```
+
+Without `--headless`, the head-unit window opens so you can watch. Use it on servers and in CI.
+
+### On a USB phone
+
+```bash
+aa test sample --usb          # the one authorized USB phone instead of the emulator
+aa test sample --usb --headless
+```
+
+Connect the phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
+
+### With the TUI
+
+```bash
+aa test sample --tui          # head unit and test progress together, in your terminal
+aa test sample --tui --record all # both, keeping every clip
+```
+
+Draws the head unit with kitty graphics, so it needs kitty, Ghostty or WezTerm and `opendhu-tui`
+(`make install`). It replaces the head-unit window, so it can't be combined with `--headless`.
+
+### Without the animated progress
+
+```bash
+aa test sample --no-interactive   # plain line-by-line progress, for logs
+aa test sample --json             # machine-readable output
+```
+
+## Android Auto on the emulator
+
+Managed suites need Android Auto (Gearhead) on the device, and stop early with a hint if it is missing. In
+order of preference:
+
+1. **Create the AVD from a Google Play system image.** Android Auto is usually already there, and the Play
+   Store can update it.
+2. **Install an APK you trust:** `aa setup gearhead --apk auto.apk`. It also takes a directory of split APKs
+   or an `.xapk`/`.apks` bundle.
+3. **Let apkeep fetch a pinned build:**
+
+   ```bash
+   aa setup gearhead --download --version 17.9.664044 \
+     --sha256 6415e1ed2a4caa8c8ec751e5896b896a5ba81d6a46d75e94a5381be14769fc94
+   ```
+
+   It needs [apkeep](https://github.com/EFForg/apkeep) and downloads from APKPure, so the checksum is what you
+   trust: openDHU refuses to install a file that does not match. List versions with
+   `apkeep -a com.google.android.projection.gearhead -d apk-pure -l`.
+
+Nothing is downloaded or installed unless you run the command, and it does nothing if Android Auto is already
+there (`--force` reinstalls).
+
+## In CI
 
 ```yaml
 - uses: actions/checkout@v4
@@ -128,29 +157,36 @@ your suites, and uploads the report, screenshots and videos:
     record: failures
 ```
 
-See [CI](docs/ci.md) for the inputs and what a run needs.
+See [CI](docs/ci.md) for the inputs. Emulator runs are slow and use a lot of runner minutes, so run them on
+demand or on a schedule, not on every push.
 
-**Android Auto on the emulator.** Managed suites need Android Auto (Gearhead) on the device and stop early
-with a hint if it is missing. In order of preference:
+## Try the sample
 
-1. Create the AVD from a **Google Play system image**. Android Auto is usually there already, and the Play
-   Store can update it.
-2. Install an APK you trust: `aa setup gearhead --apk auto.apk`. It also takes a directory of split APKs or
-   an `.xapk`/`.apks` bundle.
-3. Let apkeep fetch a pinned build:
-   `aa setup gearhead --download --version 17.9.664044 --sha256 6415e1ed2a4caa8c8ec751e5896b896a5ba81d6a46d75e94a5381be14769fc94`.
-   It needs [apkeep](https://github.com/EFForg/apkeep) on `PATH` and downloads from APKPure, so the checksum
-   is what you are trusting: it refuses to install a file that does not match. `apkeep -a
-   com.google.android.projection.gearhead -d apk-pure -l` lists the versions on offer. Take the checksum
-   from a download you have checked yourself; the one above is for the 17.9.664044 bundle (arm64 splits,
-   which run on the x86_64 Google Play image).
+The [Android sample](android-sample/README.md) is a small app with three Android Auto journeys:
 
-Nothing is downloaded or installed unless you run the command. It does nothing when Android Auto is already
-installed; add `--force` to reinstall.
+```bash
+make sample-build && aa test sample    # needs the Android SDK and JDK 17+
+```
 
-The [Android sample](android-sample/README.md) is a small app with three Android Auto journeys. Try it with
-`make sample-build && aa test sample` (needs the Android SDK and JDK 17+). Provision Android Auto on the
-emulator or phone first; the sample README walks through it.
+## Drive it by hand
+
+```bash
+aa start                          # native head unit over USB (--serial SERIAL to pick a device)
+aa gui                            # live display with mouse input and session controls
+aa tui                            # the same in your terminal
+aa tap 400 240
+aa swipe 300 200 100 200 --duration-ms 400
+aa key home
+aa focus video off
+aa screenshot screen.png
+aa audio recording.wav --seconds 10
+aa status --json
+aa stop
+```
+
+Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa start --dhu` for
+Google's DHU (install `extras;google;auto` with the Android SDK). `aa start --reverse PORT` restores an ADB
+tunnel after a USB reconnect. `aa --help` lists everything.
 
 ## Documentation
 
@@ -165,6 +201,11 @@ emulator or phone first; the sample README walks through it.
 | [Architecture](docs/architecture.md) | how the crates fit together |
 | [Vision](docs/vision.md) / [Feasibility](docs/feasibility.md) | why it exists, and what was proven first |
 
+## Limits
+
+Native USB sessions support one connected phone at a time. Car-button input is experimental, and wireless
+Android Auto is unsupported. CI currently runs on Linux only; macOS is supported but not covered by CI.
+
 ## Development
 
 ```bash
@@ -172,9 +213,6 @@ make              # format check, clippy, build, tests and example validation; n
 make help         # every target
 make hw-native    # hardware checks against a real phone
 ```
-
-Native USB sessions support one connected phone at a time. Car-button input is experimental, and wireless
-Android Auto is unsupported.
 
 ## Licence
 
