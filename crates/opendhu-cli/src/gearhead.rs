@@ -8,6 +8,7 @@ use std::time::Duration;
 use opendhu_core::{Error, Result};
 
 use crate::device::{adb, command};
+use crate::doctor::{Check, Level, check};
 
 pub(crate) const PACKAGE: &str = "com.google.android.projection.gearhead";
 
@@ -28,6 +29,30 @@ pub(crate) fn is_installed(program: &Path, serial: &str) -> Result<bool> {
         &["shell", "pm", "list", "packages", PACKAGE],
     )
     .map(|o| lists_package(&o))
+}
+
+/// The installed version, such as `17.9.664044-release`, when adb can tell.
+fn version(program: &Path, serial: &str) -> Option<String> {
+    adb(program, serial, &["shell", "dumpsys", "package", PACKAGE])
+        .ok()?
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("versionName=").map(str::to_string))
+}
+
+/// A doctor line for one device. `missing` is the level to report when the app is absent.
+pub(crate) fn check_device(program: &Path, serial: &str, missing: Level) -> Check {
+    match is_installed(program, serial) {
+        Ok(true) => check(
+            Level::Ok,
+            "android auto",
+            match version(program, serial) {
+                Some(v) => format!("{serial}: installed ({v})"),
+                None => format!("{serial}: installed"),
+            },
+        ),
+        Ok(false) => check(missing, "android auto", format!("{serial}: {MISSING_HINT}")),
+        Err(e) => check(Level::Warn, "android auto", format!("{serial}: {e}")),
+    }
 }
 
 /// The APK files an `--apk` argument stands for: a single file, or a directory of split APKs.

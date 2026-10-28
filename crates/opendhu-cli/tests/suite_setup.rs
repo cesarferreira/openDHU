@@ -236,7 +236,13 @@ fn usb_doctor_ignores_avd_and_never_installs_or_launches_the_app() {
             .any(|c| c["name"] == "usb phone" && c["level"] == "ok")
     );
     assert!(!checks.iter().any(|c| c["name"] == "avd"));
-    assert_eq!(s.adb_calls().trim(), "devices -l");
+    assert!(
+        checks
+            .iter()
+            .any(|c| c["name"] == "android auto" && c["level"] == "ok")
+    );
+    assert!(!s.adb_calls().contains("install"));
+    assert!(!s.adb_calls().contains("am start"));
     assert!(!s.dir.exists());
 }
 
@@ -278,4 +284,39 @@ fn setup_gearhead_download_requires_a_pinned_version_and_checksum() {
     let s = Sandbox::new();
     let o = s.opendhu(&["setup", "gearhead", "--download"]);
     assert_eq!(code(&o), 2, "{}", text(&o));
+}
+
+#[test]
+fn usb_doctor_fails_when_android_auto_is_missing_from_the_phone() {
+    let s = Sandbox::new();
+    let root = s.scratch("doctor-usb-no-auto");
+    write(
+        &root.join("suite.yaml"),
+        "version: 1\nenvironment: {emulator: absent_avd, apk: app.apk, package: example.app, appLabel: Test}\ntests: [test.yaml]\n",
+    );
+    write(
+        &root.join("test.yaml"),
+        "name: Test\nsteps: [{action: wait, duration: 1ms}]\n",
+    );
+    write(&root.join("app.apk"), "apk");
+    let env = s.adb_env("no-gearhead");
+    let o = s.opendhu_with(
+        &[
+            "doctor",
+            root.join("suite.yaml").to_str().unwrap(),
+            "--usb",
+            "--json",
+        ],
+        &env,
+    );
+    let checks: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert!(
+        checks
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "android auto"
+                && c["level"] == "fail"
+                && c["detail"].as_str().unwrap().contains("aa setup gearhead"))
+    );
 }

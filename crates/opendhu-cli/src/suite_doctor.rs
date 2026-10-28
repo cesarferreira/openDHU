@@ -50,7 +50,10 @@ pub fn run(path: &Path, usb: bool) -> Result<Vec<Check>> {
     if usb {
         if let Some(adb) = adb {
             match crate::suite::find_usb_phone(&adb) {
-                Ok(serial) => checks.push(check(Level::Ok, "usb phone", serial)),
+                Ok(serial) => {
+                    checks.push(check(Level::Ok, "usb phone", &serial));
+                    checks.push(crate::gearhead::check_device(&adb, &serial, Level::Fail));
+                }
                 Err(e) => checks.push(check(Level::Fail, "usb phone", e.to_string())),
             }
         }

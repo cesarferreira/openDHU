@@ -122,6 +122,13 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
                 }
                 Ok(devs) => {
                     for d in devs {
+                        if d.state == "device" {
+                            out.push(crate::gearhead::check_device(
+                                &adb_path,
+                                &d.serial,
+                                Level::Warn,
+                            ));
+                        }
                         let level = if d.state == "device" {
                             Level::Ok
                         } else {
