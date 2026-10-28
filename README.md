@@ -26,8 +26,8 @@ You need Rust 1.87+, `adb` and `ffmpeg`. Tests that read the screen also need `t
 ```bash
 git clone https://github.com/cesarferreira/openDHU.git
 cd openDHU
-make install     # aa, opendhu-native-hu, opendhu-gui and opendhu-tui into ~/.cargo/bin
-aa doctor        # checks the environment, including Android Auto on each device
+make install  # aa, opendhu-native-hu, opendhu-gui and opendhu-tui into ~/.cargo/bin
+aa doctor     # checks the environment, including Android Auto on each device
 ```
 
 For a real phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
@@ -70,20 +70,20 @@ screenshots, logs and videos. JSON and JUnit reports are written too.
 ### Basics
 
 ```bash
-aa test                       # every suite registered in opendhu.yaml
-aa test sample                # one suite, on its configured emulator
-aa test sample --filter persist   # only tests whose name or file matches
-aa test sample --list         # list tests; `aa test --list` lists suites
-aa test --validate            # parse everything without touching a device
-aa test examples/video-focus.yaml # one test, against a session you started with `aa start`
+aa test                            # every suite registered in opendhu.yaml
+aa test sample                     # one suite, on its configured emulator
+aa test sample --filter persist    # only tests whose name or file matches
+aa test sample --list              # list tests; `aa test --list` lists suites
+aa test --validate                 # parse everything without touching a device
+aa test examples/video-focus.yaml  # one test, against a session you started with `aa start`
 ```
 
 ### With recording
 
 ```bash
-aa test sample --record       # film each test, keep the clips of the ones that failed
-aa test sample --record all   # keep every clip
-aa record clip.mp4 --seconds 10   # film a session you started yourself
+aa test sample --record          # film each test, keep the clips of the ones that failed
+aa test sample --record all      # keep every clip
+aa record clip.mp4 --seconds 10  # film a session you started yourself
 ```
 
 Clips are MP4s in `videos/` next to the report, and `results.html` plays them under their test. They follow the
@@ -93,7 +93,7 @@ and the native backend.
 ### Headless
 
 ```bash
-aa test sample --headless     # no head-unit window
+aa test sample --headless  # no head-unit window
 ```
 
 Without `--headless`, the head-unit window opens so you can watch. Use it on servers and in CI.
@@ -101,7 +101,7 @@ Without `--headless`, the head-unit window opens so you can watch. Use it on ser
 ### On a USB phone
 
 ```bash
-aa test sample --usb          # the one authorized USB phone instead of the emulator
+aa test sample --usb  # the one authorized USB phone instead of the emulator
 aa test sample --usb --headless
 ```
 
@@ -110,8 +110,8 @@ Connect the phone, enable USB debugging, authorize the computer and finish Andro
 ### With the TUI
 
 ```bash
-aa test sample --tui          # head unit and test progress together, in your terminal
-aa test sample --tui --record all # both, keeping every clip
+aa test sample --tui               # head unit and test progress together, in your terminal
+aa test sample --tui --record all  # both, keeping every clip
 ```
 
 Draws the head unit with kitty graphics, so it needs kitty, Ghostty or WezTerm and `opendhu-tui`
@@ -120,8 +120,8 @@ Draws the head unit with kitty graphics, so it needs kitty, Ghostty or WezTerm a
 ### Without the animated progress
 
 ```bash
-aa test sample --no-interactive   # plain line-by-line progress, for logs
-aa test sample --json             # machine-readable output
+aa test sample --no-interactive  # plain line-by-line progress, for logs
+aa test sample --json            # machine-readable output
 ```
 
 ## Android Auto on the emulator
@@ -165,15 +165,15 @@ demand or on a schedule, not on every push.
 The [Android sample](android-sample/README.md) is a small app with three Android Auto journeys:
 
 ```bash
-make sample-build && aa test sample    # needs the Android SDK and JDK 17+
+make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 ```
 
 ## Drive it by hand
 
 ```bash
-aa start                          # native head unit over USB (--serial SERIAL to pick a device)
-aa gui                            # live display with mouse input and session controls
-aa tui                            # the same in your terminal
+aa start  # native head unit over USB (--serial SERIAL to pick a device)
+aa gui    # live display with mouse input and session controls
+aa tui    # the same in your terminal
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa key home
@@ -209,9 +209,9 @@ Android Auto is unsupported. CI currently runs on Linux only; macOS is supported
 ## Development
 
 ```bash
-make              # format check, clippy, build, tests and example validation; no hardware needed
-make help         # every target
-make hw-native    # hardware checks against a real phone
+make            # format check, clippy, build, tests and example validation; no hardware needed
+make help       # every target
+make hw-native  # hardware checks against a real phone
 ```
 
 ## Licence
