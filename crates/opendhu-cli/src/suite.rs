@@ -850,11 +850,7 @@ fn run_prepared(
         .as_nanos();
     let default_dir = opts.artifacts_dir.is_none();
     let artifacts = artifact_path(opts.artifacts_dir.take(), suite.artifacts_dir.clone());
-    let artifacts = if artifacts.is_absolute() {
-        artifacts
-    } else {
-        cwd.join(artifacts)
-    };
+    let artifacts = crate::output_path::absolute(&artifacts, &cwd);
     if default_dir {
         test_cmd::reset_artifacts(&artifacts, &[]);
     }
