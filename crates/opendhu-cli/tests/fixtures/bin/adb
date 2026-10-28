@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fake adb for tests. $FAKE_ADB_STATE holds calls.log and the `reverse` tunnel list.
-# FAKE_ADB_MODE: normal | reverse-fails | lying-list | no-device
+# FAKE_ADB_MODE: normal | reverse-fails | lying-list | no-device | no-gearhead
 [ -n "$FAKE_ADB_STATE" ] && echo "$*" >> "$FAKE_ADB_STATE/calls.log"
 [ "$1" = "-s" ] && shift 2
 # A flag file simulates the phone being mid-re-enumeration: every adb call fails.
@@ -19,6 +19,10 @@ case "$1" in
         if [ "$FAKE_ADB_MODE" = reverse-fails ]; then echo "error: closed" >&2; exit 1; fi
         [ "$FAKE_ADB_MODE" = lying-list ] || echo "${1#tcp:}" >> "$FAKE_ADB_STATE/reverse";;
     esac;;
+  shell)
+    if [ "$2 $3" = "pm list" ] && [ "$FAKE_ADB_MODE" != no-gearhead ]; then
+      echo "package:com.google.android.projection.gearhead"
+    fi;;
   devices) echo "List of devices attached"; echo "FAKE0001 device usb:1 model:Fake transport_id:1";;
 esac
 exit 0

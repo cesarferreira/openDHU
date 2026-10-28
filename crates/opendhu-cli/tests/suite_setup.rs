@@ -239,3 +239,43 @@ fn usb_doctor_ignores_avd_and_never_installs_or_launches_the_app() {
     assert_eq!(s.adb_calls().trim(), "devices -l");
     assert!(!s.dir.exists());
 }
+
+#[test]
+fn setup_gearhead_installs_a_supplied_apk_only_when_the_app_is_missing() {
+    let s = Sandbox::new();
+    let root = s.scratch("gearhead");
+    write(&root.join("auto.apk"), "apk");
+    let apk = root.join("auto.apk");
+    let args = [
+        "setup",
+        "gearhead",
+        "--apk",
+        apk.to_str().unwrap(),
+        "--serial",
+        "FAKE0001",
+    ];
+
+    let o = s.opendhu_with(&args, &s.adb_env("no-gearhead"));
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        s.adb_calls()
+            .contains(&format!("install -r {}", apk.display()))
+    );
+
+    let before = s.adb_calls();
+    let o = s.opendhu_with(&args, &s.adb_env("normal"));
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("already installed"));
+    assert_eq!(
+        s.adb_calls().matches("install").count(),
+        before.matches("install").count()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn setup_gearhead_download_requires_a_pinned_version_and_checksum() {
+    let s = Sandbox::new();
+    let o = s.opendhu(&["setup", "gearhead", "--download"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+}

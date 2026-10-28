@@ -148,6 +148,8 @@ case "$*" in
       touch "$USB_FIXTURE/emulator-replaced"
       echo external > "$USB_FIXTURE/emulator-running"
     fi;;
+  'shell pm list packages com.google.android.projection.gearhead')
+    echo package:com.google.android.projection.gearhead;;
   'install -r -t '*) rm -f "$USB_FIXTURE/log-pipe" "$USB_FIXTURE/monitor-ready";;
   'shell am start -W -n test.app/test.app.MainActivity')
     if [ -n "$USB_LAUNCH_CRASH" ] && [ -p "$USB_FIXTURE/log-pipe" ]; then

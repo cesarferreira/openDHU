@@ -4,6 +4,7 @@ mod crash_monitor;
 mod daemon_ctl;
 mod device;
 mod doctor;
+mod gearhead;
 mod output_path;
 mod phone_setup;
 mod reverse;
@@ -187,6 +188,11 @@ enum Command {
         #[arg(long, conflicts_with = "suite")]
         dhu_path: Option<PathBuf>,
     },
+    /// Prepare a phone or emulator for Android Auto
+    Setup {
+        #[command(subcommand)]
+        what: SetupKind,
+    },
     /// Run the openDHU daemon in the foreground
     ///
     /// It serves the HTTP API on 127.0.0.1 until stopped with Ctrl+C or SIGTERM, which also stops the
@@ -198,6 +204,38 @@ enum Command {
         /// Exit when the session ends. `aa start` sets this for the daemon it launches.
         #[arg(long, hide = true)]
         exit_when_idle: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SetupKind {
+    /// Install Android Auto (Gearhead) from an APK you supply, or one fetched by apkeep
+    ///
+    /// Nothing is downloaded unless --download is given, and then the version and its SHA-256 must be
+    /// pinned. An emulator image with Google Play usually has Android Auto already.
+    Gearhead {
+        /// An .apk, a directory of split APKs, or an .xapk/.apks bundle
+        #[arg(
+            long,
+            conflicts_with = "download",
+            required_unless_present = "download"
+        )]
+        apk: Option<PathBuf>,
+        /// Fetch Android Auto with apkeep (APKPure); needs --version and --sha256
+        #[arg(long, requires_all = ["version", "sha256"])]
+        download: bool,
+        /// Version to download
+        #[arg(long)]
+        version: Option<String>,
+        /// Expected SHA-256 of the downloaded file
+        #[arg(long)]
+        sha256: Option<String>,
+        /// Android device serial (default: the only authorized adb device)
+        #[arg(long)]
+        serial: Option<String>,
+        /// Install even if Android Auto is already present
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -253,6 +291,83 @@ fn launch(binary: &str, target: &str) -> Result<u8> {
         "cannot launch {}: {error}; install the GUI with `make {target}`",
         program.display()
     )))
+}
+
+fn setup_gearhead(
+    apk: Option<PathBuf>,
+    download: bool,
+    version: Option<String>,
+    sha256: Option<String>,
+    serial: Option<String>,
+    force: bool,
+    json: bool,
+) -> Result<u8> {
+    let adb = suite::adb_program();
+    let serial = match serial {
+        Some(serial) => serial,
+        None => {
+            let listing =
+                device::command(&adb, &["devices", "-l"], std::time::Duration::from_secs(20))?;
+            let ready: Vec<_> = opendhu_dhu::adb::parse_devices(&listing)
+                .into_iter()
+                .filter(|d| d.state == "device")
+                .collect();
+            match ready.as_slice() {
+                [one] => one.serial.clone(),
+                [] => {
+                    return Err(Error::DeviceDisconnected(
+                        "no authorized adb device; start an emulator or pass --serial".into(),
+                    ));
+                }
+                _ => {
+                    return Err(Error::InvalidArgs(
+                        "several adb devices attached; pass --serial".into(),
+                    ));
+                }
+            }
+        }
+    };
+    let say = |message: &str| {
+        if !json {
+            println!("{message}");
+        }
+    };
+    if !force && gearhead::is_installed(&adb, &serial)? {
+        say(&format!(
+            "Android Auto is already installed on {serial}; pass --force to reinstall"
+        ));
+        if json {
+            println!("{{\"serial\":\"{serial}\",\"installed\":false,\"alreadyPresent\":true}}");
+        }
+        return Ok(0);
+    }
+    let scratch = std::env::temp_dir().join(format!("opendhu-gearhead-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).map_err(|e| Error::Other(e.to_string()))?;
+    let result = (|| {
+        let source = if download {
+            let (version, sha256) = (
+                version.expect("clap requires it"),
+                sha256.expect("clap requires it"),
+            );
+            say(&format!(
+                "Downloading Android Auto {version} with apkeep..."
+            ));
+            gearhead::download(&version, &sha256, &scratch)?
+        } else {
+            apk.expect("clap requires it")
+        };
+        say(&format!("Installing {} on {serial}...", source.display()));
+        gearhead::install(&adb, &serial, &source, &scratch)
+    })();
+    let _ = std::fs::remove_dir_all(&scratch);
+    let files = result?;
+    say(&format!(
+        "Installed Android Auto ({files} file(s)) on {serial}"
+    ));
+    if json {
+        println!("{{\"serial\":\"{serial}\",\"installed\":true,\"files\":{files}}}");
+    }
+    Ok(0)
 }
 
 fn run(cli: Cli) -> Result<u8> {
@@ -499,6 +614,17 @@ fn run(cli: Cli) -> Result<u8> {
             }
             Ok(if doctor::has_failures(&checks) { 3 } else { 0 })
         }
+        Command::Setup {
+            what:
+                SetupKind::Gearhead {
+                    apk,
+                    download,
+                    version,
+                    sha256,
+                    serial,
+                    force,
+                },
+        } => setup_gearhead(apk, download, version, sha256, serial, force, json),
         Command::Daemon {
             port,
             exit_when_idle,

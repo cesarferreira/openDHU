@@ -115,6 +115,24 @@ aa test --validate               # parse everything without touching a device
 Test and suite headers are numbered (`[6/14]`, `[suite 2/4]`), and once a run has passed, test headers show an
 estimate of the time left. Open `results.html` in the artifacts folder for steps, screenshots and logs.
 
+**Android Auto on the emulator.** Managed suites need Android Auto (Gearhead) on the device and stop early
+with a hint if it is missing. In order of preference:
+
+1. Create the AVD from a **Google Play system image**. Android Auto is usually there already, and the Play
+   Store can update it.
+2. Install an APK you trust: `aa setup gearhead --apk auto.apk`. It also takes a directory of split APKs or
+   an `.xapk`/`.apks` bundle.
+3. Let apkeep fetch a pinned build:
+   `aa setup gearhead --download --version 17.9.664044 --sha256 6415e1ed2a4caa8c8ec751e5896b896a5ba81d6a46d75e94a5381be14769fc94`.
+   It needs [apkeep](https://github.com/EFForg/apkeep) on `PATH` and downloads from APKPure, so the checksum
+   is what you are trusting: it refuses to install a file that does not match. `apkeep -a
+   com.google.android.projection.gearhead -d apk-pure -l` lists the versions on offer. Take the checksum
+   from a download you have checked yourself; the one above is for the 17.9.664044 bundle (arm64 splits,
+   which run on the x86_64 Google Play image).
+
+Nothing is downloaded or installed unless you run the command. It does nothing when Android Auto is already
+installed; add `--force` to reinstall.
+
 The [Android sample](android-sample/README.md) is a small app with three Android Auto journeys. Try it with
 `make sample-build && aa test sample` (needs the Android SDK and JDK 17+). Provision Android Auto on the
 emulator or phone first; the sample README walks through it.

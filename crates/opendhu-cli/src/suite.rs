@@ -7,7 +7,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::{device, test_cmd};
+use crate::{device, gearhead, test_cmd};
 use fs2::FileExt;
 use opendhu_core::{Error, Result};
 use serde::Deserialize;
@@ -1054,6 +1054,10 @@ fn run_prepared(
         && let Some(child) = lease.emulator_child.take()
     {
         pool.owned.push((lease.adb.clone(), serial.clone(), child));
+    }
+    // A real phone needs Android Auto set up by hand anyway; an emulator image may lack the app.
+    if !opts.usb && !gearhead::is_installed(&lease.adb, &serial)? {
+        return Err(Error::BackendUnavailable(gearhead::MISSING_HINT.into()));
     }
     let apk = suite
         .environment
