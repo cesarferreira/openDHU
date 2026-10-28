@@ -110,12 +110,20 @@ runs:
       run: |
         nohup emulator -avd "$AVD" -no-window -no-snapshot -no-audio -no-boot-anim \
           -gpu swiftshader_indirect -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
-        adb wait-for-device
+        emulator_pid=$!
+        fail() {
+          echo "::error::$1"
+          echo "--- emulator.log ---"; tail -n 80 "$RUNNER_TEMP/emulator.log"
+          echo "--- adb devices ---"; adb devices -l
+          exit 1
+        }
+        # Never block on `adb wait-for-device`: it waits forever if the emulator died at start-up.
         for _ in $(seq 1 100); do
+          kill -0 "$emulator_pid" 2>/dev/null || fail "the emulator exited before it booted"
           [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && exit 0
           sleep 3
         done
-        echo "::error::the emulator did not finish booting"; tail -n 50 "$RUNNER_TEMP/emulator.log"; exit 1
+        fail "the emulator did not finish booting in 5 minutes"
 
     - name: Install Android Auto
       if: inputs.gearhead-apk != '' || inputs.gearhead-version != ''
