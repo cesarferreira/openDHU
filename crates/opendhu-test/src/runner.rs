@@ -100,7 +100,8 @@ pub trait ApplicationControl {
         ))
     }
     /// Restart the head-unit session to clear an Android Auto host that kept showing its
-    /// "Waiting..." card after the app restarted. `Ok(false)` when this context cannot.
+    /// own card ("Waiting..." or "unexpected error") after the app restarted. `Ok(false)` when this
+    /// context cannot.
     fn recover_projection(&self) -> opendhu_core::Result<bool> {
         Ok(false)
     }
@@ -889,8 +890,8 @@ fn phone_text(text: &str, timeout: Duration, cfg: &RunConfig) -> End {
     }
 }
 
-/// How long Android Auto's "Waiting..." card may stay up after the app's icon is tapped. A healthy
-/// app replaces it within a few seconds. After the app restarts, a USB phone's host sometimes keeps
+/// How long Android Auto's own card ("Waiting...", "has encountered an unexpected error") may stay up
+/// after the app's icon is tapped. A healthy app replaces it within a few seconds. After the app restarts, a USB phone's host sometimes keeps
 /// it up for minutes while the app itself runs; only a new head-unit session clears that.
 const HOST_STUCK_AFTER: Duration = Duration::from_secs(10);
 /// How long the launcher may stay on screen after its icon is tapped before the frame is judged.
@@ -907,7 +908,7 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
         Err(end) => return end,
     }
     let stuck = format!(
-        "Android Auto kept showing \"Waiting...\" for {} after opening the app",
+        "Android Auto kept showing its own card instead of the app for {} after opening it",
         fmt_dur(HOST_STUCK_AFTER)
     );
     match cfg.application.map(|app| app.recover_projection()) {
@@ -945,7 +946,7 @@ fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     }
 }
 
-/// Whether the host's "Waiting..." card stays up instead of the app just opened from the launcher.
+/// Whether the host's own card stays up instead of the app just opened from the launcher.
 fn host_stuck(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> Result<bool, End> {
     let label = cfg.app_label.unwrap_or_default();
     let id = SCREEN_ID.fetch_add(1, Ordering::Relaxed);
@@ -968,7 +969,7 @@ fn host_stuck(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> Result<bool
         let words = crate::screen::recognize_until(&image, || cfg.clock.cancelled(), |_| true)
             .map_err(|e| End::error(&e))?;
         let now = cfg.clock.now();
-        if crate::screen::host_waiting_card(&words) {
+        if crate::screen::host_stuck_card(&words) {
             let since = *card_since.get_or_insert(now);
             if now.saturating_sub(since) >= HOST_STUCK_AFTER {
                 return Ok(true);

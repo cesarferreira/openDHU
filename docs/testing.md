@@ -639,8 +639,8 @@ Android Auto keyboard. Focus the phone field first. Input must be nonempty, at m
 characters (letters, digits, spaces, `_`, `@`, `.`, `-`); shell syntax is rejected before device access.
 `app.restart` force-stops only the suite package and reopens it through the projected launcher, without
 erasing data or preparing backend state. After `app.open` or `app.restart`, openDHU checks that Android Auto
-does not keep its own "Waiting..." card (a "Waiting..." line above an "Exit" button) up for 10 seconds instead of
-the app. A phone's host can stay stuck like this after the app restarts, and only a new session clears it. A
+does not keep its own card (a "Waiting..." or "… has encountered an unexpected error" line above an "Exit" button)
+up for 10 seconds instead of the app. A phone's host can stay stuck like this after the app restarts, and only a new session clears it. A
 `--usb` suite then restarts the head-unit session in place, reapplies `reversePorts`, reattaches the logcat crash
 monitor and reopens the app once; the step fails if the card is still there. Elsewhere the step passes with a note,
 and the test's next projected assertion decides. Combine backend request assertions with projected UI checks:

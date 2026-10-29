@@ -180,10 +180,11 @@ pub fn exact_glyph_near(words: &[Word], glyph: &str, x: u32, y: u32, tolerance: 
     })
 }
 
-/// Android Auto's own card for an app it is still waiting on: a line reading only "Waiting..."
-/// and a line reading only "Exit". An app's text ("Waiting for the rider", "Exit map") never
-/// matches, and neither does the host's "isn't responding" dialog.
-pub fn host_waiting_card(words: &[Word]) -> bool {
+/// Android Auto's own card in place of an app: a line reading only "Waiting..." (still waiting on
+/// it) or ending "has encountered an unexpected error" (a call into it failed), and a line reading
+/// only "Exit". An app's text ("Waiting for the rider", "Exit map") never matches, and neither
+/// does the host's "isn't responding" dialog.
+pub fn host_stuck_card(words: &[Word]) -> bool {
     let mut lines: Vec<(&str, String)> = Vec::new();
     for word in words {
         match lines.iter_mut().find(|(line, _)| *line == word.line) {
@@ -198,10 +199,10 @@ pub fn host_waiting_card(words: &[Word]) -> bool {
         .into_iter()
         .map(|(_, text)| normalized(&text))
         .collect();
-    lines
-        .iter()
-        .any(|line| line.trim_end_matches(['.', '…']) == "waiting" && line != "waiting")
-        && lines.iter().any(|line| line == "exit")
+    lines.iter().any(|line| {
+        (line.trim_end_matches(['.', '…']) == "waiting" && line != "waiting")
+            || line.ends_with(" has encountered an unexpected error")
+    }) && lines.iter().any(|line| line == "exit")
 }
 
 pub fn text(words: &[Word]) -> String {
@@ -450,7 +451,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_waiting_card_needs_both_lines_on_their_own() {
+    fn host_stuck_card_needs_both_lines_on_their_own() {
         let words = |rows: &[&str]| {
             let mut tsv = String::from(
                 "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n",
@@ -467,18 +468,23 @@ mod tests {
             }
             parse_tsv(&tsv).unwrap()
         };
-        // First-pass OCR of the stuck host in a failing USB run.
-        let stuck = parse_tsv(include_str!("../tests/fixtures/host-waiting.tsv")).unwrap();
-        assert!(host_waiting_card(&stuck));
-        assert!(host_waiting_card(&words(&["Waiting…", "Exit"])));
+        // First-pass OCR of both stuck host cards in failing USB runs.
+        for fixture in [
+            include_str!("../tests/fixtures/host-waiting.tsv"),
+            include_str!("../tests/fixtures/host-error.tsv"),
+        ] {
+            assert!(host_stuck_card(&parse_tsv(fixture).unwrap()));
+        }
+        assert!(host_stuck_card(&words(&["Waiting…", "Exit"])));
         for rows in [
             &["Waiting...", "Exit map"][..],
             &["Waiting for the rider", "Exit"],
             &["Waiting", "Exit"],
             &["Robot UI isn't responding", "Exit Wait"],
             &["Waiting..."],
+            &["Robot UI has encountered an unexpected error"],
         ] {
-            assert!(!host_waiting_card(&words(rows)), "{rows:?}");
+            assert!(!host_stuck_card(&words(rows)), "{rows:?}");
         }
     }
 

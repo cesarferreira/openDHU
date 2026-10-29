@@ -111,9 +111,10 @@ Connect the phone, enable USB debugging, authorize the computer and finish Andro
 one authorized USB phone is required (emulators and wireless ADB devices are ignored), and a missing, unauthorized
 or second phone is an error. `aa test sample --validate --usb` checks the files without a phone.
 
-After an app restart, a phone's Android Auto sometimes keeps showing its own "Waiting..." card instead of the
-app. When that card stays up for 10 seconds after `app.open` or `app.restart`, a USB suite restarts the head-unit
-session once, restores its ADB tunnels and opens the app again; the step detail says when this happened.
+After an app restart, a phone's Android Auto sometimes keeps showing its own "Waiting..." or "has encountered an
+unexpected error" card instead of the app. When that card stays up for 10 seconds after `app.open` or
+`app.restart`, a USB suite restarts the head-unit session once, restores its ADB tunnels and opens the app again;
+the step detail says when this happened.
 
 ### With the TUI
 

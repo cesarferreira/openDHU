@@ -1,4 +1,4 @@
-//! A USB phone's Android Auto host can keep its "Waiting..." card up after the app restarts.
+//! A USB phone's Android Auto host can keep its own card up instead of the app after it restarts.
 use opendhu_core::{
     Capabilities, HeadUnitBackend, HeadUnitStatus, InputResult, OperationResult, Result,
     ScreenshotResult,
