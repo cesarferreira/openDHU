@@ -33,7 +33,7 @@ impl HeadUnitBackend for DaemonBackend {
     fn status(&mut self) -> Result<HeadUnitStatus> {
         let session = self.client.status()?.session.ok_or_else(|| {
             Error::BackendUnavailable(
-                "no openDHU session is running; start one with `aa start`".into(),
+                "no openDHU session is running; start one with `aa session start`".into(),
             )
         })?;
         match session.details {

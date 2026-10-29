@@ -1,4 +1,4 @@
-# Needs the native backend (`aa start --backend native`). There `observed` is the phone's own word,
+# Needs the native backend (`aa session start --backend native`). There `observed` is the phone's own word,
 # taken from the start and stop messages it sends, so asserting it is meaningful. With the DHU
 # backend `observed` is always unknown and this test would fail.
 name: The phone confirms video focus changes

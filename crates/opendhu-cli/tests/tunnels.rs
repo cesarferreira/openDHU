@@ -5,7 +5,15 @@ mod common;
 use common::*;
 
 fn start_with(s: &Sandbox, env: &[(String, String)], extra: &[&str]) -> std::process::Output {
-    let mut args = vec!["start", "--dhu", "--dhu-path", "", "--serial", "FAKE0001"];
+    let mut args = vec![
+        "session",
+        "start",
+        "--dhu",
+        "--dhu-path",
+        "",
+        "--serial",
+        "FAKE0001",
+    ];
     let dhu = fake_dhu();
     args[3] = &dhu;
     args.extend_from_slice(extra);
@@ -20,7 +28,7 @@ fn reverse_tunnels_are_applied_confirmed_and_reported_live() {
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(text(&o).contains("tcp:10101 (Active)"), "{}", text(&o));
 
-    let st = s.opendhu_with(&["status", "--json"], &env);
+    let st = s.opendhu_with(&["session", "status", "--json"], &env);
     let v: serde_json::Value = serde_json::from_slice(&st.stdout).unwrap();
     let tunnels = v["tunnels"].as_array().unwrap();
     assert_eq!(tunnels.len(), 2);
@@ -51,7 +59,7 @@ fn status_reflects_the_device_not_the_request() {
     assert_eq!(code(&start_with(&s, &env, &["--reverse", "10101"])), 0);
     // The phone re-enumerated and lost the tunnel behind openDHU's back.
     std::fs::remove_file(s.adb_state().join("reverse")).unwrap();
-    let st = s.opendhu_with(&["status", "--json"], &env);
+    let st = s.opendhu_with(&["session", "status", "--json"], &env);
     let v: serde_json::Value = serde_json::from_slice(&st.stdout).unwrap();
     assert_eq!(v["tunnels"][0]["state"], "missing");
 }
@@ -64,7 +72,7 @@ fn rejected_tunnel_fails_start_and_leaves_no_session() {
     assert_eq!(code(&o), 4, "{}", text(&o));
     assert!(text(&o).contains("adb reverse tcp:10101"), "{}", text(&o));
     assert_eq!(
-        code(&s.opendhu_with(&["status"], &env)),
+        code(&s.opendhu_with(&["session", "status"], &env)),
         3,
         "no session may remain"
     );
@@ -77,7 +85,7 @@ fn tunnel_adb_accepts_but_does_not_list_is_not_counted() {
     let o = start_with(&s, &env, &["--reverse", "10101"]);
     assert_eq!(code(&o), 4, "{}", text(&o));
     assert!(text(&o).contains("could not be confirmed"), "{}", text(&o));
-    assert_eq!(code(&s.opendhu_with(&["status"], &env)), 3);
+    assert_eq!(code(&s.opendhu_with(&["session", "status"], &env)), 3);
 }
 
 #[test]
@@ -110,7 +118,7 @@ fn without_reverse_adb_is_never_called() {
     let s = Sandbox::new();
     let env = s.adb_env("normal");
     assert_eq!(code(&start_with(&s, &env, &[])), 0);
-    assert_eq!(code(&s.opendhu_with(&["status"], &env)), 0);
+    assert_eq!(code(&s.opendhu_with(&["session", "status"], &env)), 0);
     assert_eq!(s.adb_calls(), "", "no --reverse means no adb side effects");
 }
 
@@ -132,7 +140,7 @@ fn reverse_calls(s: &Sandbox, port: u16) -> usize {
 }
 
 fn tunnel(s: &Sandbox, env: &[(String, String)]) -> serde_json::Value {
-    let st = s.opendhu_with(&["status", "--json"], env);
+    let st = s.opendhu_with(&["session", "status", "--json"], env);
     let v: serde_json::Value = serde_json::from_slice(&st.stdout).unwrap();
     v["tunnels"][0].clone()
 }

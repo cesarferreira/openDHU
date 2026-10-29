@@ -13,7 +13,14 @@ fn fake_native() -> String {
 }
 
 fn start_native(s: &Sandbox, extra: &[&str], env: &[(&str, &str)]) -> std::process::Output {
-    let mut args = vec!["start", "--backend", "native", "--serial", "FAKE0001"];
+    let mut args = vec![
+        "session",
+        "start",
+        "--backend",
+        "native",
+        "--serial",
+        "FAKE0001",
+    ];
     args.extend_from_slice(extra);
     let mut all = vec![("OPENDHU_NATIVE_HU", fake_native())];
     all.extend(env.iter().map(|(k, v)| (*k, v.to_string())));
@@ -68,7 +75,7 @@ fn native_lifecycle_reports_what_the_phone_said() {
         st["daemonPid"].as_u64().unwrap(),
         st["dhuPid"].as_u64().unwrap(),
     );
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
     assert!(
         wait_until(std::time::Duration::from_secs(5), || !alive(hu)
             && !alive(daemon)),
@@ -114,7 +121,14 @@ fn dhu_only_options_are_refused_for_the_native_backend() {
 fn a_missing_native_head_unit_names_what_was_tried() {
     let s = Sandbox::new();
     let o = s.opendhu_env(
-        &["start", "--backend", "native", "--serial", "FAKE0001"],
+        &[
+            "session",
+            "start",
+            "--backend",
+            "native",
+            "--serial",
+            "FAKE0001",
+        ],
         &[("OPENDHU_NATIVE_HU", "/no/such/opendhu-native-hu")],
     );
     assert_eq!(code(&o), 3, "{}", text(&o));
@@ -142,7 +156,7 @@ fn a_head_unit_that_dies_ends_the_session() {
         wait_until(std::time::Duration::from_secs(5), || !alive(daemon)),
         "the ephemeral daemon must exit when the head unit dies"
     );
-    assert_eq!(code(&s.opendhu(&["status"])), 3);
+    assert_eq!(code(&s.opendhu(&["session", "status"])), 3);
 }
 
 #[test]
@@ -157,7 +171,7 @@ fn the_config_file_can_choose_the_backend_and_its_dhu_settings_are_then_ignored(
     )
     .unwrap();
     let o = s.opendhu_env(
-        &["start"],
+        &["session", "start"],
         &[
             ("OPENDHU_CONFIG", &cfg.display().to_string()),
             ("OPENDHU_NATIVE_HU", &fake_native()),
@@ -265,7 +279,7 @@ fn audio_is_recorded_to_a_wav_with_a_summary_and_refused_without_a_native_sessio
         5,
         "the DHU plays its own sound"
     );
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
 
     assert_eq!(code(&start_native(&s, &[], &[])), 0);
     let o = s.opendhu(&["audio", &wav_arg, "--seconds", "2", "--json"]);
@@ -298,7 +312,7 @@ fn certificate_source_is_visible_in_text_and_json_status() {
         let s = Sandbox::new();
         let started = start_native(&s, &[], &[("FAKE_NATIVE_MODE", mode)]);
         assert_eq!(code(&started), 0, "{}", text(&started));
-        let output = s.opendhu(&["status"]);
+        let output = s.opendhu(&["session", "status"]);
         assert_eq!(code(&output), 0, "{}", text(&output));
         assert!(
             text(&output).contains(&format!("Certificate:  {expected}")),
@@ -321,7 +335,7 @@ fn certificate_source_is_visible_in_text_and_json_status() {
 fn start_defaults_to_native_and_ignores_dhu_discovery_settings() {
     let s = Sandbox::new();
     let o = s.opendhu_env(
-        &["start", "--serial", "FAKE0001"],
+        &["session", "start", "--serial", "FAKE0001"],
         &[
             ("OPENDHU_NATIVE_HU", &fake_native()),
             ("OPENDHU_DHU_PATH", "/no/such/dhu"),
@@ -340,6 +354,7 @@ fn dhu_flag_overrides_a_configured_native_backend() {
     std::fs::write(&cfg, "[session]\nbackend = \"native\"\n").unwrap();
     let o = s.opendhu_env(
         &[
+            "session",
             "start",
             "--dhu",
             "--dhu-path",
@@ -357,7 +372,7 @@ fn dhu_flag_overrides_a_configured_native_backend() {
 fn dhu_flag_and_backend_option_cannot_be_combined() {
     let s = Sandbox::new();
     for backend in ["native", "dhu"] {
-        let o = s.opendhu(&["start", "--dhu", "--backend", backend]);
+        let o = s.opendhu(&["session", "start", "--dhu", "--backend", backend]);
         assert_eq!(code(&o), 2, "{}", text(&o));
         assert!(text(&o).contains("cannot be used with"), "{}", text(&o));
     }

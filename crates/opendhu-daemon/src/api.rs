@@ -152,7 +152,7 @@ pub struct DaemonInfo {
     pub version: String,
     pub pid: u32,
     pub port: u16,
-    /// True for a daemon started by `aa start`: it exits when its session ends.
+    /// True for a daemon started by `aa session start`: it exits when its session ends.
     pub exit_when_idle: bool,
 }
 

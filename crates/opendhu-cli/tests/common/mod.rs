@@ -54,6 +54,7 @@ impl Sandbox {
 
     pub fn start_fake(&self) -> Output {
         self.opendhu(&[
+            "session",
             "start",
             "--dhu",
             "--dhu-path",
@@ -100,7 +101,7 @@ impl Sandbox {
     }
 
     pub fn status_json(&self) -> serde_json::Value {
-        let o = self.opendhu(&["status", "--json"]);
+        let o = self.opendhu(&["session", "status", "--json"]);
         assert_eq!(code(&o), 0, "{}", text(&o));
         serde_json::from_slice(&o.stdout).unwrap()
     }
@@ -109,7 +110,7 @@ impl Sandbox {
 impl Drop for Sandbox {
     fn drop(&mut self) {
         let _ = Command::new(env!("CARGO_BIN_EXE_aa"))
-            .arg("stop")
+            .args(["session", "stop"])
             .env("OPENDHU_RUNTIME_DIR", &self.dir)
             .output();
         let _ = std::fs::remove_dir_all(&self.dir);

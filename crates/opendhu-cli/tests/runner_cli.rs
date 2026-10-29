@@ -324,7 +324,7 @@ fn wait_exit(child: &mut Child, limit: Duration) -> Option<std::process::ExitSta
 fn wait_until_focus_off(s: &Sandbox) {
     assert!(
         wait_until(Duration::from_secs(10), || {
-            let o = s.opendhu(&["status", "--json"]);
+            let o = s.opendhu(&["session", "status", "--json"]);
             serde_json::from_slice::<serde_json::Value>(&o.stdout)
                 .is_ok_and(|v| v["videoFocus"]["requested"] == "off")
         }),
@@ -399,6 +399,7 @@ fn a_second_ctrl_c_exits_immediately_even_if_cleanup_is_stuck() {
     // `focus video on` hangs in this fake, so the cleanup that follows the first Ctrl+C blocks.
     let started = s.opendhu_env(
         &[
+            "session",
             "start",
             "--dhu",
             "--dhu-path",

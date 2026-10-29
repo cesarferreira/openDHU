@@ -1,4 +1,4 @@
-//! Finding the daemon, and starting one when `aa start` needs it.
+//! Finding the daemon, and starting one when `aa session start` needs it.
 
 use std::fs::File;
 use std::os::unix::process::CommandExt;
@@ -39,7 +39,7 @@ pub fn ensure() -> Result<Client> {
 
     let deadline = Instant::now() + STARTUP;
     loop {
-        // Connecting wins over an early exit: a second `aa start` racing this one may have
+        // Connecting wins over an early exit: a second `aa session start` racing this one may have
         // lost the bind to the first daemon, which is exactly the one we want to talk to.
         if let Ok(client) = Client::connect_in(&dir) {
             return Ok(client);

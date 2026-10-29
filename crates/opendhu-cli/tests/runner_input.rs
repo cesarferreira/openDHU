@@ -12,6 +12,7 @@ fn yaml_runner_forwards_tap_swipe_and_key_to_native_session() {
     );
     let started = sandbox.opendhu_env(
         &[
+            "session",
             "start",
             "--backend",
             "native",

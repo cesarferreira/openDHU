@@ -1,7 +1,7 @@
 # Writing and running tests
 
 ```bash
-aa start --dhu --reverse 10101    # this example targets Google's DHU; ordinary test files need a running session
+aa session start --dhu --reverse 10101  # this example targets Google's DHU; ordinary test files need a running session
 aa test examples/video-focus.yaml
 aa test tests/ --report junit --report json --report html --artifacts-dir ./build/test-results
 ```
@@ -291,7 +291,7 @@ gone, a rejected command or a failed cleanup) or `skipped`.
 | 130 | interrupted by Ctrl+C or SIGTERM (outranks every other code) |
 | 1 | any other error |
 
-`aa start` can also return 4 (a device or tunnel problem). `aa test` cannot: it never starts a session, and a
+`aa session start` can also return 4 (a device or tunnel problem). `aa test` cannot: it never starts a session, and a
 DHU that has died shows up as 3.
 
 With several tests, one code is chosen in the fixed order 2, 3, 4, 5, 6, 7, 8, 1, so the result does not depend

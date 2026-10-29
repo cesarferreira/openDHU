@@ -36,7 +36,9 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 fn no_daemon() -> Error {
-    Error::BackendUnavailable("no openDHU session is running; start one with `aa start`".into())
+    Error::BackendUnavailable(
+        "no openDHU session is running; start one with `aa session start`".into(),
+    )
 }
 
 impl Client {

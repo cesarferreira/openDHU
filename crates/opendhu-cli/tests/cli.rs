@@ -43,13 +43,37 @@ fn full_lifecycle_start_focus_status_stop() {
         st["daemonPid"].as_u64().unwrap(),
         st["dhuPid"].as_u64().unwrap(),
     );
-    let stop = s.opendhu(&["stop"]);
+    let stop = s.opendhu(&["session", "stop"]);
     assert_eq!(code(&stop), 0, "{}", text(&stop));
     assert!(
         wait_until(Duration::from_secs(5), || !alive(dhu) && !alive(sup)),
         "processes must be gone"
     );
-    assert_eq!(code(&s.opendhu(&["status"])), 3);
+    assert_eq!(code(&s.opendhu(&["session", "status"])), 3);
+}
+
+#[test]
+fn session_restart_replaces_the_session_and_keeps_its_settings() {
+    let s = Sandbox::new();
+    assert_eq!(code(&s.start_fake()), 0);
+    let before = s.status_json();
+
+    let o = s.opendhu(&["session", "restart", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let after = s.status_json();
+    assert_ne!(after["sessionId"], before["sessionId"]);
+    assert_ne!(after["dhuPid"], before["dhuPid"]);
+    assert_eq!(after["daemonPid"], before["daemonPid"], "same daemon");
+    assert_eq!(after["backend"], "dhu");
+    assert!(
+        wait_until(Duration::from_secs(5), || !alive(
+            before["dhuPid"].as_u64().unwrap()
+        )),
+        "the old DHU must be stopped"
+    );
+
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "restart"])), 3, "no session");
 }
 
 #[test]
@@ -57,7 +81,7 @@ fn focus_without_session_is_backend_unavailable() {
     let s = Sandbox::new();
     let o = s.opendhu(&["focus", "video", "off"]);
     assert_eq!(code(&o), 3);
-    assert!(text(&o).contains("aa start"), "{}", text(&o));
+    assert!(text(&o).contains("aa session start"), "{}", text(&o));
 }
 
 #[test]
@@ -67,7 +91,7 @@ fn second_start_is_a_session_conflict() {
     let again = s.start_fake();
     assert_eq!(code(&again), 8, "{}", text(&again));
     assert_eq!(
-        code(&s.opendhu(&["status"])),
+        code(&s.opendhu(&["session", "status"])),
         0,
         "first session must be unharmed"
     );
@@ -78,6 +102,7 @@ fn start_reports_dhu_startup_failure_with_its_output() {
     let s = Sandbox::new();
     let o = s.opendhu_env(
         &[
+            "session",
             "start",
             "--dhu",
             "--dhu-path",
@@ -99,13 +124,14 @@ fn start_reports_dhu_startup_failure_with_its_output() {
         "no doubled prefix: {}",
         text(&o)
     );
-    assert_eq!(code(&s.opendhu(&["status"])), 3);
+    assert_eq!(code(&s.opendhu(&["session", "status"])), 3);
 }
 
 #[test]
 fn missing_dhu_is_backend_unavailable_and_lists_tried_paths() {
     let s = Sandbox::new();
     let o = s.opendhu(&[
+        "session",
         "start",
         "--dhu",
         "--dhu-path",
@@ -173,7 +199,7 @@ fn stale_daemon_file_does_not_block_start() {
     });
     std::fs::write(s.dir.join("daemon.json"), stale.to_string()).unwrap();
     assert_eq!(
-        code(&s.opendhu(&["status"])),
+        code(&s.opendhu(&["session", "status"])),
         3,
         "a stale file is not a running session"
     );
@@ -196,7 +222,7 @@ fn runtime_dir_with_loose_permissions_is_refused() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&s.dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let o = s.opendhu(&["status"]);
+    let o = s.opendhu(&["session", "status"]);
     assert_eq!(code(&o), 1);
     assert!(text(&o).contains("0700"), "{}", text(&o));
 }
@@ -281,6 +307,7 @@ fn screenshot_the_dhu_accepts_but_never_writes_is_a_timeout() {
     let s = Sandbox::new();
     let started = s.opendhu_env(
         &[
+            "session",
             "start",
             "--dhu",
             "--dhu-path",

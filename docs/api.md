@@ -9,7 +9,7 @@ can still happen. There is no changelog yet, so check the commit history.
 ## Running the daemon
 
 ```bash
-aa start            # starts a daemon if none is running, then a session; the daemon exits when the session ends
+aa session start            # starts a daemon if none is running, then a session; the daemon exits when the session ends
 aa daemon           # foreground daemon that stays up; Ctrl+C or SIGTERM stops the session and exits
 aa daemon --port 9000
 ```
@@ -274,13 +274,13 @@ sees the final `session.stopped`.
 - **One session**, one backend. Commands are serialized on the DHU console, so concurrent clients cannot interleave
   on it. Twenty parallel focus requests all succeed and leave openDHU's idea of the state equal to the DHU's.
 - **Two clients starting at once:** exactly one gets `201`, the other `409`.
-- **A daemon started by `aa start`** exits when its session ends (`stop`, a failed start, or the DHU dying).
+- **A daemon started by `aa session start`** exits when its session ends (`stop`, a failed start, or the DHU dying).
   **A daemon you started with `aa daemon`** stays up and can host another session.
-  A daemon started by `aa start` also exits after 30 s with no session at all, for example when the CLI that
+  A daemon started by `aa session start` also exits after 30 s with no session at all, for example when the CLI that
   spawned it died before sending `start`, so it cannot linger.
 - **No orphans:** the daemon owns the DHU's stdin, and the DHU quits when it closes. If the daemon is killed with
   `SIGKILL`, the DHU still exits. SIGTERM and Ctrl+C stop the session and remove `daemon.json`.
-- **Logs:** one JSON object per line on stdout (`daemon.log` for a daemon started by `aa start`). They
+- **Logs:** one JSON object per line on stdout (`daemon.log` for a daemon started by `aa session start`). They
   include one `http.request` line per request, with method, path, status and duration, and never the token or
   the `Authorization` header.
 

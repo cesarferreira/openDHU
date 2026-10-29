@@ -34,7 +34,7 @@ The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test
 5. The daemon emits `focus.video.requested` and `focus.video.accepted` (or `failed`) events, and returns the result
    with an operation id.
 
-`aa start` first launches a daemon if none answers, then sends `POST /v1/session/start`.
+`aa session start` first launches a daemon if none answers, then sends `POST /v1/session/start`.
 
 ## State and files
 

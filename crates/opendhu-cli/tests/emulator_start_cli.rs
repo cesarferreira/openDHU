@@ -68,7 +68,7 @@ fn standalone_emulator_start_bootstraps_tcp_and_stop_removes_its_forward() {
     let s = Sandbox::new();
     let env = fixture(&s, "emulator-5554");
     // No serial also covers the GUI's automatic single-device choice.
-    let output = s.opendhu_with(&["start", "--backend", "native"], &env);
+    let output = s.opendhu_with(&["session", "start", "--backend", "native"], &env);
     assert_eq!(code(&output), 0, "{}", text(&output));
     assert_eq!(s.status_json()["transport"], "tcp");
     let state = s.scratch("state");
@@ -89,7 +89,7 @@ fn standalone_emulator_start_bootstraps_tcp_and_stop_removes_its_forward() {
         !state.join("removed").exists(),
         "forward must stay alive after the start CLI exits"
     );
-    let stop = s.opendhu(&["stop"]);
+    let stop = s.opendhu(&["session", "stop"]);
     assert_eq!(code(&stop), 0, "{}", text(&stop));
     assert!(wait_until(std::time::Duration::from_secs(3), || state
         .join("removed")
@@ -101,7 +101,7 @@ fn a_failed_emulator_backend_start_removes_the_allocated_forward() {
     let s = Sandbox::new();
     let mut env = fixture(&s, "emulator-5554");
     env.push(("FAKE_NATIVE_MODE".into(), "exit-early".into()));
-    let output = s.opendhu_with(&["start", "--serial", "emulator-5554"], &env);
+    let output = s.opendhu_with(&["session", "start", "--serial", "emulator-5554"], &env);
     assert_ne!(code(&output), 0, "{}", text(&output));
     assert!(
         s.scratch("state").join("removed").exists(),
@@ -116,6 +116,7 @@ fn explicit_tcp_and_physical_phones_keep_their_requested_transports() {
         (
             "emulator-5554",
             vec![
+                "session",
                 "start",
                 "--serial",
                 "emulator-5554",
@@ -124,7 +125,11 @@ fn explicit_tcp_and_physical_phones_keep_their_requested_transports() {
             ],
             "127.0.0.1:15277",
         ),
-        ("PHONE123", vec!["start", "--serial", "PHONE123"], "USB"),
+        (
+            "PHONE123",
+            vec!["session", "start", "--serial", "PHONE123"],
+            "USB",
+        ),
     ] {
         let s = Sandbox::new();
         let env = fixture(&s, serial);
@@ -148,7 +153,7 @@ fn an_explicit_emulator_does_not_require_unplugging_unrelated_usb_phones() {
     let s = Sandbox::new();
     let mut env = fixture(&s, "emulator-5554");
     env.push(("TEST_EXTRA_USB".into(), "yes".into()));
-    let output = s.opendhu_with(&["start", "--serial", "emulator-5554"], &env);
+    let output = s.opendhu_with(&["session", "start", "--serial", "emulator-5554"], &env);
     assert_eq!(code(&output), 0, "{}", text(&output));
     assert_eq!(s.status_json()["transport"], "tcp");
 }

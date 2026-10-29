@@ -50,13 +50,13 @@ fn a_foreground_daemon_serves_the_cli_and_outlives_the_session() {
     assert_eq!(st["phase"], "running");
     assert_eq!(st["sessionId"].as_str().unwrap().len(), 6);
 
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
     assert!(
         alive(pid),
         "a daemon you started yourself stays up after the session ends"
     );
     assert_eq!(
-        code(&s.opendhu(&["status"])),
+        code(&s.opendhu(&["session", "status"])),
         3,
         "no session, even though the daemon is up"
     );
@@ -126,7 +126,7 @@ fn a_killed_daemon_leaves_no_dhu_and_a_new_session_can_start() {
         "a killed daemon cannot clean up after itself"
     );
     assert_eq!(
-        code(&s.opendhu(&["status"])),
+        code(&s.opendhu(&["session", "status"])),
         3,
         "the stale file must not look like a live session"
     );
@@ -156,6 +156,7 @@ fn relative_paths_are_sent_to_the_daemon_as_absolute() {
     let args = s.scratch("args.txt");
     let o = Command::new(env!("CARGO_BIN_EXE_aa"))
         .args([
+            "session",
             "start",
             "--dhu",
             "--dhu-path",
@@ -212,7 +213,7 @@ fn start_does_not_leave_a_daemon_running_after_stop() {
     let s = Sandbox::new();
     assert_eq!(code(&s.start_fake()), 0);
     let daemon = s.status_json()["daemonPid"].as_u64().unwrap();
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
     assert!(
         wait_until(Duration::from_secs(10), || !alive(daemon)),
         "a daemon that `start` launched exits when its session ends"

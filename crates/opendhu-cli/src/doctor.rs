@@ -208,7 +208,7 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
             Level::Warn,
             "other dhu",
             format!(
-                "a desktop-head-unit not started by openDHU is running (pid {}). It holds the phone's USB link and openDHU cannot control it; stop it before `aa start`",
+                "a desktop-head-unit not started by openDHU is running (pid {}). It holds the phone's USB link and openDHU cannot control it; stop it before `aa session start`",
                 pids.join(", ")
             ),
         ));
@@ -216,7 +216,7 @@ pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Che
     out.push(check(
         Level::Info,
         "not checked",
-        "whether Android Auto projection will connect; that needs `aa start` and a phone with Android Auto set up",
+        "whether Android Auto projection will connect; that needs `aa session start` and a phone with Android Auto set up",
     ));
     out
 }
@@ -243,7 +243,7 @@ fn native_checks(out: &mut Vec<Check>) {
         Err(_) => check(
             Level::Info,
             "native head unit",
-            "opendhu-native-hu not found (needed for the default `aa start`; use `aa start --dhu` for Google's DHU)",
+            "opendhu-native-hu not found (needed for the default `aa session start`; use `aa session start --dhu` for Google's DHU)",
         ),
     });
     out.push(

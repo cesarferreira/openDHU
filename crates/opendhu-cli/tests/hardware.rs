@@ -16,7 +16,14 @@ fn real_dhu_video_focus_round_trip() {
     }
     let s = Sandbox::new();
     // An arbitrary port, so the test never disturbs a tunnel the user relies on.
-    let start = s.opendhu(&["start", "--dhu", "--headless", "--reverse", "47123"]);
+    let start = s.opendhu(&[
+        "session",
+        "start",
+        "--dhu",
+        "--headless",
+        "--reverse",
+        "47123",
+    ]);
     assert_eq!(code(&start), 0, "{}", text(&start));
     // Independent of openDHU: ask adb itself.
     let list = std::process::Command::new("adb")
@@ -95,7 +102,7 @@ fn real_dhu_video_focus_round_trip() {
 
     let st = s.status_json();
     let dhu = st["dhuPid"].as_u64().unwrap();
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
     assert!(wait_until(std::time::Duration::from_secs(10), || !alive(
         dhu
     )));
@@ -109,7 +116,14 @@ fn real_native_backend_reports_what_the_phone_did() {
         return;
     }
     let s = Sandbox::new();
-    let start = s.opendhu(&["start", "--backend", "native", "--reverse", "47123"]);
+    let start = s.opendhu(&[
+        "session",
+        "start",
+        "--backend",
+        "native",
+        "--reverse",
+        "47123",
+    ]);
     assert_eq!(code(&start), 0, "{}", text(&start));
     let list = std::process::Command::new("adb")
         .args(["reverse", "--list"])
@@ -163,7 +177,7 @@ fn real_native_backend_reports_what_the_phone_did() {
 
     let st = s.status_json();
     let hu = st["dhuPid"].as_u64().unwrap();
-    assert_eq!(code(&s.opendhu(&["stop"])), 0);
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
     assert!(wait_until(std::time::Duration::from_secs(10), || !alive(
         hu
     )));

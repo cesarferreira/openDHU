@@ -32,7 +32,7 @@ struct Raw {
 #[serde(deny_unknown_fields)]
 struct RawDhu {
     path: Option<PathBuf>,
-    /// The DHU's own `.ini` file (what `aa start --config` takes).
+    /// The DHU's own `.ini` file (what `aa session start --config` takes).
     ini: Option<PathBuf>,
     headless: Option<bool>,
 }

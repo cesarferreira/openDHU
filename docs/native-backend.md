@@ -1,16 +1,16 @@
 # Native backend (default)
 
 openDHU uses its own Android Auto head unit by default, so Google's DHU is not needed.
-Use `aa start --dhu` to select Google's DHU, or set `session.backend` in the config file.
+Use `aa session start --dhu` to select Google's DHU, or set `session.backend` in the config file.
 The explicit `--backend native` and `--backend dhu` options are also supported.
 
 ```bash
 cargo build -p opendhu-native-hu     # builds next to `aa`
 brew install ffmpeg                  # decodes the phone's video into screenshots
-aa start
+aa session start
 ```
 
-`aa start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
+`aa session start` returns once the phone is projecting **and** a first complete picture has arrived (about 6 s), so a
 screenshot straight afterwards works.
 
 Everything else works the same: `focus`, `screenshot`, `status`, `test`, the HTTP API and the GUI.
@@ -99,7 +99,7 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   unreadable, or invalid pair fails startup. Keep the key outside this repository (`chmod 600`).
 - `OPENDHU_NATIVE_CERT` and `OPENDHU_NATIVE_KEY` override those paths. Set both or neither, in the environment
   of the daemon that starts the head unit. Restart the session after changing files, or the daemon after
-  changing these variables. `aa status` and the GUI show `custom` when your pair is loaded.
+  changing these variables. `aa session status` and the GUI show `custom` when your pair is loaded.
 
 ## Limits
 
@@ -144,7 +144,7 @@ For an SDK emulator, ordinary startup (including the GUI's Start button) prepare
 server and a session-owned ephemeral TCP forward automatically:
 
 ```bash
-aa start --serial emulator-5554
+aa session start --serial emulator-5554
 ```
 
 Android Auto developer mode and initial projection consent must already be provisioned. The session removes
@@ -156,10 +156,10 @@ USB accessory mode:
 
 ```bash
 adb -s emulator-5554 forward tcp:15277 tcp:5277
-aa start --serial emulator-5554 --native-tcp 127.0.0.1:15277
+aa session start --serial emulator-5554 --native-tcp 127.0.0.1:15277
 ```
 
 The server must be started in Android Auto's developer settings first. The TCP endpoint must be
 loopback; it is scoped to that session and uses the same TLS authentication and protocol as USB.
-`aa status` reports `Transport: tcp`. Remove manually created forwards when finished. A YAML suite
+`aa session status` reports `Transport: tcp`. Remove manually created forwards when finished. A YAML suite
 manages the server, an ephemeral forward and its isolated session automatically; see [testing](testing.md).

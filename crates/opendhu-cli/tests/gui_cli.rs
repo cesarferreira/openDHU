@@ -77,7 +77,14 @@ fn test_viewer_opens_by_default_uses_the_session_runtime_and_is_closed_after_the
         "/../opendhu-native/tests/fixtures/fake-native-hu.sh"
     );
     let start = s.opendhu_env(
-        &["start", "--backend", "native", "--serial", "FAKE0001"],
+        &[
+            "session",
+            "start",
+            "--backend",
+            "native",
+            "--serial",
+            "FAKE0001",
+        ],
         &[("OPENDHU_NATIVE_HU", native)],
     );
     assert_eq!(code(&start), 0, "{}", text(&start));
@@ -134,7 +141,14 @@ fn headless_test_does_not_require_or_start_a_viewer() {
         "/../opendhu-native/tests/fixtures/fake-native-hu.sh"
     );
     let start = s.opendhu_env(
-        &["start", "--backend", "native", "--serial", "FAKE0001"],
+        &[
+            "session",
+            "start",
+            "--backend",
+            "native",
+            "--serial",
+            "FAKE0001",
+        ],
         &[("OPENDHU_NATIVE_HU", native)],
     );
     assert_eq!(code(&start), 0, "{}", text(&start));

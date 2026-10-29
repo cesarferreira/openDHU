@@ -23,7 +23,7 @@ fn config_file_supplies_dhu_path_and_serial_so_start_needs_no_flags() {
             fake_dhu()
         ),
     );
-    let o = s.opendhu_env(&["start"], &[("OPENDHU_CONFIG", &cfg)]);
+    let o = s.opendhu_env(&["session", "start"], &[("OPENDHU_CONFIG", &cfg)]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert_eq!(s.status_json()["serial"], "FAKE0001");
 }
@@ -39,7 +39,7 @@ fn flag_beats_config_file() {
         ),
     );
     let o = s.opendhu_env(
-        &["start", "--serial", "FAKE0001"],
+        &["session", "start", "--serial", "FAKE0001"],
         &[("OPENDHU_CONFIG", &cfg)],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
@@ -54,7 +54,7 @@ fn env_var_beats_config_file_for_the_dhu_path() {
         "[dhu]\npath = \"/no/such/dhu\"\n[session]\nbackend = \"dhu\"\nserial = \"FAKE0001\"\n",
     );
     let o = s.opendhu_env(
-        &["start"],
+        &["session", "start"],
         &[("OPENDHU_CONFIG", &cfg), ("OPENDHU_DHU_PATH", &fake_dhu())],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
@@ -64,10 +64,10 @@ fn env_var_beats_config_file_for_the_dhu_path() {
 fn a_broken_config_file_fails_start_with_exit_2_but_not_stop_or_status() {
     let s = Sandbox::new();
     let cfg = write_config(&s, "[dhu]\npth = \"x\"\n");
-    let o = s.opendhu_env(&["start"], &[("OPENDHU_CONFIG", &cfg)]);
+    let o = s.opendhu_env(&["session", "start"], &[("OPENDHU_CONFIG", &cfg)]);
     assert_eq!(code(&o), 2, "{}", text(&o));
     assert!(text(&o).contains("config.toml"), "{}", text(&o));
-    let st = s.opendhu_env(&["status"], &[("OPENDHU_CONFIG", &cfg)]);
+    let st = s.opendhu_env(&["session", "status"], &[("OPENDHU_CONFIG", &cfg)]);
     assert_eq!(
         code(&st),
         3,
@@ -79,7 +79,10 @@ fn a_broken_config_file_fails_start_with_exit_2_but_not_stop_or_status() {
 #[test]
 fn a_named_config_file_that_does_not_exist_is_an_error() {
     let s = Sandbox::new();
-    let o = s.opendhu_env(&["start"], &[("OPENDHU_CONFIG", "/no/such/config.toml")]);
+    let o = s.opendhu_env(
+        &["session", "start"],
+        &[("OPENDHU_CONFIG", "/no/such/config.toml")],
+    );
     assert_eq!(code(&o), 2, "{}", text(&o));
 }
 

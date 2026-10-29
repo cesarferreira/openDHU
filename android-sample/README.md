@@ -65,7 +65,7 @@ same reports. It cleans up its own session, logs and tunnels; it never boots or 
 The phone's initial Android Auto consent screens may need to be accepted manually.
 
 To explore manually instead, install the APK with `adb -s SERIAL install -r PATH_TO_APK`, then use
-`aa start --serial SERIAL` and `aa gui`. Open **openDHU Demo** from Android Auto's app launcher.
+`aa session start --serial SERIAL` and `aa gui`. Open **openDHU Demo** from Android Auto's app launcher.
 
 ## E2E tests
 

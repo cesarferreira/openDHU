@@ -266,7 +266,7 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Result<egui::TextureHandle,
     Ok(ctx.load_texture("screenshot", color, egui::TextureOptions::LINEAR))
 }
 
-/// `aa` next to this executable, or on `PATH`. `aa start` owns daemon start-up and the
+/// `aa` next to this executable, or on `PATH`. `aa session start` owns daemon start-up and the
 /// config file, so the window does not repeat that logic.
 fn cli_path() -> PathBuf {
     std::env::current_exe()
@@ -283,7 +283,7 @@ fn start_with_cli(
     headless: bool,
 ) -> Result<String, String> {
     let mut cmd = Command::new(cli_path());
-    cmd.arg("start");
+    cmd.args(["session", "start"]);
     if native {
         cmd.args(["--backend", "native"]);
     } else {
@@ -300,7 +300,7 @@ fn start_with_cli(
     }
     let out = cmd
         .output()
-        .map_err(|e| format!("cannot run `aa start`: {e}"))?;
+        .map_err(|e| format!("cannot run `aa session start`: {e}"))?;
     if out.status.success() {
         Ok("Session started".into())
     } else {
@@ -309,7 +309,7 @@ fn start_with_cli(
             .lines()
             .rev()
             .find(|l| !l.trim().is_empty())
-            .unwrap_or("aa start failed");
+            .unwrap_or("aa session start failed");
         Err(line.trim_start_matches("error: ").to_string())
     }
 }

@@ -177,7 +177,7 @@ All **observed** on a live USB session:
 
 **Inferred, not tested:** a second DHU cannot attach to the same phone while the first holds its USB
 accessory link. `aa doctor` reports a `desktop-head-unit` that openDHU did not start, because that is
-the likeliest cause of a failed `aa start`.
+the likeliest cause of a failed `aa session start`.
 
 Because a closed stdin ends the DHU, the daemon that owns the pipe cannot leave an orphan behind, even if
 the daemon is killed. **Tested on the phone:** unplugging the cable ends the session (see 7b). The
@@ -193,7 +193,7 @@ A DHU has exactly one command channel: its own stdin. openDHU cannot write to an
 The only way in would be pushing keystrokes into the user's terminal, which is fragile, depends on the
 terminal, and is global desktop-style input injection that the PRD forbids.
 
-**Consequence.** "Existing session" means a session openDHU started. `aa start` launches (if none is
+**Consequence.** "Existing session" means a session openDHU started. `aa session start` launches (if none is
 running) the openDHU daemon, which owns the DHU's pipes and serves the loopback HTTP API described in
 [api.md](api.md). `aa focus video on|off`, `status`, `stop` and every other command are clients of that
 API. (The first version used a Unix socket owned by a supervisor process; the PRD requires the CLI and GUI to
@@ -213,12 +213,12 @@ Options for teams that already launch the DHU from their own script (not impleme
 - **Inferred:** the accessory-mode switch re-enumerates the phone over USB, which drops `adb reverse` and
   `adb forward` tunnels. The user's own launch script says the same in a comment and re-applies
   its `adb reverse` tunnel after the switch.
-- **Handled:** `aa start --reverse PORT` (repeatable) runs `adb reverse tcp:PORT tcp:PORT` once the DHU is
+- **Handled:** `aa session start --reverse PORT` (repeatable) runs `adb reverse tcp:PORT tcp:PORT` once the DHU is
   attached, because the switch is what drops them. A tunnel counts only after `adb reverse --list` shows it;
   otherwise `start` fails and the DHU is stopped, so a session never looks healthy while the app cannot reach its
   backend. `status` re-checks each tunnel against `adb reverse --list` (`active`, `missing` or `unknown`). Only the
   ports asked for are added, and nothing is ever removed.
-- **Verified on the phone:** after `aa start --reverse 10101`, `adb reverse --list` independently showed
+- **Verified on the phone:** after `aa session start --reverse 10101`, `adb reverse --list` independently showed
   `UsbFfs tcp:10101 tcp:10101`.
 - **Handled mid-session too:** a daemon thread checks `adb reverse --list` every 2 s and re-applies only the
   requested tunnels that are missing. It acts only when adb answers, so a phone that is mid-re-enumeration is left
@@ -235,10 +235,10 @@ One run, Pixel 6, session started with `--reverse 47123`, cable pulled, then plu
 - adb lost the device at 10:28:37 (1 s polling). The DHU exited with status 0 at 10:28:49 and the daemon
   emitted `session.ended` (`the DHU exited (exit status: 0)`). Whether the DHU noticed the unplug or the replug
   was not separated.
-- The ephemeral daemon then exited and removed `daemon.json`. `aa status` returned exit code 3. No
+- The ephemeral daemon then exited and removed `daemon.json`. `aa session status` returned exit code 3. No
   processes were left.
-- After the replug, a fresh `aa start --reverse 47123` worked, and an independent `adb reverse --list` showed the
-  tunnel.
+- After the replug, a fresh `aa session start --reverse 47123` worked, and an independent `adb reverse --list`
+  showed the tunnel.
 
 **So a real unplug does not give the tunnel keeper a chance to act: the session is gone, not paused.** The keeper
 only repairs tunnels dropped while the DHU is still alive. Nothing resumes a session automatically; start a new one.
@@ -287,14 +287,14 @@ selection is unit-tested; the wait itself was checked by hand, not by an automat
    and passes on the fix.
 
 3. **Start right after stop could not find the phone.** After a session ends the phone leaves accessory mode
-   and is briefly invisible to adb, so `aa start` without `--serial` failed with "no device".
+   and is briefly invisible to adb, so `aa session start` without `--serial` failed with "no device".
    Auto-selection now waits up to 10 s for exactly one authorized device. With several devices it still
    refuses to guess.
 
 ## 10. What is implemented
 
-`aa start [--reverse PORT]… | stop | status | focus video on|off | screenshot | test | doctor`, with `--json` (camelCase keys), deterministic
-exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `opendhu-core`. USB transport only. `doctor` is
+`aa session start [--reverse PORT]… | stop | status | restart`, `aa focus video on|off | screenshot | test | doctor`,
+with `--json` (camelCase keys), deterministic exit codes (PRD 8.2) and the `HeadUnitBackend` trait in `opendhu-core`. USB transport only. `doctor` is
 read-only and warns about a DHU that openDHU does not own.
 
 `aa screenshot PATH|-o PATH` validates the path (must end in `.png`, no whitespace, existing directory),

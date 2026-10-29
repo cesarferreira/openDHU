@@ -15,11 +15,11 @@ cargo install --path crates/opendhu-gui --locked
 
 The connection bar shows the selected phone, connection state, **Settings**, and **Start** / **Stop**.
 The device picker discovers phones through adb even before a daemon is running. Unauthorized and offline
-phones remain visible but cannot be selected. **Automatic device** lets `aa start` choose the only authorized
+phones remain visible but cannot be selected. **Automatic device** lets `aa session start` choose the only authorized
 phone. A running session shows its actual phone; stop it before choosing another device.
 
-With no session, the window shows a single connection panel. **Start session** runs `aa start --backend native`
-(or `aa start --dhu` for Google DHU), so daemon startup and your [config file](configuration.md) behave as they
+With no session, the window shows a single connection panel. **Start session** runs `aa session start --backend native`
+(or `aa session start --dhu` for Google DHU), so daemon startup and your [config file](configuration.md) behave as they
 do in the terminal. `aa` must sit next to `opendhu-gui` or be on `PATH`.
 
 **Settings** holds the head-unit choice, optional device serial, reverse ports, and Google DHU's headless option.

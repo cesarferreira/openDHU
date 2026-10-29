@@ -661,7 +661,7 @@ impl Lease {
         }
         if self.runtime.exists() {
             // A failed start can leave a daemon without a session; terminate only this private PID.
-            let _ = suite_cli(&self.exe, &self.runtime, &["stop"], None);
+            let _ = suite_cli(&self.exe, &self.runtime, &["session", "stop"], None);
             if let Ok(text) = std::fs::read_to_string(self.runtime.join("daemon.json"))
                 && let Ok(info) = serde_json::from_str::<serde_json::Value>(&text)
                 && let Some(pid) = info["pid"].as_u64()
@@ -1207,7 +1207,14 @@ fn run_prepared(
         &output,
         "Starting the native head unit and waiting for projection...",
     );
-    let mut start_args = vec!["start", "--backend", "native", "--serial", &serial];
+    let mut start_args = vec![
+        "session",
+        "start",
+        "--backend",
+        "native",
+        "--serial",
+        &serial,
+    ];
     if let Some(endpoint) = &endpoint {
         start_args.extend(["--native-tcp", endpoint]);
     }

@@ -68,7 +68,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn no_session() -> Error {
-    Error::BackendUnavailable("no openDHU session is running; start one with `aa start`".into())
+    Error::BackendUnavailable(
+        "no openDHU session is running; start one with `aa session start`".into(),
+    )
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
@@ -367,7 +369,7 @@ impl Daemon {
                 }
                 Slot::Running(_) => {
                     return Err(Error::SessionConflict(
-                        "an openDHU session is already running; run `aa stop` first".into(),
+                        "an openDHU session is already running; run `aa session stop` first".into(),
                     ));
                 }
                 Slot::Stopping { .. } => {

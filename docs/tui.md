@@ -6,7 +6,7 @@ supports it: kitty, Ghostty or WezTerm. Like the desktop window ([gui.md](gui.md
 [api.md](api.md), and the video is decoded with `ffmpeg`.
 
 ```bash
-aa start
+aa session start
 aa tui                           # after make install-tui
 cargo run -p opendhu-tui         # from a checkout
 aa test e2e/production.yaml --tui  # with the test progress underneath; see testing.md
@@ -46,6 +46,6 @@ always zlib-compressed, and a frame identical to the one on screen is not sent a
 
 - **No picture, header works:** the terminal is not showing kitty graphics. Run `aa tui` directly in the
   terminal app, not inside tmux or another multiplexer, unless it passes graphics through.
-- **Header says `no session`:** start one with `aa start`. With `aa test --tui` the viewer follows the
+- **Header says `no session`:** start one with `aa session start`. With `aa test --tui` the viewer follows the
   session of the test that is running, so it stays empty while a suite boots its emulator.
 - **Picture lags:** use a release build (`make install-tui`); a debug build encodes frames slowly.

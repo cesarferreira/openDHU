@@ -75,7 +75,7 @@ aa test sample                     # one suite, on its configured emulator
 aa test sample --filter persist    # only tests whose name or file matches
 aa test sample --list              # list tests; `aa test --list` lists suites
 aa test --validate                 # parse everything without touching a device
-aa test examples/video-focus.yaml  # one test, against a session you started with `aa start`
+aa test examples/video-focus.yaml  # one test, against a session you started with `aa session start`
 ```
 
 ### With recording
@@ -180,21 +180,22 @@ make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 ## Drive it by hand
 
 ```bash
-aa start  # native head unit over USB (--serial SERIAL to pick a device)
-aa gui    # live display with mouse input and session controls
-aa tui    # the same in your terminal
+aa session start  # native head unit over USB (--serial SERIAL to pick a device)
+aa gui            # live display with mouse input and session controls
+aa tui            # the same in your terminal
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa key home
 aa focus video off
 aa screenshot screen.png
 aa audio recording.wav --seconds 10
-aa status --json
-aa stop
+aa session status --json
+aa session restart  # stop and start again with the same settings
+aa session stop
 ```
 
-Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa start --dhu` for
-Google's DHU (install `extras;google;auto` with the Android SDK). `aa start --reverse PORT` restores an ADB
+Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa session start --dhu` for
+Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
 tunnel after a USB reconnect. `aa --help` lists everything.
 
 ## Documentation

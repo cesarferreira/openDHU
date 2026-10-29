@@ -46,42 +46,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Start an Android Auto session (native by default; the daemon keeps it running)
-    Start {
-        /// Head unit to run [default: native]
-        #[arg(long, value_enum)]
-        backend: Option<BackendArg>,
-        /// Use Google's Desktop Head Unit instead of the native backend
-        #[arg(long, conflicts_with = "backend")]
-        dhu: bool,
-        /// Path to the desktop-head-unit executable (dhu backend) [env: OPENDHU_DHU_PATH]
-        #[arg(long)]
-        dhu_path: Option<PathBuf>,
-        /// Android device serial (default: the only authorized adb device)
-        #[arg(long)]
-        serial: Option<String>,
-        /// Connect native backend to an existing loopback ADB forward (IP:port)
-        #[arg(long)]
-        native_tcp: Option<String>,
-        /// DHU .ini configuration file
-        #[arg(long)]
-        config: Option<PathBuf>,
-        /// Run the DHU without its window
-        #[arg(long)]
-        headless: bool,
-        /// Re-apply `adb reverse tcp:PORT tcp:PORT` after the phone attaches (repeatable). Starting
-        /// a session re-enumerates the phone over USB, which drops existing tunnels.
-        #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
-        reverse: Vec<u16>,
+    /// Start, stop, restart or inspect the Android Auto session
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
     },
     /// Open the desktop window
     Gui,
     /// Show the head unit in this terminal (needs kitty graphics: kitty, Ghostty, WezTerm)
     Tui,
-    /// Stop the running session
-    Stop,
-    /// Show the running session
-    Status,
     /// Change head unit focus
     Focus {
         #[command(subcommand)]
@@ -211,15 +184,53 @@ enum Command {
     /// Run the openDHU daemon in the foreground
     ///
     /// It serves the HTTP API on 127.0.0.1 until stopped with Ctrl+C or SIGTERM, which also stops the
-    /// session. `aa start` starts a daemon by itself when none is running; this one stays up.
+    /// session. `aa session start` starts a daemon by itself when none is running; this one stays up.
     Daemon {
         /// Port to listen on [default: 8765, or any free port if that is taken]
         #[arg(long)]
         port: Option<u16>,
-        /// Exit when the session ends. `aa start` sets this for the daemon it launches.
+        /// Exit when the session ends. `aa session start` sets this for the daemon it launches.
         #[arg(long, hide = true)]
         exit_when_idle: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum SessionAction {
+    /// Start a session (native by default; the daemon keeps it running)
+    Start {
+        /// Head unit to run [default: native]
+        #[arg(long, value_enum)]
+        backend: Option<BackendArg>,
+        /// Use Google's Desktop Head Unit instead of the native backend
+        #[arg(long, conflicts_with = "backend")]
+        dhu: bool,
+        /// Path to the desktop-head-unit executable (dhu backend) [env: OPENDHU_DHU_PATH]
+        #[arg(long)]
+        dhu_path: Option<PathBuf>,
+        /// Android device serial (default: the only authorized adb device)
+        #[arg(long)]
+        serial: Option<String>,
+        /// Connect native backend to an existing loopback ADB forward (IP:port)
+        #[arg(long)]
+        native_tcp: Option<String>,
+        /// DHU .ini configuration file
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Run the DHU without its window
+        #[arg(long)]
+        headless: bool,
+        /// Re-apply `adb reverse tcp:PORT tcp:PORT` after the phone attaches (repeatable). Starting
+        /// a session re-enumerates the phone over USB, which drops existing tunnels.
+        #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+        reverse: Vec<u16>,
+    },
+    /// Stop the running session
+    Stop,
+    /// Show the running session
+    Status,
+    /// Stop the running session and start it again with the same settings
+    Restart,
 }
 
 #[derive(Subcommand, Debug)]
@@ -387,21 +398,24 @@ fn setup_gearhead(
 
 fn run(cli: Cli) -> Result<u8> {
     let json = cli.json;
-    // Only commands that use settings read the file, so a typo in it never blocks `stop` or `status`.
+    // Only commands that use settings read the file, so a typo in it never blocks `session stop` or `session status`.
     let load = || config::load(&config::Locator::from_process(), &current_dir()?);
     let dhu_env_set = std::env::var_os("OPENDHU_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
         Command::Gui => launch_gui(),
         Command::Tui => launch("opendhu-tui", "install-tui"),
-        Command::Start {
-            backend,
-            dhu,
-            dhu_path,
-            serial,
-            native_tcp,
-            config,
-            headless,
-            reverse,
+        Command::Session {
+            action:
+                SessionAction::Start {
+                    backend,
+                    dhu,
+                    dhu_path,
+                    serial,
+                    native_tcp,
+                    config,
+                    headless,
+                    reverse,
+                },
         } => {
             let cfg = load()?;
             let cwd = current_dir()?;
@@ -438,7 +452,9 @@ fn run(cli: Cli) -> Result<u8> {
             print_session(&expect_session(status.session)?, json);
             Ok(0)
         }
-        Command::Stop => {
+        Command::Session {
+            action: SessionAction::Stop,
+        } => {
             daemon_ctl::connect()?.stop()?;
             println!(
                 "{}",
@@ -450,8 +466,17 @@ fn run(cli: Cli) -> Result<u8> {
             );
             Ok(0)
         }
-        Command::Status => {
+        Command::Session {
+            action: SessionAction::Status,
+        } => {
             let status = daemon_ctl::connect()?.status()?;
+            print_session(&expect_session(status.session)?, json);
+            Ok(0)
+        }
+        Command::Session {
+            action: SessionAction::Restart,
+        } => {
+            let status = daemon_ctl::connect()?.restart()?;
             print_session(&expect_session(status.session)?, json);
             Ok(0)
         }
@@ -696,7 +721,9 @@ fn current_dir() -> Result<PathBuf> {
 /// (exit code 3) as no daemon at all.
 fn expect_session(s: Option<SessionStatus>) -> Result<SessionStatus> {
     s.ok_or_else(|| {
-        Error::BackendUnavailable("no openDHU session is running; start one with `aa start`".into())
+        Error::BackendUnavailable(
+            "no openDHU session is running; start one with `aa session start`".into(),
+        )
     })
 }
 

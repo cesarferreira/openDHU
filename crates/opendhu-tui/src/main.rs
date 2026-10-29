@@ -560,7 +560,7 @@ impl<'a> App<'a> {
             // `aa test` boots its own device after building, so there is nothing to start by hand.
             None if self.log.is_some() && !running => "test run finished; no session".to_string(),
             None if running => "waiting for the test run to start a session".to_string(),
-            None => "no session; start one with `aa start`".to_string(),
+            None => "no session; start one with `aa session start`".to_string(),
         };
         // Without a session the video cannot connect; its error would only repeat that.
         let video = match (self.status.as_ref().and(self.video.problem()), self.frames) {
