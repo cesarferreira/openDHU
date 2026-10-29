@@ -29,6 +29,8 @@ use crate::{launch, log, runtime};
 #[derive(Clone)]
 struct RunningSession {
     id: String,
+    /// Kept so `restart` can launch the same head unit again.
+    request: Arc<StartRequest>,
     backend: Arc<Mutex<AnyBackend>>,
     kind: BackendKind,
     transport: String,
@@ -375,6 +377,58 @@ impl Daemon {
                 }
             }
         }
+        self.launch(id, req).await
+    }
+
+    /// Stop the running session and start it again from the same request. The daemon keeps
+    /// running in between, so clients stay connected (an `exit_when_idle` daemon would exit on
+    /// a plain stop). Used to clear an Android Auto host that stopped showing the app.
+    pub async fn restart(&self) -> Result<StatusResponse> {
+        let running = {
+            let mut slot = lock(&self.inner.slot);
+            match &*slot {
+                Slot::Running(r) => {
+                    let r = r.clone();
+                    *slot = Slot::Stopping { id: r.id.clone() };
+                    r
+                }
+                Slot::Idle => return Err(no_session()),
+                Slot::Starting { .. } | Slot::Stopping { .. } => {
+                    return Err(Error::SessionConflict(
+                        "the session is starting or stopping; try again shortly".into(),
+                    ));
+                }
+            }
+        };
+        let events = &self.inner.events;
+        events.emit("session.restarting", Some(&running.id), json!({}));
+        log::info("session.restarting", json!({ "sessionId": running.id }));
+        running.stop_keeper.store(true, Ordering::SeqCst);
+        let stopped = with_backend(Arc::clone(&running.backend), |b| b.stop()).await?;
+        events.emit("session.stopped", Some(&running.id), json!({}));
+        if let Err(e) = stopped {
+            // The new launch reports whether the phone is usable; a failed stop alone is not fatal.
+            log::warn(
+                "session.restart_stop_failed",
+                json!({ "sessionId": running.id, "message": e.message() }),
+            );
+        }
+        let req = StartRequest::clone(&running.request);
+        drop(running);
+        let id = match runtime::new_session_id() {
+            Ok(id) => id,
+            Err(e) => {
+                *lock(&self.inner.slot) = Slot::Idle;
+                self.signal_if_ephemeral();
+                return Err(e);
+            }
+        };
+        *lock(&self.inner.slot) = Slot::Starting { id: id.clone() };
+        self.launch(id, req).await
+    }
+
+    /// Launch a session for a slot already marked `Starting { id }`.
+    async fn launch(&self, id: String, req: StartRequest) -> Result<StatusResponse> {
         let events = &self.inner.events;
         events.emit("session.starting", Some(&id), json!({}));
         log::info("session.starting", json!({ "sessionId": id }));
@@ -549,6 +603,7 @@ fn launch_session(req: &StartRequest, id: String, events: Arc<EventBus>) -> Resu
     }
     Ok(RunningSession {
         id,
+        request: Arc::new(req.clone()),
         backend: Arc::new(Mutex::new(backend)),
         kind: req.backend,
         transport: transport.into(),

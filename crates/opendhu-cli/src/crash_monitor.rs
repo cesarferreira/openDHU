@@ -115,6 +115,8 @@ struct State {
     expected: String,
     received: bool,
     closed: Option<String>,
+    /// Which logcat stream is current; a replaced stream's reader must not mark the monitor closed.
+    generation: u64,
 }
 
 type Shared = Arc<(Mutex<State>, Condvar)>;
@@ -133,32 +135,7 @@ pub struct CrashMonitor {
 impl CrashMonitor {
     pub fn start(adb: &Path, serial: &str, package: &str, log: &Path) -> Result<Self> {
         let file = std::fs::File::create(log).map_err(|e| Error::Other(e.to_string()))?;
-        let mut child = Command::new(adb)
-            .args([
-                "-s",
-                serial,
-                "logcat",
-                "-b",
-                "main",
-                "-b",
-                "system",
-                "-b",
-                "crash",
-                "-b",
-                "events",
-                "-v",
-                "threadtime",
-                "-T",
-                "1",
-                "*:V",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::from(
-                file.try_clone().map_err(|e| Error::Other(e.to_string()))?,
-            ))
-            .spawn()
-            .map_err(|e| Error::Other(format!("cannot start crash monitor: {e}")))?;
+        let mut child = spawn_logcat(adb, serial, &file)?;
         let stdout = child.stdout.take().expect("logcat stdout");
         let shared = Arc::new((
             Mutex::new(State {
@@ -170,11 +147,12 @@ impl CrashMonitor {
                 expected: String::new(),
                 received: false,
                 closed: None,
+                generation: 0,
             }),
             Condvar::new(),
         ));
         let reader = Arc::clone(&shared);
-        std::thread::spawn(move || capture(stdout, file, reader));
+        std::thread::spawn(move || capture(stdout, file, reader, 0));
         let monitor = Self {
             adb: adb.into(),
             serial: serial.into(),
@@ -190,6 +168,33 @@ impl CrashMonitor {
         // Ignore historical records, without clearing the device's shared log buffers.
         monitor.checkpoint()?;
         Ok(monitor)
+    }
+
+    /// Replace the logcat stream after the phone re-enumerated (a new USB head-unit session drops
+    /// every ADB connection). Records logged while no stream was attached are not inspected.
+    pub fn reconnect(&self) -> Result<()> {
+        let file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&self.log)
+            .map_err(|e| Error::Other(e.to_string()))?;
+        let mut child = spawn_logcat(&self.adb, &self.serial, &file)?;
+        let stdout = child.stdout.take().expect("logcat stdout");
+        let generation = {
+            let mut state = self.shared.0.lock().unwrap();
+            state.generation += 1;
+            state.closed = None;
+            state.active = false;
+            state.generation
+        };
+        {
+            let mut old = self.child.lock().unwrap();
+            let _ = old.kill();
+            let _ = old.wait();
+            *old = child;
+        }
+        let reader = Arc::clone(&self.shared);
+        std::thread::spawn(move || capture(stdout, file, reader, generation));
+        self.checkpoint()
     }
 
     pub fn check(&self) -> Result<Option<String>> {
@@ -292,7 +297,36 @@ impl Drop for CrashMonitor {
     }
 }
 
-fn capture(stdout: impl std::io::Read, mut file: std::fs::File, shared: Shared) {
+fn spawn_logcat(adb: &Path, serial: &str, file: &std::fs::File) -> Result<Child> {
+    Command::new(adb)
+        .args([
+            "-s",
+            serial,
+            "logcat",
+            "-b",
+            "main",
+            "-b",
+            "system",
+            "-b",
+            "crash",
+            "-b",
+            "events",
+            "-v",
+            "threadtime",
+            "-T",
+            "1",
+            "*:V",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(
+            file.try_clone().map_err(|e| Error::Other(e.to_string()))?,
+        ))
+        .spawn()
+        .map_err(|e| Error::Other(format!("cannot start crash monitor: {e}")))
+}
+
+fn capture(stdout: impl std::io::Read, mut file: std::fs::File, shared: Shared, generation: u64) {
     let result = (|| -> std::io::Result<()> {
         let mut reader = BufReader::new(stdout);
         let mut bytes = Vec::new();
@@ -305,6 +339,9 @@ fn capture(stdout: impl std::io::Read, mut file: std::fs::File, shared: Shared) 
             file.flush()?;
             let line = String::from_utf8_lossy(&bytes);
             let mut state = shared.0.lock().unwrap();
+            if state.generation != generation {
+                return Ok(());
+            }
             if record(&line)
                 .is_some_and(|(_, tag, message)| tag == TAG && message == state.expected)
             {
@@ -318,6 +355,9 @@ fn capture(stdout: impl std::io::Read, mut file: std::fs::File, shared: Shared) 
         Ok(())
     })();
     let mut state = shared.0.lock().unwrap();
+    if state.generation != generation {
+        return;
+    }
     state.closed = Some(
         result
             .err()
@@ -339,6 +379,59 @@ mod tests {
             parser.push(line);
         }
         parser.detail()
+    }
+
+    #[test]
+    fn a_reconnected_stream_restores_health_checks_after_the_phone_re_enumerates() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("aa-crash-monitor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let device_log = dir.join("device.log");
+        std::fs::write(&device_log, "").unwrap();
+        // `logcat` streams the device log; `shell log -t TAG MSG` appends to it like logd.
+        let adb = dir.join("adb");
+        std::fs::write(
+            &adb,
+            format!(
+                "#!/bin/sh\nshift 2\ncase \"$1\" in\n  logcat) echo $$ > '{dir}/logcat.pid'; exec tail -n 0 -F '{log}' ;;\n  shell) echo \"10-29 11:00:00.000 1 1 I $4: $5\" >> '{log}' ;;\nesac\n",
+                dir = dir.display(),
+                log = device_log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&adb, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let monitor =
+            CrashMonitor::start(&adb, "SERIAL", "test.app", &dir.join("logcat.txt")).unwrap();
+        assert!(monitor.check().unwrap().is_none());
+
+        // A new USB session drops every ADB connection, ending the stream.
+        let pid = std::fs::read_to_string(dir.join("logcat.pid")).unwrap();
+        Command::new("kill").arg(pid.trim()).status().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while monitor.check().is_ok() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            monitor.check().is_err(),
+            "a dropped stream must be reported"
+        );
+
+        monitor.reconnect().unwrap();
+        assert!(monitor.check().unwrap().is_none());
+        let mut log = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&device_log)
+            .unwrap();
+        writeln!(
+            log,
+            "10-29 11:00:01.000 665 665 I am_crash: [0,321,test.app,123,reason]"
+        )
+        .unwrap();
+        let detail = monitor.finish().unwrap().expect("crash after reconnect");
+        assert!(detail.contains("am_crash"), "{detail}");
+        monitor.stop();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

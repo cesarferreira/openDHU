@@ -67,6 +67,10 @@ async fn session_stop(State(d): State<Daemon>) -> ApiResult<StoppedResponse> {
     Ok(Json(StoppedResponse { stopped: true }))
 }
 
+async fn session_restart(State(d): State<Daemon>) -> ApiResult<StatusResponse> {
+    Ok(Json(d.restart().await?))
+}
+
 async fn focus_video(
     State(d): State<Daemon>,
     AppJson(req): AppJson<FocusRequest>,
@@ -264,6 +268,7 @@ pub fn router(daemon: Daemon) -> Router {
         .route("/v1/devices", get(devices))
         .route("/v1/session/start", post(session_start))
         .route("/v1/session/stop", post(session_stop))
+        .route("/v1/session/restart", post(session_restart))
         .route("/v1/focus/video", post(focus_video))
         .route("/v1/video", get(video))
         .route("/v1/audio/{channel}", get(audio))

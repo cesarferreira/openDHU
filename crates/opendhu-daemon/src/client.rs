@@ -146,6 +146,11 @@ impl Client {
         Ok(())
     }
 
+    /// Stop the session and start it again from its original request, keeping the daemon.
+    pub fn restart(&self) -> Result<StatusResponse> {
+        self.request("POST", "/v1/session/restart", None, true)
+    }
+
     pub fn focus_video(&self, enabled: bool) -> Result<OperationResponse> {
         self.post_json("/v1/focus/video", &FocusRequest { enabled }, false)
     }

@@ -712,6 +712,37 @@ fn a_persistent_daemon_survives_the_session_and_can_start_another() {
 }
 
 #[test]
+fn a_restart_replaces_the_session_without_ending_an_ephemeral_daemon() {
+    let d = TestDaemon::start(true);
+    d.client.start(&d.dhu()).unwrap();
+    let before = d.client.status().unwrap().session.unwrap();
+    let old_dhu = before.details.unwrap().dhu_pid;
+
+    let after = d.client.restart().unwrap().session.unwrap();
+
+    assert_eq!(after.phase, Phase::Running);
+    assert_ne!(after.session_id, before.session_id);
+    assert_ne!(after.details.unwrap().dhu_pid, old_dhu);
+    assert!(
+        wait_until(Duration::from_secs(10), || !alive(old_dhu)),
+        "the old DHU must be stopped"
+    );
+    assert!(!d.finished(), "the daemon must survive a restart");
+    // The same client keeps working against the new session.
+    assert_eq!(
+        d.client.status().unwrap().session.unwrap().phase,
+        Phase::Running
+    );
+}
+
+#[test]
+fn a_restart_without_a_session_is_refused() {
+    let d = TestDaemon::start(false);
+    let err = d.client.restart().unwrap_err();
+    assert!(err.to_string().contains("no openDHU session"), "{err}");
+}
+
+#[test]
 fn when_the_dhu_dies_the_session_ends_and_an_event_says_why() {
     let d = TestDaemon::start(false);
     let sse = Sse::open(&d);

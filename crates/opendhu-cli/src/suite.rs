@@ -88,6 +88,14 @@ pub struct Application {
     serial: String,
     package: String,
     pub monitor: Arc<crate::crash_monitor::CrashMonitor>,
+    /// Set on a USB phone, the only transport whose head-unit session can be restarted mid-suite.
+    usb: Option<UsbSession>,
+}
+
+#[derive(Clone)]
+struct UsbSession {
+    runtime: PathBuf,
+    reverse_ports: Vec<(u16, u16)>,
 }
 impl Application {
     pub fn reset(&self) -> Result<()> {
@@ -137,6 +145,26 @@ impl opendhu_test::runner::ApplicationControl for Application {
             &["exec-out", "uiautomator", "dump", "/dev/tty"],
         )
     }
+    /// Restart the head-unit session in place. The phone re-enumerates, which drops ADB, its
+    /// reverse tunnels and the logcat stream, so each is restored before the app is reopened.
+    fn recover_projection(&self) -> Result<bool> {
+        let Some(usb) = &self.usb else {
+            return Ok(false);
+        };
+        let client = opendhu_daemon::Client::connect_in(&usb.runtime)?;
+        client.restart()?;
+        wait_for_usb_adb(&self.adb, &self.serial, None)?;
+        for (device, host) in &usb.reverse_ports {
+            device::adb(
+                &self.adb,
+                &self.serial,
+                &["reverse", &format!("tcp:{device}"), &format!("tcp:{host}")],
+            )?;
+        }
+        self.monitor.reconnect()?;
+        client.focus_video(true)?;
+        Ok(true)
+    }
     fn car_app_display(&self) -> Result<Option<bool>> {
         let displays = device::adb(&self.adb, &self.serial, &["shell", "dumpsys", "display"])?;
         Ok(Some(has_car_app_display(&displays, &self.package)))
@@ -149,6 +177,27 @@ impl opendhu_test::runner::ApplicationControl for Application {
             &["shell", "input", "text", &text.replace(' ', "%s")],
         )?;
         Ok(())
+    }
+}
+
+/// Starting a USB session re-enumerates the phone, which drops it from ADB for a few seconds.
+fn wait_for_usb_adb(adb: &Path, serial: &str, cancel: Option<&AtomicBool>) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(cancel) = cancel {
+            check_cancel(cancel)?;
+        }
+        if device::command(adb, &["-s", serial, "get-state"], Duration::from_secs(2))
+            .is_ok_and(|state| state.trim() == "device")
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::DeviceDisconnected(format!(
+                "USB phone {serial} did not return to ADB within 30s after its head-unit session started",
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(300));
     }
 }
 
@@ -1177,25 +1226,7 @@ fn run_prepared(
     }
     if opts.usb {
         phase(&output, "Waiting for USB phone to return to ADB...");
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            check_cancel(&cancel)?;
-            if device::command(
-                &lease.adb,
-                &["-s", &serial, "get-state"],
-                Duration::from_secs(2),
-            )
-            .is_ok_and(|state| state.trim() == "device")
-            {
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(Error::DeviceDisconnected(format!(
-                    "USB phone {serial} did not return to ADB within 30s after projection started",
-                )));
-            }
-            std::thread::sleep(Duration::from_millis(300));
-        }
+        wait_for_usb_adb(&lease.adb, &serial, Some(&cancel))?;
         lease.acquire_reverses(&serial, &suite.environment.reverse_ports, &output, &cancel)?;
     }
     let monitor = Arc::new(crate::crash_monitor::CrashMonitor::start(
@@ -1242,6 +1273,15 @@ fn run_prepared(
         u64::try_from(setup_started.elapsed().as_millis()).unwrap_or(u64::MAX),
     );
     timings.save();
+    let usb = opts.usb.then(|| UsbSession {
+        runtime: lease.runtime.clone(),
+        reverse_ports: suite
+            .environment
+            .reverse_ports
+            .iter()
+            .map(|port| (port.device, port.host))
+            .collect(),
+    });
     opts.cancel = Some(Arc::clone(&cancel));
     opts.usb = false; // Device setup is complete; ordinary tests use the leased session.
     opts.paths = tests;
@@ -1252,6 +1292,7 @@ fn run_prepared(
         adb: lease.adb.clone(),
         serial,
         package: suite.environment.package,
+        usb,
     });
     opts.artifacts_dir = Some(artifacts);
     if opts.report.is_empty() {

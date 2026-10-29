@@ -88,6 +88,7 @@ Request bodies are JSON and reject unknown fields. Keys are camelCase.
 | `GET /v1/devices` | adb devices: serial, state, model |
 | `POST /v1/session/start` | start a session; returns `201` with the status |
 | `POST /v1/session/stop` | stop the session; returns `{"stopped": true}` |
+| `POST /v1/session/restart` | stop the session and start it again from its original request, keeping the daemon (an `--exit-when-idle` daemon would exit on a plain stop); returns the new status |
 | `POST /v1/focus/video` | `{"enabled": true\|false}` |
 | `POST /v1/screenshot` | `{"path": "/abs/file.png"}` |
 | `GET /v1/events` | server-sent events |

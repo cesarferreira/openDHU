@@ -99,6 +99,11 @@ pub trait ApplicationControl {
             "phone.expect requires a suite application context".into(),
         ))
     }
+    /// Restart the head-unit session to clear an Android Auto host that kept showing its
+    /// "Waiting..." card after the app restarted. `Ok(false)` when this context cannot.
+    fn recover_projection(&self) -> opendhu_core::Result<bool> {
+        Ok(false)
+    }
     /// Whether the app has a car display on the phone (`None` when it cannot be observed).
     /// A missing display means the app never started projecting, whatever the car screen shows.
     fn car_app_display(&self) -> opendhu_core::Result<Option<bool>> {
@@ -884,7 +889,102 @@ fn phone_text(text: &str, timeout: Duration, cfg: &RunConfig) -> End {
     }
 }
 
+/// How long Android Auto's "Waiting..." card may stay up after the app's icon is tapped. A healthy
+/// app replaces it within a few seconds. After the app restarts, a USB phone's host sometimes keeps
+/// it up for minutes while the app itself runs; only a new head-unit session clears that.
+const HOST_STUCK_AFTER: Duration = Duration::from_secs(10);
+/// How long the launcher may stay on screen after its icon is tapped before the frame is judged.
+const LAUNCHER_LEAVES_WITHIN: Duration = Duration::from_secs(5);
+
 fn open_app(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
+    let opened = open_app_once(backend, cfg);
+    if opened.outcome != Outcome::Passed {
+        return opened;
+    }
+    match host_stuck(backend, cfg) {
+        Ok(false) => return opened,
+        Ok(true) => {}
+        Err(end) => return end,
+    }
+    let stuck = format!(
+        "Android Auto kept showing \"Waiting...\" for {} after opening the app",
+        fmt_dur(HOST_STUCK_AFTER)
+    );
+    match cfg.application.map(|app| app.recover_projection()) {
+        None | Some(Ok(false)) => {
+            // Nothing here can clear it, so leave the verdict to the test's next step as before.
+            return End::pass(format!(
+                "{}; {stuck}, and only a `--usb` suite can restart its head-unit session",
+                opened.detail
+            ));
+        }
+        Some(Err(error)) => {
+            return End::error(&Error::Other(format!(
+                "{stuck}; restarting the head-unit session failed: {}",
+                error.message()
+            )));
+        }
+        Some(Ok(true)) => {}
+    }
+    let reopened = open_app_once(backend, cfg);
+    if reopened.outcome != Outcome::Passed {
+        return End {
+            detail: format!("{stuck}; after restarting the session: {}", reopened.detail),
+            ..reopened
+        };
+    }
+    match host_stuck(backend, cfg) {
+        Ok(false) => End::pass(format!(
+            "{}; recovered after {stuck} by restarting the head-unit session",
+            reopened.detail
+        )),
+        Ok(true) => End::timeout(format!(
+            "{stuck}, again after restarting the head-unit session"
+        )),
+        Err(end) => end,
+    }
+}
+
+/// Whether the host's "Waiting..." card stays up instead of the app just opened from the launcher.
+fn host_stuck(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> Result<bool, End> {
+    let label = cfg.app_label.unwrap_or_default();
+    let id = SCREEN_ID.fetch_add(1, Ordering::Relaxed);
+    let dir = cfg.artifacts_dir.join("ui");
+    std::fs::create_dir_all(&dir).map_err(|e| End::error(&Error::Other(e.to_string())))?;
+    let image = dir.join(format!("host-{id:04}.png"));
+    let started = cfg.clock.now();
+    let mut card_since: Option<Duration> = None;
+    loop {
+        if cfg.clock.cancelled() {
+            return Err(End::interrupted(
+                "interrupted while checking the opened app",
+            ));
+        }
+        if let Some(end) = application_health(cfg) {
+            return Err(end);
+        }
+        backend.screenshot(&image).map_err(|e| End::error(&e))?;
+        // The card's large centred text is always in the first, cheapest OCR pass.
+        let words = crate::screen::recognize_until(&image, || cfg.clock.cancelled(), |_| true)
+            .map_err(|e| End::error(&e))?;
+        let now = cfg.clock.now();
+        if crate::screen::host_waiting_card(&words) {
+            let since = *card_since.get_or_insert(now);
+            if now.saturating_sub(since) >= HOST_STUCK_AFTER {
+                return Ok(true);
+            }
+        } else if card_since.is_some()
+            || crate::screen::locate_launcher_label(&words, label, 70, 410).is_none()
+            || now.saturating_sub(started) >= LAUNCHER_LEAVES_WITHIN
+        {
+            // The card went away, or the launcher gave way to something else.
+            return Ok(false);
+        }
+        cfg.clock.sleep(Duration::from_secs(1));
+    }
+}
+
+fn open_app_once(backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End {
     let Some(label) = cfg.app_label else {
         return End::error(&Error::InvalidArgs(
             "app.open requires a suite environment.appLabel".into(),
