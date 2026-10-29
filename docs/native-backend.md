@@ -112,7 +112,11 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 - **One phone.** The head unit takes the Android phone it finds on USB. With several attached, `start` refuses
   rather than guess.
 - **Screenshots and the live view need `ffmpeg`**, and a keyframe: if the phone has sent none since projection started, the
-  screenshot fails and says so.
+  screenshot fails and says so. A phone can go minutes without another keyframe (a USB Pixel on a moving map does),
+  so after 16 MB without one the head unit turns video focus off and on, which makes the phone start again with a
+  keyframe. Screenshots keep using the current picture during that ~0.6 s, but the host resets what it shows (an open
+  map header closes) and a tap in flight can be lost. Each screenshot decodes everything since the last keyframe, so
+  screenshots slow down (about 0.8 s at 16 MB) before that.
 - **USB or forwarded TCP.** Emulator head-unit servers can use loopback TCP (see below). Wireless Bluetooth pairing is not wired up.
 - **Resolution** defaults to 800×480 (480p). `OPENDHU_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
   daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;

@@ -29,7 +29,15 @@ use crate::screenshot;
 const CONFIRM_WAIT: Duration = Duration::from_secs(4);
 /// Frames since the last keyframe are kept for screenshots. A phone that sends this much without a
 /// keyframe is not behaving, so the buffer is dropped and a new keyframe awaited.
-const GOP_CAP: usize = 16 * 1024 * 1024;
+const GOP_CAP: usize = 32 * 1024 * 1024;
+/// Past this many bytes since the last keyframe, the phone is asked for a new one by turning video
+/// focus off and on. A USB phone can go minutes without a keyframe on a moving map. The toggle
+/// resets the host's on-screen state (an open header closes) and can drop a tap in flight, so it
+/// is kept for runs that would otherwise reach `GOP_CAP` and lose every screenshot; most get a
+/// keyframe from the phone well before this.
+const GOP_REFRESH: usize = 16 * 1024 * 1024;
+/// A refresh the phone did not answer with a keyframe may be tried again after this long.
+const REFRESH_RETRY: Duration = Duration::from_secs(10);
 
 /// How long a tap holds the finger down.
 const TAP_HOLD: Duration = Duration::from_millis(60);
@@ -56,6 +64,9 @@ struct Inner {
     /// Every frame since the last keyframe, including it.
     gop: Vec<u8>,
     have_keyframe: bool,
+    /// Video focus is being turned off and on to get a keyframe. The phone's brief stop is not a
+    /// real one: screenshots keep using the current picture and no stop event is emitted.
+    refreshing: bool,
     /// A viewer is watching: every frame is also sent to the daemon.
     streaming: bool,
     /// Bytes of audio received, and whether a listener wants each channel, in `AudioChannel::ALL` order.
@@ -94,6 +105,7 @@ impl Shared {
                 pps: Vec::new(),
                 gop: Vec::new(),
                 have_keyframe: false,
+                refreshing: false,
                 streaming: false,
                 burst_pending: false,
                 audio_bytes: [0; 3],
@@ -425,7 +437,7 @@ impl Shared {
         }
         let stream = {
             let i = self.lock();
-            if i.observed == FocusState::Off || i.requested == FocusState::Off {
+            if i.requested == FocusState::Off || (i.observed == FocusState::Off && !i.refreshing) {
                 return err(
                     ErrorKind::Other,
                     "Don't have video focus - nothing to screenshot.",
@@ -448,10 +460,19 @@ impl Shared {
         }
     }
 
-    fn on_frame(&self, data: &[u8]) {
-        let picture_ready = {
+    /// Store a frame. Returns whether the caller should start `refresh_keyframe`.
+    fn on_frame(&self, data: &[u8]) -> bool {
+        let (picture_ready, refresh) = {
             let mut i = self.lock();
             Self::take_frame(&mut i, data);
+            let refresh = !i.refreshing
+                && i.have_keyframe
+                && i.gop.len() >= GOP_REFRESH
+                && i.requested != FocusState::Off
+                && i.observed == FocusState::On;
+            if refresh {
+                i.refreshing = true;
+            }
             // Sent under the same lock that updated the buffers, so a viewer that joins gets every
             // frame exactly once: either in its first burst or live.
             if i.streaming {
@@ -462,7 +483,10 @@ impl Shared {
                     crate::emit_video(data, false);
                 }
             }
-            i.have_keyframe && !i.sps.is_empty() && !i.pps.is_empty()
+            (
+                i.have_keyframe && !i.sps.is_empty() && !i.pps.is_empty(),
+                refresh,
+            )
         };
         // "Ready" means a screenshot is possible: the phone said it is projecting AND a decodable
         // picture has arrived. The picture comes about 3 s after the phone's start message, and a
@@ -473,6 +497,43 @@ impl Shared {
                 backend_build: BACKEND_BUILD.into(),
             }));
         }
+        refresh
+    }
+
+    /// Turn video focus off and on so the phone restarts its encoder, which begins with a keyframe.
+    /// The requested focus is unchanged, and a request to turn video off meanwhile is respected.
+    async fn refresh_keyframe(&self) {
+        for enabled in [false, true] {
+            let before = {
+                let i = self.lock();
+                if enabled && i.requested == FocusState::Off {
+                    break;
+                }
+                i.phone_events
+            };
+            let mut m = Wifi::VideoFocusIndication::new();
+            m.set_focus_mode(if enabled {
+                Wifi::video_focus_mode::Enum::FOCUSED
+            } else {
+                Wifi::video_focus_mode::Enum::UNFOCUSED
+            });
+            m.set_unrequested(true);
+            if self
+                .tx
+                .send(AndroidAutoMessage::VideoFocus(m).sendable())
+                .await
+                .is_err()
+            {
+                break;
+            }
+            let deadline = Instant::now() + CONFIRM_WAIT;
+            while self.lock().phone_events == before && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        // The keyframe normally ends the refresh first; this only allows another try.
+        tokio::time::sleep(REFRESH_RETRY).await;
+        self.lock().refreshing = false;
     }
 
     /// Start a viewer: parameter sets first, then the last keyframe and what followed. Without a
@@ -501,6 +562,7 @@ impl Shared {
                     i.gop.clear();
                     i.gop.extend_from_slice(nal.bytes);
                     i.have_keyframe = true;
+                    i.refreshing = false;
                 }
                 _ if i.have_keyframe => {
                     if i.gop.len() + nal.bytes.len() > GOP_CAP {
@@ -774,7 +836,10 @@ pub async fn run(hu: Arc<Shared>, setup: &AndroidAutoSetup) -> Result<(), String
 #[async_trait::async_trait]
 impl AndroidAutoVideoChannelTrait for Hu {
     async fn receive_video(&self, data: Vec<u8>, _timestamp: Option<u64>) {
-        self.on_frame(&data);
+        if self.on_frame(&data) {
+            let hu = Arc::clone(&self.0);
+            tokio::spawn(async move { hu.refresh_keyframe().await });
+        }
     }
     async fn setup_video(&self) -> Result<(), ()> {
         Ok(())
@@ -789,20 +854,28 @@ impl AndroidAutoVideoChannelTrait for Hu {
         &self.video
     }
     async fn phone_video_started(&self, _session: i32) {
-        {
+        let refreshing = {
             let mut i = self.lock();
             i.observed = FocusState::On;
             i.phone_events += 1;
+            i.refreshing
+        };
+        if refreshing {
+            return;
         }
         crate::emit(&Line::Event(Event::Video {
             state: FocusState::On,
         }));
     }
     async fn phone_video_stopped(&self) {
-        {
+        let refreshing = {
             let mut i = self.lock();
             i.observed = FocusState::Off;
             i.phone_events += 1;
+            i.refreshing
+        };
+        if refreshing {
+            return;
         }
         crate::emit(&Line::Event(Event::Video {
             state: FocusState::Off,
@@ -1273,6 +1346,76 @@ mod tests {
             nal_units(&[0, 0, 1]).is_empty(),
             "a start code with no header byte"
         );
+    }
+
+    /// One P-frame NAL unit of `len` bytes (zeros never form a start code).
+    fn p_frame(len: usize) -> Vec<u8> {
+        let mut nal = vec![0, 0, 0, 1, 0x21];
+        nal.resize(len, 0);
+        nal
+    }
+
+    #[test]
+    fn a_long_run_without_a_keyframe_asks_for_one_once_until_it_arrives() {
+        let hu = Shared::new();
+        hu.lock().observed = FocusState::On;
+        for frame in [&SPS[..], &PPS, &IDR, &P] {
+            assert!(!hu.on_frame(frame));
+        }
+        assert!(
+            hu.on_frame(&p_frame(GOP_REFRESH)),
+            "the run reached the refresh size"
+        );
+        assert!(!hu.on_frame(&P), "one refresh at a time");
+        hu.on_frame(&IDR);
+        assert!(!hu.lock().refreshing, "the keyframe ends the refresh");
+
+        // Video that was turned off on request is left off.
+        hu.lock().requested = FocusState::Off;
+        assert!(!hu.on_frame(&p_frame(GOP_REFRESH)));
+    }
+
+    #[tokio::test]
+    async fn the_phone_stopping_video_for_a_refresh_does_not_refuse_screenshots() {
+        let hu = Shared::new();
+        hu.on_frame(&SPS);
+        hu.on_frame(&PPS);
+        hu.on_frame(&IDR);
+        {
+            let mut i = hu.lock();
+            i.observed = FocusState::Off;
+            i.refreshing = true;
+        }
+        if let Outcome::Err(e) = hu.screenshot(std::path::Path::new("/tmp/x.png")).await {
+            assert!(!e.message.contains("nothing to screenshot"), "{e:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refresh_turns_video_off_and_on_without_changing_the_request() {
+        let hu = Arc::new(Shared::new());
+        {
+            let mut i = hu.lock();
+            i.requested = FocusState::On;
+            i.observed = FocusState::On;
+            i.refreshing = true;
+        }
+        let mut rx = hu.rx.lock().await.take().unwrap();
+        let refresh = tokio::spawn({
+            let hu = Arc::clone(&hu);
+            async move { hu.refresh_keyframe().await }
+        });
+        for observed in [FocusState::Off, FocusState::On] {
+            tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("a focus indication is sent")
+                .unwrap();
+            let mut i = hu.lock();
+            i.observed = observed;
+            i.phone_events += 1;
+        }
+        assert_eq!(hu.lock().requested, FocusState::On);
+        refresh.abort();
     }
 
     #[tokio::test]
