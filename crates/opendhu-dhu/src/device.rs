@@ -149,6 +149,54 @@ fn server_running(program: &Path, serial: &str) -> Result<bool> {
         .any(|line| line.contains("ServiceRecord{") && line.contains(SERVER)))
 }
 
+/// How long a phone may take to come back to ADB after its USB gadget resets (about 4 s on a Pixel 6).
+const USB_RESET_WAIT: Duration = Duration::from_secs(20);
+/// How long adb may take to answer for a phone that a session just released (about 1 s on a Pixel 6).
+const ADB_ANSWER_WAIT: Duration = Duration::from_secs(3);
+
+/// Put a phone that an earlier head unit left in Android Open Accessory mode back in its normal USB
+/// mode. A head unit that connects to it there gets no answer to its version request, so a session
+/// started right after another one stopped never projects. A reset of the USB gadget makes the
+/// phone re-enumerate normally, and the next head unit switches it to accessory mode afresh.
+/// Returns whether a reset was needed. A phone whose `svc usb` cannot report its functions is left
+/// alone.
+pub fn release_stale_accessory(program: &Path, serial: &str) -> Result<bool> {
+    // Right after the previous session stopped, adb briefly reports the phone as missing or still
+    // authorizing, so wait for it before asking.
+    crate::adb::wait_for_device(program, serial, ADB_ANSWER_WAIT);
+    if !in_accessory_mode(program, serial).unwrap_or(false) {
+        return Ok(false);
+    }
+    // The phone drops off USB while the gadget resets, so this command's own result means nothing.
+    let _ = adb(program, serial, &["shell", "svc", "usb", "resetUsbGadget"]);
+    let deadline = Instant::now() + USB_RESET_WAIT;
+    loop {
+        if matches!(in_accessory_mode(program, serial), Ok(false)) {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::DeviceDisconnected(format!(
+                "{serial} stayed in USB accessory mode, or did not return to adb, within {}s of a USB reset; \
+                 unplug and reconnect it",
+                USB_RESET_WAIT.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn in_accessory_mode(program: &Path, serial: &str) -> Result<bool> {
+    // `svc usb getFunctions` prints to stderr, so redirect it on the phone.
+    let functions = command(
+        program,
+        &["-s", serial, "shell", "svc usb getFunctions 2>&1"],
+        Duration::from_secs(5),
+    )?;
+    Ok(functions
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .any(|f| f == "accessory"))
+}
+
 /// Discard Quick Boot projection handlers before connecting a dedicated test session.
 pub fn restart_head_unit_server(program: &Path, serial: &str) -> Result<()> {
     adb(
@@ -518,6 +566,55 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn a_phone_left_in_accessory_mode_is_reset_and_awaited() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("aa-stale-accessory-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("adb");
+        // adb first says the phone is still authorizing; then `getFunctions` reports accessory until
+        // a reset, then two polls of a phone still away.
+        std::fs::write(
+            &program,
+            r#"#!/bin/sh
+state="$(dirname "$0")"
+shift 2
+case "$*" in
+  get-state)
+    if [ ! -f "$state/answered" ]; then
+      touch "$state/answered"; echo 'error: device still authorizing' >&2; exit 1
+    fi
+    echo device
+    ;;
+  'shell svc usb getFunctions 2>&1')
+    if [ ! -f "$state/reset" ]; then echo accessory; exit 0; fi
+    count=$(cat "$state/polls" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$state/polls"
+    if [ "$count" -le 2 ]; then echo "error: device '$2' not found" >&2; exit 1; fi
+    echo
+    ;;
+  'shell svc usb resetUsbGadget') touch "$state/reset"; exit 255 ;;
+  *) echo "Unexpected fake adb command: $*" >&2; exit 8 ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(release_stale_accessory(&program, "PHONE1").unwrap());
+        assert!(dir.join("reset").exists());
+        // Back in normal mode: nothing more to do.
+        assert!(!release_stale_accessory(&program, "PHONE1").unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn restart_waits_for_dying_service_before_starting_settings() {
         use std::os::unix::fs::PermissionsExt;

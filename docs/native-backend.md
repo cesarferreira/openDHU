@@ -118,6 +118,11 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   map header closes) and a tap in flight can be lost. Each screenshot decodes everything since the last keyframe, so
   screenshots slow down (about 0.8 s at 16 MB) before that.
 - **USB or forwarded TCP.** Emulator head-unit servers can use loopback TCP (see below). Wireless Bluetooth pairing is not wired up.
+- **A phone left in accessory mode** by the previous session (it stays there after `aa session stop`) never answers
+  a new head unit, so a USB start right after a stop used to time out. Before a USB start the daemon asks the phone
+  over adb (`svc usb getFunctions`) and, if it is still in accessory mode, resets its USB gadget
+  (`svc usb resetUsbGadget`) and waits for it to come back, which adds about 5 s. This needs USB debugging, which
+  openDHU uses anyway.
 - **Resolution** defaults to 800×480 (480p). `OPENDHU_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
   daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;
   an unrecognised value falls back to 480p with a warning in the head unit's log.

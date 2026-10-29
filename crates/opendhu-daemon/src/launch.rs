@@ -54,6 +54,14 @@ pub fn launch_backend(req: &StartRequest) -> Result<LaunchedBackend> {
                 None
             };
             let transport = if launch.tcp.is_some() { "tcp" } else { "usb" };
+            if launch.tcp.is_none()
+                && opendhu_dhu::device::release_stale_accessory(&adb_path()?, &serial)?
+            {
+                crate::log::info(
+                    "usb.accessory_released",
+                    serde_json::json!({ "serial": serial }),
+                );
+            }
             let backend = NativeBackend::launch(&launch)?;
             Ok(LaunchedBackend {
                 backend: AnyBackend::Native(backend),
