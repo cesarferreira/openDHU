@@ -15,7 +15,7 @@ fn start_with(s: &Sandbox, env: &[(String, String)], extra: &[&str]) -> std::pro
         "FAKE0001",
     ];
     let dhu = fake_dhu();
-    args[3] = &dhu;
+    args[4] = &dhu;
     args.extend_from_slice(extra);
     s.opendhu_with(&args, env)
 }
