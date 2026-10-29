@@ -111,6 +111,9 @@ impl opendhu_test::runner::ApplicationControl for Application {
     fn restart(&self) -> Result<()> {
         self.reset()
     }
+    fn remove_preferences(&self, file: &str, keys: &[String]) -> Result<()> {
+        device::remove_preferences(&self.adb, &self.serial, &self.package, file, keys)
+    }
     fn phone_ui_dump(&self) -> Result<String> {
         // While projecting, the phone sits on an Android Auto screen and `uiautomator` dumps the
         // active window, so put the app's own phone UI in front first. A no-op if it already is.

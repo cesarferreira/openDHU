@@ -74,6 +74,10 @@ pub enum Step {
     AppOpen,
     #[serde(rename = "app.restart")]
     AppRestart,
+    /// Stop the app and delete entries from one of its SharedPreferences files, so a journey can
+    /// start from state the app has not cached yet. Other entries and app data are kept.
+    #[serde(rename = "app.removePreferences")]
+    AppRemovePreferences { file: String, keys: Vec<String> },
     #[serde(rename = "keyboard.type")]
     KeyboardType { text: String, timeout: Dur },
     #[serde(rename = "device.inputText")]
@@ -132,6 +136,7 @@ impl Step {
             Self::HttpRequest { .. } => "http.request",
             Self::AppOpen => "app.open",
             Self::AppRestart => "app.restart",
+            Self::AppRemovePreferences { .. } => "app.removePreferences",
             Self::DeviceInputText { .. } => "device.inputText",
             Self::KeyboardType { .. } => "keyboard.type",
             Self::UiWaitFor { .. } => "ui.waitFor",
@@ -158,6 +163,9 @@ impl Step {
             Self::HttpRequest { method, url, .. } => format!("{method:?} {url}"),
             Self::AppOpen => "open the app".into(),
             Self::AppRestart => "restart the app".into(),
+            Self::AppRemovePreferences { file, keys } => {
+                format!("remove {} from {file}", keys.join(", "))
+            }
             Self::KeyboardType { text, .. } | Self::DeviceInputText { text } => {
                 format!("type {text:?}")
             }
@@ -469,6 +477,24 @@ fn validate(t: &TestFile) -> Result<()> {
                     .map_err(|error| bad(i, a, error.to_string()))?;
             }
             Step::AppOpen | Step::AppRestart => {}
+            Step::AppRemovePreferences { file, keys } => {
+                let name_ok = |name: &str| {
+                    !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+                };
+                if keys.is_empty() {
+                    return Err(bad(i, a, "`keys` has nothing to remove"));
+                }
+                if !name_ok(file) || !keys.iter().all(|k| name_ok(k)) {
+                    return Err(bad(
+                        i,
+                        a,
+                        "file and keys may only use letters, digits, '.', '_' and '-'",
+                    ));
+                }
+            }
             Step::DeviceInputText { text } => validate_input_text(text)?,
             Step::UiWaitFor { text, timeout }
             | Step::UiExpect { text, timeout }

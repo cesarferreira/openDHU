@@ -87,6 +87,12 @@ pub trait ApplicationControl {
     /// Stop the application process. The runner opens it through the projected launcher afterward.
     fn restart(&self) -> opendhu_core::Result<()>;
     fn input_text(&self, text: &str) -> opendhu_core::Result<()>;
+    /// Stop the application and delete entries from one of its SharedPreferences files.
+    fn remove_preferences(&self, _file: &str, _keys: &[String]) -> opendhu_core::Result<()> {
+        Err(Error::InvalidArgs(
+            "app.removePreferences requires a suite application context".into(),
+        ))
+    }
     /// A `uiautomator dump` of the phone's own screen.
     fn phone_ui_dump(&self) -> opendhu_core::Result<String> {
         Err(Error::InvalidArgs(
@@ -480,6 +486,17 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
             }
             match application.restart() {
                 Ok(()) => open_app(backend, cfg),
+                Err(error) => End::error(&error),
+            }
+        }
+        Step::AppRemovePreferences { file, keys } => {
+            let Some(application) = cfg.application else {
+                return End::error(&Error::InvalidArgs(
+                    "app.removePreferences requires a suite application context".into(),
+                ));
+            };
+            match application.remove_preferences(file, keys) {
+                Ok(()) => End::pass(format!("removed {} from {file}", keys.join(", "))),
                 Err(error) => End::error(&error),
             }
         }

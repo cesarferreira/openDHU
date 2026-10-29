@@ -264,3 +264,19 @@ fn health_checks_that_cross_the_wait_deadline_do_not_panic() {
     );
     assert_eq!(result.outcome, Outcome::Passed);
 }
+
+#[test]
+fn remove_preferences_requires_safe_names_and_at_least_one_key() {
+    let ok = "name: Fresh\nsteps:\n  - action: app.removePreferences\n    file: APPLICATION_SHARED_PREFERENCES\n    keys: [vehicleMetadata]\n";
+    assert!(parse(ok).is_ok());
+    for step in [
+        "file: p\n    keys: []",
+        "file: ../x\n    keys: [a]",
+        "file: p\n    keys: ['a b']",
+        "file: ''\n    keys: [a]",
+        "file: p",
+    ] {
+        let yaml = format!("name: Fresh\nsteps:\n  - action: app.removePreferences\n    {step}\n");
+        assert!(parse(&yaml).is_err(), "{yaml}");
+    }
+}

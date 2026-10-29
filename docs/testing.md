@@ -574,6 +574,19 @@ and the file is written through `run-as`, so the app must be a debuggable build.
 environment fields, a child suite's `preferences` replaces the inherited one completely; a shared
 base can set a flag to `false` so every suite starts from a known state.
 
+`app.removePreferences` force-stops the app and deletes the named `keys` from one of its
+SharedPreferences `file`s (any entry type; other entries, a missing file and missing keys are left
+alone). Use it to start a test from state the app has not cached yet, for example to prove first-launch
+behaviour that a cached value from an earlier test would hide. It needs a debuggable build, like
+`preferences`, and does not clear other application data or permissions.
+
+```yaml
+- action: app.removePreferences
+  file: APPLICATION_SHARED_PREFERENCES
+  keys: [cachedProfile]
+- action: app.open
+```
+
 Backend steps use a loopback fixture API, while the app uses its normal production network clients:
 
 ```yaml

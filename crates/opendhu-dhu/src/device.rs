@@ -184,9 +184,46 @@ pub fn set_boolean_preferences(
     booleans: &std::collections::BTreeMap<String, bool>,
 ) -> Result<()> {
     adb(program, serial, &["shell", "am", "force-stop", package])?;
+    let existing = read_preferences(program, serial, package, file)?;
+    write_preferences(
+        program,
+        serial,
+        package,
+        file,
+        &with_boolean_preferences(&existing, booleans),
+    )
+}
+
+/// Remove entries of any type from one of a debuggable app's SharedPreferences files, keeping
+/// every other entry. Missing keys and a missing file are not errors. The app is stopped first so
+/// it neither holds the old values in memory nor rewrites them on exit. Uses `run-as`, so the app
+/// must be a debuggable build.
+pub fn remove_preferences(
+    program: &Path,
+    serial: &str,
+    package: &str,
+    file: &str,
+    keys: &[String],
+) -> Result<()> {
+    adb(program, serial, &["shell", "am", "force-stop", package])?;
+    let existing = read_preferences(program, serial, package, file)?;
+    if existing.is_empty() {
+        return Ok(());
+    }
+    write_preferences(
+        program,
+        serial,
+        package,
+        file,
+        &without_preferences(&existing, keys),
+    )
+}
+
+/// The file's XML, or an empty string when it does not exist yet.
+fn read_preferences(program: &Path, serial: &str, package: &str, file: &str) -> Result<String> {
     let path = format!("shared_prefs/{file}.xml");
-    let existing = match adb(program, serial, &["shell", "run-as", package, "cat", &path]) {
-        Ok(xml) => xml,
+    match adb(program, serial, &["shell", "run-as", package, "cat", &path]) {
+        Ok(xml) => Ok(xml),
         Err(error) => {
             let text = error.message();
             if text.contains("not debuggable") || text.contains("Unknown package") {
@@ -195,10 +232,19 @@ pub fn set_boolean_preferences(
                     text.trim()
                 )));
             }
-            String::new() // The file does not exist yet.
+            Ok(String::new()) // The file does not exist yet.
         }
-    };
-    let updated = with_boolean_preferences(&existing, booleans);
+    }
+}
+
+fn write_preferences(
+    program: &Path,
+    serial: &str,
+    package: &str,
+    file: &str,
+    xml: &str,
+) -> Result<()> {
+    let path = format!("shared_prefs/{file}.xml");
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -209,7 +255,7 @@ pub fn set_boolean_preferences(
         "/data/local/tmp/opendhu-prefs-{}-{nonce}.xml",
         std::process::id()
     );
-    std::fs::write(&local, updated).map_err(|e| Error::Other(e.to_string()))?;
+    std::fs::write(&local, xml).map_err(|e| Error::Other(e.to_string()))?;
     let local_text = local.to_string_lossy().into_owned();
     let result = adb(program, serial, &["push", &local_text, &remote])
         .and_then(|_| {
@@ -229,6 +275,39 @@ pub fn set_boolean_preferences(
     let _ = adb(program, serial, &["shell", "rm", "-f", &remote]);
     let _ = std::fs::remove_file(&local);
     result.map(|_| ())
+}
+
+/// `xml` without the named entries. Android writes scalars as one `<tag name="k" ... />` line and
+/// strings as `<string name="k">...</string>`, which can span lines; every other line is kept.
+pub fn without_preferences(xml: &str, keys: &[String]) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut skipping_string = false;
+    for line in xml.lines() {
+        if skipping_string {
+            skipping_string = !line.contains("</string>");
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let removed = keys.iter().any(|key| {
+            let name = format!(" name=\"{key}\"");
+            trimmed
+                .strip_prefix('<')
+                .and_then(|rest| rest.split_once(&name))
+                .is_some_and(|(tag, _)| {
+                    !tag.is_empty() && tag.chars().all(|c| c.is_ascii_alphabetic())
+                })
+        });
+        if removed {
+            skipping_string = trimmed.starts_with("<string ")
+                && !trimmed.contains("</string>")
+                && !trimmed.trim_end().ends_with("/>");
+            continue;
+        }
+        out.push(line);
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    text
 }
 
 /// `xml` with each boolean set: an existing entry of the same name is replaced and everything else
@@ -417,6 +496,25 @@ mod tests {
         let filled = with_boolean_preferences(empty_map, &flags);
         assert!(filled.contains("<map>") && !filled.contains("<map />"));
         assert_eq!(with_boolean_preferences(&filled, &flags), filled);
+    }
+
+    #[test]
+    fn removed_preferences_drop_scalars_and_multiline_strings_only() {
+        let xml = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <string name=\"vehicleMetadata\">{&quot;a&quot;:1}</string>\n    <string name=\"spans\">first\nsecond</string>\n    <string name=\"keep\">me</string>\n    <boolean name=\"flag\" value=\"true\" />\n    <int name=\"vehicleMetadataCount\" value=\"3\" />\n</map>\n";
+        let keys = [
+            "vehicleMetadata".to_string(),
+            "spans".to_string(),
+            "flag".to_string(),
+        ];
+        let out = without_preferences(xml, &keys);
+        assert!(
+            !out.contains("vehicleMetadata\"") && !out.contains("spans") && !out.contains("flag")
+        );
+        assert!(!out.contains("second"));
+        assert!(out.contains(r#"<string name="keep">me</string>"#));
+        assert!(out.contains(r#"<int name="vehicleMetadataCount" value="3" />"#));
+        assert!(out.starts_with("<?xml") && out.contains("<map>") && out.contains("</map>"));
+        assert_eq!(without_preferences(&out, &keys), out);
     }
 
     #[cfg(unix)]
