@@ -107,6 +107,10 @@ aa test sample --usb --headless
 
 Connect the phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
 
+`--usb` is never auto-detected: without it the emulator is used, even if a phone is plugged in. With it, exactly
+one authorized USB phone is required (emulators and wireless ADB devices are ignored), and a missing, unauthorized
+or second phone is an error. `aa test sample --validate --usb` checks the files without a phone.
+
 ### With the TUI
 
 ```bash
