@@ -32,6 +32,13 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Keep the adb key pair (and the debug keystore) with the AVD. The AVD's userdata trusts the key it first
+# booted with, so a key regenerated on every container run leaves the emulator "unauthorized".
+mkdir -p "$ANDROID_AVD_HOME/.android"
+# The image may already hold a real directory here (created while installing the SDK).
+rm -rf "$HOME/.android"
+ln -sfn "$ANDROID_AVD_HOME/.android" "$HOME/.android"
+
 adb start-server >/dev/null
 emulator -avd "$AVD_NAME" -no-window -no-snapshot -no-audio -no-boot-anim \
     -gpu swiftshader_indirect -no-metrics > /tmp/emulator.log 2>&1 &
@@ -43,7 +50,7 @@ for _ in $(seq 1 100); do
     booted && break
     sleep 3
 done
-booted || { tail -n 40 /tmp/emulator.log >&2; echo 'opendhu: the emulator did not boot in 5 minutes' >&2; exit 1; }
+booted || { tail -n 40 /tmp/emulator.log >&2; echo 'opendhu: the emulator did not boot in 5 minutes (adb: '"$(adb get-state 2>&1 | head -1)"'). If adb is unauthorized, delete the cached AVD directory and rerun.' >&2; exit 1; }
 
 if [[ -n "${AA_GEARHEAD_APK:-}" ]]; then
     aa setup gearhead --apk "$AA_GEARHEAD_APK" --force
