@@ -1,0 +1,6 @@
+.git
+target
+build
+test-results
+android-sample/build
+android-sample/.gradle

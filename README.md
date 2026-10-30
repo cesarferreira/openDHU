@@ -204,6 +204,7 @@ tunnel after a USB reconnect. `aa --help` lists everything.
 |---|---|
 | [Testing](docs/testing.md) | YAML actions, suites, services, reports, video, and what a pass does and does not prove |
 | [CI](docs/ci.md) | the GitHub Action: emulator, Android Auto, reports and videos as artifacts |
+| [Docker](docs/docker.md) | a headless emulator and `aa` in a container on a Linux host with KVM |
 | [Native backend](docs/native-backend.md) | credentials, resolution, transports and limits |
 | [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) | the two viewers |
 | [HTTP API](docs/api.md) | endpoints and live events |

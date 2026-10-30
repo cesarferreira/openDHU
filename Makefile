@@ -6,7 +6,7 @@
 
 .PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui install-tui \
         clean test check fmt lint run daemon gui doctor stop demo vendor-check validate-examples \
-        hw hw-dhu hw-native
+        hw hw-dhu hw-native docker-build
 
 BIN := ~/.cargo/target/debug
 OPENDHU_BIN ?= aa
@@ -38,6 +38,9 @@ help:
 	@echo "    sample-check        run Android unit tests, lint and YAML validation"
 	@echo "    sample-test         build and run the three Android Auto E2E journeys"
 	@echo "    sample-validate     validate sample YAML without an SDK or emulator"
+	@echo
+	@echo "  Docker (Linux host with KVM; see docs/docker.md)"
+	@echo "    docker-build        build the headless emulator + aa image (DOCKER_IMAGE=opendhu)"
 	@echo
 	@echo "  Install"
 	@echo "    install             aa, opendhu-native-hu, opendhu-gui and opendhu-tui (release)"
@@ -182,3 +185,8 @@ sample-test: sample-build
 
 sample-validate:
 	$(OPENDHU_BIN) test sample --validate
+
+# A headless emulator plus aa for Linux hosts with KVM; see docs/docker.md.
+DOCKER_IMAGE ?= opendhu
+docker-build:
+	docker build -f docker/Dockerfile -t $(DOCKER_IMAGE) .
