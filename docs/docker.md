@@ -29,6 +29,7 @@ passed to `aa`; with none, `aa test` runs every suite. `test` adds `--headless -
 ```bash
 docker run --rm --device /dev/kvm --group-add "$(stat -c %g /dev/kvm)" \
   --user "$(id -u):$(id -g)" \
+  --tmpfs /home/opendhu:rw,mode=0755,uid="$(id -u)",gid="$(id -g)" \
   -v "$PWD:/work" \
   -v "$HOME/.cache/opendhu/avd:/avd" \
   -v "$HOME/.config/opendhu/credentials:/home/opendhu/.config/opendhu/credentials:ro" \
@@ -57,6 +58,7 @@ The same without `make`, from the repository root:
 
 ```bash
 docker run --rm --device /dev/kvm --group-add "$(stat -c %g /dev/kvm)" --user "$(id -u):$(id -g)" \
+  --tmpfs /home/opendhu:rw,mode=0755,uid="$(id -u)",gid="$(id -g)" \
   -v "$PWD:/work" \
   -v "$HOME/.cache/opendhu/avd:/avd" \
   -v "$HOME/.cache/opendhu/gradle:/home/opendhu/.gradle" \
@@ -74,17 +76,22 @@ swiftshader_indirect`, waits for Android to finish booting and stops it on exit.
 keystore are kept in `/avd/.android`, because the AVD trusts the key it first booted with: keep `/avd` in a volume
 or bind mount, and delete it entirely (not just part of it) to start over.
 
-A fresh AVD does **not** have Android Auto ready, and `aa` cannot finish that for you:
+A fresh AVD does **not** have Android Auto ready, and `aa` cannot finish that for you. Do this once, then keep the
+AVD in `/avd`:
 
-1. **Android Auto is not installed.** Supply an APK, split directory or `.xapk` with `AA_GEARHEAD_APK`
+1. **Install Android Auto.** Supply an APK, split directory or `.xapk` with `AA_GEARHEAD_APK`
    (`make docker-test DOCKER_GEARHEAD_APK=/path/to/splits`). You can pull the splits from an emulator or phone that
    already has it with `adb shell pm path com.google.android.projection.gearhead` and `adb pull`.
-2. **Developer mode and the head-unit server are not enabled.** `aa` stops with "Provision this emulator
-   baseline: open Android Auto Settings, enable developer mode by tapping Version repeatedly, accept the developer
-   prompt, ...". Do that once on an emulator you can see, then reuse that provisioned AVD in `/avd`.
+2. **Enable developer mode.** Open Android Auto settings (`adb shell am start -a
+   com.google.android.projection.gearhead.SETTINGS`), tap *Version* about ten times and accept the development
+   prompt. Without it `aa` stops with "Provision this emulator baseline".
+3. **Allow notification access.** With a session running (`aa session start --reverse 10101`), the head unit asks
+   for notification access: tap *Go to phone*, then turn on Android Auto under *Notification read, reply & control*
+   and allow it. Without it the car never shows the launcher and suites fail at their first `app.open` step.
 
-Until step 2 is done, suites fail before the first test with the provisioning message. One AVD is shared by all
-runs, so use a dedicated runner.
+The container has no display, so drive these with `adb shell input tap` and `adb exec-out screencap -p` (or `aa
+screenshot`/`aa tap` for the head unit) from `docker run -d --entrypoint bash ...` running the emulator. Stop the
+emulator with `adb emu kill` so the AVD state is saved. One AVD is shared by all runs, so use a dedicated runner.
 
 ## Building on the image
 

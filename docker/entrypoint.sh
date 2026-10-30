@@ -32,6 +32,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# aa refuses a runtime dir whose owner differs from $HOME's, so $HOME must belong to the running user.
+if [[ "$(stat -c %u "$HOME")" != "$(id -u)" ]]; then
+    echo 'opendhu: /home/opendhu is not owned by uid '"$(id -u)"'. Run with --tmpfs /home/opendhu:rw,mode=0755,uid=<uid>,gid=<gid> (the Make target does).' >&2
+    exit 1
+fi
+
 # Keep the adb key pair (and the debug keystore) with the AVD. The AVD's userdata trusts the key it first
 # booted with, so a key regenerated on every container run leaves the emulator "unauthorized".
 mkdir -p "$ANDROID_AVD_HOME/.android"
