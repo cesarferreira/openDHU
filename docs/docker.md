@@ -7,7 +7,9 @@ available) and the tools `aa test` needs (`adb`, ffmpeg, tesseract). It is the s
 ## Requirements
 
 - A **Linux host with KVM**. The container needs `--device /dev/kvm`; without hardware acceleration the
-  emulator is too slow to be useful. Docker Desktop on macOS or Windows is not supported.
+  emulator is too slow to be useful.
+- **Not macOS or Windows, including Apple Silicon.** Docker Desktop provides no `/dev/kvm`, and the image is
+  x86_64 because Google ships no arm64 Linux emulator. On a Mac, install `aa` natively (see the README).
 - Development apps need [head-unit credentials](native-backend.md#debugging-knobs): mount
   `~/.config/opendhu/credentials` into the container.
 
