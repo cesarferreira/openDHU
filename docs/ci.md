@@ -59,3 +59,4 @@ APKPure, so the checksum is what you trust: take it from a bundle you checked yo
 - The uploaded folder holds `results.html`, `results.json`, `results.xml`, logs, screenshots and `videos/`.
   Download it and open `results.html` to watch a failing test.
 - This repository's own `e2e.yml` runs the Android sample this way, on demand from the Actions tab.
+- To run the same setup outside GitHub Actions, see [Docker](docker.md).
