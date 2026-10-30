@@ -43,13 +43,48 @@ Reports land in `build/test-results` in the mounted project, owned by you.
 | `AVD_DEVICE` | `avdmanager` device definition for a new AVD, default `pixel_6` |
 | `AA_GEARHEAD_APK` | Path inside the container of an Android Auto APK, split directory or `.xapk` to install first |
 
+## Run the sample suite
+
+The sample's suite builds its APK before every run, so Gradle runs inside the container (the image has JDK 17;
+the Android platform is downloaded on first use). Mount a Gradle cache to keep that fast:
+
+```bash
+make docker-test                                  # builds the image, then runs `aa test sample`
+make docker-test DOCKER_TEST_ARGS="sample --filter favorite"
+```
+
+The same without `make`, from the repository root:
+
+```bash
+docker run --rm --device /dev/kvm --group-add "$(stat -c %g /dev/kvm)" --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" \
+  -v "$HOME/.cache/opendhu/avd:/avd" \
+  -v "$HOME/.cache/opendhu/gradle:/home/opendhu/.gradle" \
+  -v "$HOME/.config/opendhu/credentials:/home/opendhu/.config/opendhu/credentials:ro" \
+  opendhu test sample
+```
+
+Reports land in `build/test-results` in the checkout. The first run downloads Gradle and the Android platform and
+creates the AVD, so it is slow.
+
 ## What is and is not provisioned
 
 The entrypoint creates the AVD when `/avd` has none, boots it with `-no-window -no-snapshot -gpu
-swiftshader_indirect`, waits for Android to finish booting and stops it on exit. `aa` itself handles the
-Android Auto welcome screen and unknown sources. Consent and developer settings in Android Auto are not
-scripted, so provision them once, or supply an APK, then **keep `/avd` in a volume or bind mount** so the
-provisioned emulator is reused. One AVD is shared by all runs, so use a dedicated runner.
+swiftshader_indirect`, waits for Android to finish booting and stops it on exit. The adb key pair and debug
+keystore are kept in `/avd/.android`, because the AVD trusts the key it first booted with: keep `/avd` in a volume
+or bind mount, and delete it entirely (not just part of it) to start over.
+
+A fresh AVD does **not** have Android Auto ready, and `aa` cannot finish that for you:
+
+1. **Android Auto is not installed.** Supply an APK, split directory or `.xapk` with `AA_GEARHEAD_APK`
+   (`make docker-test DOCKER_GEARHEAD_APK=/path/to/splits`). You can pull the splits from an emulator or phone that
+   already has it with `adb shell pm path com.google.android.projection.gearhead` and `adb pull`.
+2. **Developer mode and the head-unit server are not enabled.** `aa` stops with "Provision this emulator
+   baseline: open Android Auto Settings, enable developer mode by tapping Version repeatedly, accept the developer
+   prompt, ...". Do that once on an emulator you can see, then reuse that provisioned AVD in `/avd`.
+
+Until step 2 is done, suites fail before the first test with the provisioning message. One AVD is shared by all
+runs, so use a dedicated runner.
 
 ## Building on the image
 

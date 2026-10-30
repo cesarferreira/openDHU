@@ -16,16 +16,18 @@ RUN cargo build --release --locked -p opendhu-cli -p opendhu-native-hu
 FROM ubuntu:${UBUNTU}
 ARG ANDROID_API=36
 ARG CMDLINE_TOOLS=11076708
+# The runtime user has no passwd entry, so Java would resolve user.home as "?" and miss the debug keystore.
 ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     ANDROID_AVD_HOME=/avd \
     ANDROID_API=${ANDROID_API} \
-    HOME=/home/opendhu
+    HOME=/home/opendhu \
+    JAVA_TOOL_OPTIONS=-Duser.home=/home/opendhu
 ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl unzip openjdk-17-jre-headless ffmpeg tesseract-ocr tesseract-ocr-eng \
+        ca-certificates curl unzip openjdk-17-jdk-headless ffmpeg tesseract-ocr tesseract-ocr-eng \
         libssl3 lsof procps iproute2 \
         libpulse0 libnss3 libx11-6 libxcb1 libgl1 libasound2t64 libxkbcommon0 libdbus-1-3 \
         libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxtst6 \

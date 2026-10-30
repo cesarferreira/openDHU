@@ -6,7 +6,7 @@
 
 .PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui install-tui \
         clean test check fmt lint run daemon gui doctor stop demo vendor-check validate-examples \
-        hw hw-dhu hw-native docker-build
+        hw hw-dhu hw-native docker-build docker-test
 
 BIN := ~/.cargo/target/debug
 OPENDHU_BIN ?= aa
@@ -41,6 +41,7 @@ help:
 	@echo
 	@echo "  Docker (Linux host with KVM; see docs/docker.md)"
 	@echo "    docker-build        build the headless emulator + aa image (DOCKER_IMAGE=opendhu)"
+	@echo "    docker-test         run the sample suite in the image (DOCKER_TEST_ARGS=\"sample --filter x\")"
 	@echo
 	@echo "  Install"
 	@echo "    install             aa, opendhu-native-hu, opendhu-gui and opendhu-tui (release)"
@@ -190,3 +191,18 @@ sample-validate:
 DOCKER_IMAGE ?= opendhu
 docker-build:
 	docker build -f docker/Dockerfile -t $(DOCKER_IMAGE) .
+
+# Runs suites from this checkout in the image. Needs /dev/kvm and head-unit credentials.
+DOCKER_CACHE ?= $(HOME)/.cache/opendhu
+DOCKER_TEST_ARGS ?= sample
+DOCKER_GEARHEAD_APK ?=
+docker-test: docker-build
+	mkdir -p $(DOCKER_CACHE)/avd $(DOCKER_CACHE)/gradle
+	docker run --rm --device /dev/kvm --group-add "$$(stat -c %g /dev/kvm)" \
+		--user "$$(id -u):$$(id -g)" \
+		-v "$(CURDIR):/work" \
+		-v "$(DOCKER_CACHE)/avd:/avd" \
+		-v "$(DOCKER_CACHE)/gradle:/home/opendhu/.gradle" \
+		-v "$(HOME)/.config/opendhu/credentials:/home/opendhu/.config/opendhu/credentials:ro" \
+		$(if $(DOCKER_GEARHEAD_APK),-v "$(DOCKER_GEARHEAD_APK):/gearhead:ro" -e AA_GEARHEAD_APK=/gearhead) \
+		$(DOCKER_IMAGE) test $(DOCKER_TEST_ARGS)
