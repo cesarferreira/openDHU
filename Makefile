@@ -200,6 +200,7 @@ docker-test: docker-build
 	mkdir -p $(DOCKER_CACHE)/avd $(DOCKER_CACHE)/gradle
 	docker run --rm --device /dev/kvm --group-add "$$(stat -c %g /dev/kvm)" \
 		--user "$$(id -u):$$(id -g)" \
+		--tmpfs /home/opendhu:rw,mode=0755,uid=$$(id -u),gid=$$(id -g) \
 		-v "$(CURDIR):/work" \
 		-v "$(DOCKER_CACHE)/avd:/avd" \
 		-v "$(DOCKER_CACHE)/gradle:/home/opendhu/.gradle" \
