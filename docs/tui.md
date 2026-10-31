@@ -23,7 +23,9 @@ aa test e2e/production.yaml --tui  # with the test progress underneath; see test
 | Wheel | Scroll |
 | `Esc` or `b` | Back |
 | `h` | Home |
-| Arrows, `Enter` | D-pad |
+| `[`, `]` | Turn the rotary dial: focus the previous or next item |
+| Arrows | Nudge focus to the next area of the screen in that direction (it does not step between items) |
+| `Enter` | Press the focused item |
 | `s` | Search |
 | Space | Play/pause |
 | `n`, `p` | Next, previous track |

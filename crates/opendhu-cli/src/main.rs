@@ -105,7 +105,7 @@ enum Command {
     /// Touch a pixel of the projected screen (0,0 is the top left of a screenshot)
     Tap { x: u32, y: u32 },
     /// Press one of the car's buttons: home, back, up, down, left, right, enter, search, play_pause,
-    /// next, previous, call, end_call
+    /// next, previous, call, end_call, or turn the dial: rotate_left, rotate_right
     Key {
         #[arg(value_parser = parse_key)]
         key: opendhu_core::Key,

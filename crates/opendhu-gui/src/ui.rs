@@ -856,7 +856,9 @@ pub fn gesture(start: (u32, u32), end: (u32, u32), held: std::time::Duration) ->
     }
 }
 
-const BUTTONS: [(&str, opendhu_core::Key); 8] = [
+const BUTTONS: [(&str, opendhu_core::Key); 10] = [
+    ("Dial left", opendhu_core::Key::RotateLeft),
+    ("Dial right", opendhu_core::Key::RotateRight),
     ("Up", opendhu_core::Key::Up),
     ("Down", opendhu_core::Key::Down),
     ("Left", opendhu_core::Key::Left),

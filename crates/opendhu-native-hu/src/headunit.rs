@@ -128,7 +128,16 @@ impl Shared {
             input: InputConfiguration {
                 // The buttons we can press. The phone asks to bind the ones it wants and is refused any
                 // that are not listed here.
-                keycodes: Key::ALL.map(Key::android_code).to_vec(),
+                // Both turns of the dial share one code, so it is declared once.
+                keycodes: Key::ALL.map(Key::android_code).into_iter().fold(
+                    Vec::new(),
+                    |mut codes, c| {
+                        if !codes.contains(&c) {
+                            codes.push(c);
+                        }
+                        codes
+                    },
+                ),
                 touchscreen: Some(screen),
             },
             screen,
@@ -234,6 +243,9 @@ impl Shared {
                 "The phone is not projecting - nothing to press.".to_string(),
             );
         }
+        if let Some(steps) = key.rotation() {
+            return self.turn(key, steps, long_press).await;
+        }
         let send = |pressed: bool| async move {
             let mut events = Wifi::ButtonEvents::new();
             events
@@ -272,6 +284,43 @@ impl Shared {
                 "sent {}{} (Android key code {}); the phone does not acknowledge buttons",
                 if long_press { "a long press of " } else { "" },
                 key.name(),
+                key.android_code()
+            )],
+        }))
+    }
+
+    /// A turn of the rotary dial: one relative input event, with nothing to hold or release.
+    async fn turn(&self, key: Key, steps: i32, long_press: bool) -> Outcome {
+        if long_press {
+            return fail(
+                ErrorKind::InvalidArgs,
+                format!("{key} is a turn of the dial and cannot be long-pressed"),
+            );
+        }
+        let mut events = Wifi::RelativeInputEvents::new();
+        events.relative_input_events.push(dial_turn(steps));
+        let mut m = Wifi::InputEventIndication::new();
+        m.set_timestamp(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_micros() as u64),
+        );
+        m.relative_input_event = android_auto::protobuf::MessageField::some(events);
+        if self
+            .tx
+            .send(AndroidAutoMessage::Input(m).sendable())
+            .await
+            .is_err()
+        {
+            return fail(
+                ErrorKind::Unavailable,
+                "the Android Auto session is not running".to_string(),
+            );
+        }
+        Outcome::Ok(Reply::Input(InputResult {
+            status: OpStatus::Accepted,
+            evidence: vec![format!(
+                "sent {key} (a dial turn of {steps:+} on Android key code {}); the phone does not acknowledge buttons",
                 key.android_code()
             )],
         }))
@@ -615,7 +664,6 @@ fn nal_units(data: &[u8]) -> Vec<Nal<'_>> {
     out
 }
 
-/// The point `n` of `steps` of the way from `a` to `b`.
 /// One edge of a button press. `meta` and `long_press` are optional in our protocol file, but the
 /// head units known to work with Android Auto (OpenAuto, headunit-reloaded) always send all four
 /// fields. Without them a phone that had bound the key (Home, Back) did nothing on a press.
@@ -628,6 +676,15 @@ fn button_event(key: Key, pressed: bool, long_press: bool) -> Wifi::ButtonEvent 
     event
 }
 
+/// A turn of the dial by `steps` (negative is anticlockwise), as OpenAuto sends its scroll wheel.
+fn dial_turn(steps: i32) -> Wifi::RelativeInputEvent {
+    let mut event = Wifi::RelativeInputEvent::new();
+    event.set_scan_code(Key::RotateRight.android_code());
+    event.set_delta(steps);
+    event
+}
+
+/// The point `n` of `steps` of the way from `a` to `b`.
 fn lerp(a: u32, b: u32, n: u64, steps: u64) -> u32 {
     let (a, b) = (i64::from(a), i64::from(b));
     (a + (b - a) * n as i64 / steps as i64) as u32
@@ -1234,6 +1291,44 @@ mod tests {
         assert!(!hu.lock().burst_pending, "the keyframe completed the burst");
     }
 
+    #[tokio::test]
+    async fn a_dial_turn_is_one_relative_event_and_cannot_be_held() {
+        let hu = Shared::new();
+        hu.lock().observed = FocusState::On;
+        let mut rx = hu.rx.lock().await.take().unwrap();
+        let Outcome::Ok(Reply::Input(r)) = hu
+            .handle(Command::Key {
+                key: Key::RotateLeft,
+                long_press: false,
+            })
+            .await
+        else {
+            panic!("a turn must be accepted");
+        };
+        assert!(
+            r.evidence[0].contains("a dial turn of -1"),
+            "{:?}",
+            r.evidence
+        );
+        let mut sent = 0;
+        while rx.try_recv().is_ok() {
+            sent += 1;
+        }
+        assert_eq!(sent, 1, "a turn has no press and release");
+        let turn = dial_turn(-1);
+        assert_eq!((turn.scan_code(), turn.delta()), (65536, -1));
+        let Outcome::Err(e) = hu
+            .handle(Command::Key {
+                key: Key::RotateRight,
+                long_press: true,
+            })
+            .await
+        else {
+            panic!("a turn cannot be long-pressed");
+        };
+        assert_eq!(e.kind, ErrorKind::InvalidArgs);
+    }
+
     #[test]
     fn a_button_event_carries_every_field_a_phone_expects() {
         let down = button_event(Key::Home, true, false);
@@ -1253,6 +1348,8 @@ mod tests {
                 "{k} is not declared"
             );
         }
+        let dial = hu.input.keycodes.iter().filter(|c| **c == 65536).count();
+        assert_eq!(dial, 1, "the dial's code is declared once");
     }
 
     #[tokio::test]

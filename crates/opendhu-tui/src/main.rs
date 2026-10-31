@@ -29,6 +29,7 @@ const HINTS: &[(&str, &str)] = &[
     ("wheel", "scroll"),
     ("esc", "back"),
     ("h", "home"),
+    ("[/]", "dial"),
     ("arrows/enter", "dpad"),
     ("s", "search"),
     ("space", "play"),
@@ -717,6 +718,8 @@ fn key_for_char(c: char) -> Option<Key> {
         'p' => Key::Previous,
         'c' => Key::Call,
         'e' => Key::EndCall,
+        '[' => Key::RotateLeft,
+        ']' => Key::RotateRight,
         _ => return None,
     })
 }
@@ -745,6 +748,7 @@ mod tests {
     fn letters_map_to_car_buttons() {
         assert_eq!(key_for_char('h'), Some(Key::Home));
         assert_eq!(key_for_char(' '), Some(Key::PlayPause));
+        assert_eq!(key_for_char(']'), Some(Key::RotateRight));
         assert_eq!(key_for_char('z'), None);
     }
 

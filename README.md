@@ -197,6 +197,7 @@ aa web            # the same in a browser tab
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa key home
+aa key rotate_right  # turn the dial: focus the next item (`aa key enter` presses it)
 aa focus video off
 aa screenshot screen.png
 aa audio recording.wav --seconds 10

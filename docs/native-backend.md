@@ -103,7 +103,13 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
 
 ## Limits
 
-- **Car buttons are sent but not proven.** `aa key home|back|up|down|...` sends Android key presses, and the phone binds all 13 buttons we declare (it asks for exactly those). But on a Pixel 6 none of Home, Back, the arrows or a long press visibly changed the screen in my tests, so `keyInput` stays `unverified` and the key YAML step cannot be required. Treat buttons as experimental. The cause is unknown: either a detail of the key message that I have wrong, or Android Auto ignoring them on a touch head unit.
+- **Car buttons are sent but not acknowledged.** `aa key home|back|up|down|...` sends Android key presses, and
+  `aa key rotate_left|rotate_right` turns the rotary dial one step. On an emulator (Android Auto on
+  `sdk_gphone64_arm64`), Home and Back work, `rotate_left`/`rotate_right` move focus between items and `enter`
+  presses the focused one. The arrows are nudges: they move focus to another area of the screen, not to the
+  next item. The phone never confirms a press, so `keyInput` stays `unverified` and the key YAML step cannot be
+  required. An earlier test on a Pixel 6, before every button field was sent, showed no effect; it has not been
+  repeated.
 - **Audio, navigation, night mode, driving restrictions and multi-touch are not implemented.** The head unit
   answers the phone's sensor requests with fixed values (daytime, unrestricted). Those capabilities stay `unverified`.
 - **Touch is fire-and-forget.** `aa tap X Y` and `aa swipe X1 Y1 X2 Y2` send single-finger touches in

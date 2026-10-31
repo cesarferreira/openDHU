@@ -83,10 +83,12 @@
     <div id="keys">
       <button data-key="back">Back<kbd>Esc</kbd></button>
       <button data-key="home">Home<kbd>H</kbd></button>
-      <button data-key="left">◀</button>
-      <button data-key="up">▲</button>
-      <button data-key="down">▼</button>
-      <button data-key="right">▶</button>
+      <button data-key="rotate_left" title="Turn the dial: focus the previous item">Dial ↺<kbd>[</kbd></button>
+      <button data-key="rotate_right" title="Turn the dial: focus the next item">Dial ↻<kbd>]</kbd></button>
+      <button data-key="left" title="Nudge focus to the area on the left">◀</button>
+      <button data-key="up" title="Nudge focus to the area above">▲</button>
+      <button data-key="down" title="Nudge focus to the area below">▼</button>
+      <button data-key="right" title="Nudge focus to the area on the right">▶</button>
       <button data-key="enter">Enter<kbd>↵</kbd></button>
       <button data-key="search">Search<kbd>S</kbd></button>
       <button data-key="previous">Prev<kbd>P</kbd></button>
@@ -215,7 +217,7 @@ function screenshot() {
 const KEYS = {
   Escape: "back", b: "back", h: "home", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left",
   ArrowRight: "right", Enter: "enter", s: "search", " ": "play_pause", n: "next", p: "previous",
-  c: "call", e: "end_call",
+  c: "call", e: "end_call", "[": "rotate_left", "]": "rotate_right",
 };
 document.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.closest("input, textarea")) return;

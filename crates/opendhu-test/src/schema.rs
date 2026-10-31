@@ -114,7 +114,8 @@ pub enum Step {
         duration: Option<Dur>,
     },
     /// Press a car button: home, back, up, down, left, right, enter, search, play_pause, next, previous,
-    /// call, end_call. `long: true` holds it for about a second.
+    /// call, end_call, or turn the dial one step: rotate_left, rotate_right. `long: true` holds a
+    /// button for about a second; a turn cannot be held.
     #[serde(rename = "key")]
     Key {
         value: opendhu_core::Key,
