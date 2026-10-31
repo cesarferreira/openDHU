@@ -83,7 +83,7 @@ while IFS= read -r line; do
       if [ "$observed" = off ]; then
         echo "{\"id\":$id,\"err\":{\"kind\":\"other\",\"message\":\"The phone is not projecting - nothing to touch.\"}}"
       else
-        echo "{\"id\":$id,\"ok\":{\"type\":\"input\",\"value\":{\"status\":\"accepted\",\"evidence\":[\"sent $cmd (fake)\"]}}}"
+        echo "{\"id\":$id,\"ok\":{\"type\":\"input\",\"value\":{\"status\":\"accepted\",\"evidence\":[\"sent $cmd (fake); the phone does not acknowledge touch or buttons\"]}}}"
       fi;;
     *) echo "{\"id\":$id,\"err\":{\"kind\":\"invalid_args\",\"message\":\"unknown command\"}}";;
   esac
