@@ -235,14 +235,10 @@ impl Shared {
             );
         }
         let send = |pressed: bool| async move {
-            let mut event = Wifi::ButtonEvent::new();
-            event.set_scan_code(key.android_code());
-            event.set_is_pressed(pressed);
-            if long_press {
-                event.set_long_press(true);
-            }
             let mut events = Wifi::ButtonEvents::new();
-            events.button_events.push(event);
+            events
+                .button_events
+                .push(button_event(key, pressed, long_press));
             let mut m = Wifi::InputEventIndication::new();
             m.set_timestamp(
                 std::time::SystemTime::now()
@@ -620,6 +616,18 @@ fn nal_units(data: &[u8]) -> Vec<Nal<'_>> {
 }
 
 /// The point `n` of `steps` of the way from `a` to `b`.
+/// One edge of a button press. `meta` and `long_press` are optional in our protocol file, but the
+/// head units known to work with Android Auto (OpenAuto, headunit-reloaded) always send all four
+/// fields. Without them a phone that had bound the key (Home, Back) did nothing on a press.
+fn button_event(key: Key, pressed: bool, long_press: bool) -> Wifi::ButtonEvent {
+    let mut event = Wifi::ButtonEvent::new();
+    event.set_scan_code(key.android_code());
+    event.set_is_pressed(pressed);
+    event.set_meta(0);
+    event.set_long_press(long_press);
+    event
+}
+
 fn lerp(a: u32, b: u32, n: u64, steps: u64) -> u32 {
     let (a, b) = (i64::from(a), i64::from(b));
     (a + (b - a) * n as i64 / steps as i64) as u32
@@ -1224,6 +1232,16 @@ mod tests {
         assert!(hu.lock().burst_pending);
         hu.on_frame(&IDR);
         assert!(!hu.lock().burst_pending, "the keyframe completed the burst");
+    }
+
+    #[test]
+    fn a_button_event_carries_every_field_a_phone_expects() {
+        let down = button_event(Key::Home, true, false);
+        assert_eq!(down.scan_code(), 3);
+        assert!(down.is_pressed());
+        assert!(down.has_meta() && down.meta() == 0);
+        assert!(down.has_long_press() && !down.long_press());
+        assert!(button_event(Key::Back, false, true).long_press());
     }
 
     #[test]
