@@ -47,6 +47,22 @@ does not stop the tests; their output continues in the shell. `--tui` cannot be 
 `--headless`, `--show-head-unit`, `--interactive` or `--json`, and `--list` and `--validate` do not open
 it. See [tui.md](tui.md) for keys, SSH behaviour and troubleshooting.
 
+### Watch a run in the browser (`--web`)
+
+`--web` shows the head unit and the test progress in a browser tab instead of a window. Install the viewer
+with `make install-web`.
+
+```bash
+aa test sample --web          # a managed suite: the page follows each test's own session
+```
+
+It opens `http://127.0.0.1:8766/` (or another free port, printed when it starts) in your default browser.
+The live picture is on the left and the progress lines are on the right, coloured like the terminal's. Click
+and drag on the picture to touch the phone, as in `aa web`. Unlike `--tui`, progress still prints in the shell
+as usual, and `aa` exits as soon as the run ends: the page keeps the log and says the run has finished.
+`--web` cannot be combined with `--tui` or `--show-head-unit`, and `--list` and `--validate` do not open it.
+See [web.md](web.md) for keys and the security model.
+
 ## Terminal progress and named suites
 
 Terminal output colors current work cyan, passes green, failures/errors red and skips yellow.

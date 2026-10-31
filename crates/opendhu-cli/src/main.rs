@@ -55,6 +55,15 @@ enum Command {
     Gui,
     /// Show the head unit in this terminal (needs kitty graphics: kitty, Ghostty, WezTerm)
     Tui,
+    /// Show the head unit in a browser, served on 127.0.0.1
+    Web {
+        /// Port to serve on [default: 8766, or any free port if that is taken]
+        #[arg(long)]
+        port: Option<u16>,
+        /// Print the address instead of opening the default browser
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Change head unit focus
     Focus {
         #[command(subcommand)]
@@ -149,6 +158,10 @@ enum Command {
         /// opendhu-tui)
         #[arg(long, conflicts_with_all = ["headless", "show_head_unit", "interactive"])]
         tui: bool,
+        /// Show the head unit and the test progress in a browser, instead of the head-unit window
+        /// (requires opendhu-web)
+        #[arg(long, conflicts_with_all = ["tui", "show_head_unit"])]
+        web: bool,
         /// Animate terminal progress (enabled by default)
         #[arg(long, conflicts_with = "no_interactive")]
         interactive: bool,
@@ -309,12 +322,16 @@ fn launch_gui() -> Result<u8> {
 }
 
 fn launch(binary: &str, target: &str) -> Result<u8> {
+    launch_with(binary, target, &[])
+}
+
+fn launch_with(binary: &str, target: &str, args: &[String]) -> Result<u8> {
     use std::os::unix::process::CommandExt;
 
     let program = viewer::sibling(binary);
-    let error = std::process::Command::new(&program).exec();
+    let error = std::process::Command::new(&program).args(args).exec();
     Err(Error::BackendUnavailable(format!(
-        "cannot launch {}: {error}; install the GUI with `make {target}`",
+        "cannot launch {}: {error}; install it with `make {target}`",
         program.display()
     )))
 }
@@ -404,6 +421,16 @@ fn run(cli: Cli) -> Result<u8> {
     match cli.command {
         Command::Gui => launch_gui(),
         Command::Tui => launch("opendhu-tui", "install-tui"),
+        Command::Web { port, no_open } => {
+            let mut args = Vec::new();
+            if let Some(port) = port {
+                args.extend(["--port".to_string(), port.to_string()]);
+            }
+            if !no_open {
+                args.push("--open".to_string());
+            }
+            launch_with("opendhu-web", "install-web", &args)
+        }
         Command::Session {
             action:
                 SessionAction::Start {
@@ -576,6 +603,7 @@ fn run(cli: Cli) -> Result<u8> {
             show_head_unit,
             headless,
             tui,
+            web,
             interactive,
             no_interactive,
             verbose,
@@ -601,6 +629,14 @@ fn run(cli: Cli) -> Result<u8> {
             } else {
                 None
             };
+            let _web = if web && !list && !validate {
+                Some(viewer::WebViewer::start(
+                    None,
+                    std::sync::Arc::clone(&output),
+                )?)
+            } else {
+                None
+            };
             let shown = std::sync::Arc::clone(&output);
             let result = test_cmd::run(test_cmd::Options {
                 paths,
@@ -614,7 +650,7 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
-                show_head_unit: !tui && (show_head_unit || !headless),
+                show_head_unit: !tui && !web && (show_head_unit || !headless),
                 output,
                 filter,
                 usb,
@@ -629,7 +665,7 @@ fn run(cli: Cli) -> Result<u8> {
             });
             // Without this the viewer shows an empty log until it is closed and the error is printed.
             if let Err(e) = &result
-                && _tui.is_some()
+                && (_tui.is_some() || _web.is_some())
             {
                 shown.show_in_viewer(&format!("ERROR {e}"));
             }

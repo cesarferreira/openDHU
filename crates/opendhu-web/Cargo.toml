@@ -1,0 +1,23 @@
+[package]
+name = "opendhu-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Browser head unit for the openDHU daemon: live picture, touch and test progress on localhost"
+
+[[bin]]
+name = "opendhu-web"
+path = "src/main.rs"
+
+[dependencies]
+opendhu-core = { path = "../opendhu-core" }
+opendhu-daemon = { path = "../opendhu-daemon" }
+opendhu-native = { path = "../opendhu-native" }
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true

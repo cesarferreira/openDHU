@@ -2264,6 +2264,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "opendhu-web"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "opendhu-core",
+ "opendhu-daemon",
+ "opendhu-native",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"

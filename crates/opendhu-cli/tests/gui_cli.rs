@@ -196,3 +196,122 @@ fn contradictory_test_presentation_flags_are_rejected_before_startup() {
     }
     assert!(!s.dir.exists());
 }
+
+fn fake_web(dir: &Path, script: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    let web = dir.join("opendhu-web");
+    std::fs::write(&web, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(web, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn web_opens_the_browser_unless_told_not_to_and_passes_the_port() {
+    let s = Sandbox::new();
+    let cli = isolated_cli(&s);
+    fake_web(cli.parent().unwrap(), "echo \"$@\"");
+    let run = |args: &[&str]| {
+        let output = Command::new(&cli)
+            .arg("web")
+            .args(args)
+            .env("PATH", s.scratch("empty-path"))
+            .env("OPENDHU_CONFIG", "/no/such/config.toml")
+            .output()
+            .unwrap();
+        assert_eq!(code(&output), 0, "{}", text(&output));
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    assert_eq!(run(&[]), "--open");
+    assert_eq!(run(&["--port", "9001", "--no-open"]), "--port 9001");
+}
+
+#[test]
+fn missing_web_viewer_explains_how_to_install_it() {
+    let s = Sandbox::new();
+    let cli = isolated_cli(&s);
+    let output = Command::new(&cli)
+        .arg("web")
+        .env("PATH", s.scratch("empty-path"))
+        .env("OPENDHU_CONFIG", "/no/such/config.toml")
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 3, "{}", text(&output));
+    assert!(
+        text(&output).contains("make install-web"),
+        "{}",
+        text(&output)
+    );
+}
+
+#[test]
+fn test_web_feeds_the_browser_viewer_and_still_prints_progress_without_a_window() {
+    let s = Sandbox::new();
+    let native = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../opendhu-native/tests/fixtures/fake-native-hu.sh"
+    );
+    let start = s.opendhu_env(
+        &[
+            "session",
+            "start",
+            "--backend",
+            "native",
+            "--serial",
+            "FAKE0001",
+        ],
+        &[("OPENDHU_NATIVE_HU", native)],
+    );
+    assert_eq!(code(&start), 0, "{}", text(&start));
+    let cli = isolated_cli(&s);
+    let record = s.scratch("web-feed");
+    // Reads the feed until `aa` closes it at the end of the run, as the real viewer does. `sh` cannot
+    // redirect from a descriptor above 9, so it goes through /dev/fd.
+    fake_web(
+        cli.parent().unwrap(),
+        "printf '%s\\n' \"$*\" > \"$WEB_RECORD\"\n/bin/cat \"/dev/fd/$OPENDHU_WEB_LOG_FD\" >> \"$WEB_RECORD\"",
+    );
+    let file = s.scratch("web.yaml");
+    let art = s.scratch("art");
+    std::fs::write(
+        &file,
+        "name: Web test\nsteps: [{action: wait, duration: 10ms, as: settle}]\n",
+    )
+    .unwrap();
+    let output = Command::new(&cli)
+        .args([
+            "test",
+            file.to_str().unwrap(),
+            "--web",
+            "--artifacts-dir",
+            art.to_str().unwrap(),
+        ])
+        .env("OPENDHU_RUNTIME_DIR", &s.dir)
+        .env_remove("OPENDHU_CONFIG")
+        .env("XDG_CONFIG_HOME", s.dir.join("no-xdg"))
+        // No opendhu-gui anywhere: --web replaces the window.
+        .env("PATH", s.scratch("no-gui"))
+        .env("WEB_RECORD", &record)
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert!(!art.join("head-unit-viewer.log").exists());
+    assert!(text(&output).contains("PASS  1 test"), "{}", text(&output));
+    let feed = std::fs::read_to_string(&record).unwrap();
+    let mut lines = feed.lines();
+    assert_eq!(lines.next(), Some("--open"));
+    assert!(feed.contains("Test: Web test"), "{feed:?}");
+    assert!(feed.contains("PASS 1. settle"), "{feed:?}");
+}
+
+#[test]
+fn test_web_cannot_be_combined_with_another_viewer() {
+    let s = Sandbox::new();
+    for other in ["--tui", "--show-head-unit"] {
+        let output = s.opendhu(&["test", "missing.yaml", "--web", other]);
+        assert_eq!(code(&output), 2, "{}", text(&output));
+        assert!(
+            text(&output).contains("cannot be used with"),
+            "{}",
+            text(&output)
+        );
+    }
+}

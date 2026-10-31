@@ -8,6 +8,7 @@ members = [
     "crates/opendhu-cli",
     "crates/opendhu-gui",
     "crates/opendhu-tui",
+    "crates/opendhu-web",
     "crates/opendhu-native",
     "crates/opendhu-native-hu",
 ]

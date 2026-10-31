@@ -64,44 +64,8 @@ impl TuiViewer {
         runtime: Option<&Path>,
         output: std::sync::Arc<crate::test_output::Output>,
     ) -> Result<Self> {
-        use std::os::fd::FromRawFd;
-
-        let mut fds = [0i32; 2];
-        // `pipe2` does not exist on macOS, so create the pipe and set close-on-exec separately.
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(Error::Other(std::io::Error::last_os_error().to_string()));
-        }
-        for fd in fds {
-            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
-                let err = std::io::Error::last_os_error().to_string();
-                unsafe {
-                    libc::close(fds[0]);
-                    libc::close(fds[1]);
-                }
-                return Err(Error::Other(err));
-            }
-        }
-        let (read, write) = (fds[0], fds[1]);
-        // SAFETY: `write` is a fresh descriptor nothing else owns.
-        let pipe = unsafe { std::fs::File::from_raw_fd(write) };
-        let mut command = Command::new(sibling("opendhu-tui"));
-        command.env("OPENDHU_TUI_LOG_FD", read.to_string());
-        if let Some(runtime) = runtime {
-            command.env("OPENDHU_RUNTIME_DIR", runtime);
-        }
-        // Only the viewer inherits the read end; the write end stays here so closing it is the
-        // viewer's end-of-run signal.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::fcntl(read, libc::F_SETFD, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let spawned = command.spawn();
-        unsafe { libc::close(read) };
-        let child = spawned.map_err(|e| {
+        let command = Command::new(sibling("opendhu-tui"));
+        let (child, pipe) = spawn_fed(command, "OPENDHU_TUI_LOG_FD", runtime).map_err(|e| {
             Error::BackendUnavailable(format!(
                 "cannot show the head unit in the terminal: {e}; install it with `make install-tui`"
             ))
@@ -111,11 +75,89 @@ impl TuiViewer {
     }
 }
 
+/// `program` with the read end of a fresh pipe on the descriptor named by `env`, and the write end
+/// for the caller: closing it is the viewer's end-of-run signal.
+fn spawn_fed(
+    mut command: Command,
+    env: &str,
+    runtime: Option<&Path>,
+) -> std::io::Result<(Child, std::fs::File)> {
+    use std::os::fd::FromRawFd;
+
+    let mut fds = [0i32; 2];
+    // `pipe2` does not exist on macOS, so create the pipe and set close-on-exec separately.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    for fd in fds {
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+            let err = std::io::Error::last_os_error();
+            unsafe {
+                libc::close(fds[0]);
+                libc::close(fds[1]);
+            }
+            return Err(err);
+        }
+    }
+    let (read, write) = (fds[0], fds[1]);
+    // SAFETY: `write` is a fresh descriptor nothing else owns.
+    let pipe = unsafe { std::fs::File::from_raw_fd(write) };
+    command.env(env, read.to_string());
+    if let Some(runtime) = runtime {
+        command.env("OPENDHU_RUNTIME_DIR", runtime);
+    }
+    // Only the viewer inherits the read end; the write end stays here so closing it is the
+    // viewer's end-of-run signal.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(read, libc::F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let spawned = command.spawn();
+    unsafe { libc::close(read) };
+    Ok((spawned?, pipe))
+}
+
 impl Drop for TuiViewer {
     fn drop(&mut self) {
         // Closing the pipe tells the viewer the run is over; it stays until the user closes it.
         let transcript = self.output.detach_viewer();
         let _ = self.child.wait();
         self.output.print(&transcript);
+    }
+}
+
+/// The browser viewer for `aa test --web`: `opendhu-web` serving the head unit and the run's
+/// progress on localhost. Progress still prints in the shell too. Dropping it ends the feed; the
+/// viewer tells open pages the run is over, then exits by itself.
+pub(crate) struct WebViewer {
+    child: Child,
+    output: std::sync::Arc<crate::test_output::Output>,
+}
+
+impl WebViewer {
+    pub(crate) fn start(
+        runtime: Option<&Path>,
+        output: std::sync::Arc<crate::test_output::Output>,
+    ) -> Result<Self> {
+        let mut command = Command::new(sibling("opendhu-web"));
+        command.arg("--open").stdin(Stdio::null());
+        let (child, pipe) = spawn_fed(command, "OPENDHU_WEB_LOG_FD", runtime).map_err(|e| {
+            Error::BackendUnavailable(format!(
+                "cannot show the head unit in the browser: {e}; install it with `make install-web`"
+            ))
+        })?;
+        output.mirror_to_viewer(pipe);
+        Ok(Self { child, output })
+    }
+}
+
+impl Drop for WebViewer {
+    fn drop(&mut self) {
+        self.output.detach_viewer();
+        let _ = self.child.wait();
     }
 }

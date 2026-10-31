@@ -53,11 +53,13 @@ pub(crate) struct Output {
     viewer: Mutex<Option<Viewer>>,
 }
 
-/// Where progress goes while the terminal viewer owns the screen: its pipe, plus every line sent so
-/// the run can be replayed into the shell's scrollback once the viewer closes.
+/// Where progress goes while a viewer shows it: its pipe, plus every line sent so the run can be
+/// replayed into the shell's scrollback once a terminal viewer closes. A viewer that does not own
+/// the screen (the browser) only mirrors stdout, which keeps printing as usual.
 struct Viewer {
     pipe: std::fs::File,
     transcript: Vec<String>,
+    owns_screen: bool,
 }
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -207,6 +209,16 @@ impl Output {
         *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Viewer {
             pipe,
             transcript: Vec::new(),
+            owns_screen: true,
+        });
+    }
+
+    /// Copy progress to the browser viewer's `pipe` as well as stdout, until `detach_viewer`.
+    pub(crate) fn mirror_to_viewer(&self, pipe: std::fs::File) {
+        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Viewer {
+            pipe,
+            transcript: Vec::new(),
+            owns_screen: false,
         });
     }
 
@@ -389,8 +401,9 @@ impl Output {
         }
     }
 
-    /// True when the viewer took the message. If the viewer has gone (the user closed it), its
-    /// transcript is printed and progress goes back to stdout.
+    /// True when the viewer took the message instead of stdout. If the viewer has gone (the user
+    /// closed it), its transcript is printed and progress goes back to stdout. A mirroring viewer
+    /// never takes the message; when it has gone it is just forgotten.
     fn send_to_viewer(&self, message: &str) -> bool {
         let mut guard = self.viewer.lock().unwrap_or_else(|e| e.into_inner());
         let Some(viewer) = guard.as_mut() else {
@@ -401,6 +414,12 @@ impl Output {
             .iter()
             .try_for_each(|l| writeln!(viewer.pipe, "{l}"))
             .is_ok();
+        if !viewer.owns_screen {
+            if !sent {
+                guard.take();
+            }
+            return false;
+        }
         if sent {
             viewer.transcript.extend(lines);
             return true;

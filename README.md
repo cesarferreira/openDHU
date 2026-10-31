@@ -26,7 +26,7 @@ You need Rust 1.87+, `adb` and `ffmpeg`. Tests that read the screen also need `t
 ```bash
 git clone https://github.com/cesarferreira/openDHU.git
 cd openDHU
-make install  # aa, opendhu-native-hu, opendhu-gui and opendhu-tui into ~/.cargo/bin
+make install  # aa, opendhu-native-hu, opendhu-gui, opendhu-tui and opendhu-web into ~/.cargo/bin
 aa doctor     # checks the environment, including Android Auto on each device
 ```
 
@@ -126,6 +126,16 @@ aa test sample --tui --record all  # both, keeping every clip
 Draws the head unit with kitty graphics, so it needs kitty, Ghostty or WezTerm and `opendhu-tui`
 (`make install`). It replaces the head-unit window, so it can't be combined with `--headless`.
 
+### In the browser
+
+```bash
+aa test sample --web  # head unit and test progress together, in a browser tab
+```
+
+Opens `http://127.0.0.1:8766/` with the live picture next to the test log, and you can click the picture to
+touch the phone. Progress still prints in the terminal as usual. Needs `opendhu-web` (`make install`) and
+ffmpeg. It replaces the head-unit window.
+
 ### Without the animated progress
 
 ```bash
@@ -183,6 +193,7 @@ make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 aa session start  # native head unit over USB (--serial SERIAL to pick a device)
 aa gui            # live display with mouse input and session controls
 aa tui            # the same in your terminal
+aa web            # the same in a browser tab
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa key home
@@ -206,7 +217,7 @@ tunnel after a USB reconnect. `aa --help` lists everything.
 | [CI](docs/ci.md) | the GitHub Action: emulator, Android Auto, reports and videos as artifacts |
 | [Docker](docs/docker.md) | a headless emulator and `aa` in a container on a Linux host with KVM |
 | [Native backend](docs/native-backend.md) | credentials, resolution, transports and limits |
-| [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) | the two viewers |
+| [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) / [Browser viewer](docs/web.md) | the three viewers |
 | [HTTP API](docs/api.md) | endpoints and live events |
 | [Configuration](docs/configuration.md) | `config.toml` and environment variables |
 | [Architecture](docs/architecture.md) | how the crates fit together |

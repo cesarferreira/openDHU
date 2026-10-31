@@ -19,9 +19,11 @@ daemon is the only process that talks to the DHU.
 | `opendhu-test` | YAML test schema, runner, JSON and JUnit reports, artifacts layout. The runner uses only the backend trait, so tests use a mock backend. |
 | `opendhu-daemon` | The HTTP server, auth, session state machine, event stream, tunnel keeper, and a small client. |
 | `opendhu-gui` | The `opendhu-gui` window (egui). A client of the daemon API only; see [gui.md](gui.md). |
+| `opendhu-tui` | The terminal viewer, drawn with kitty graphics. A client of the daemon API only; see [tui.md](tui.md). |
+| `opendhu-web` | The browser viewer: a loopback page with MJPEG video and touch. A client of the daemon API only; see [web.md](web.md). |
 | `opendhu-cli` | The `aa` binary: argument parsing, config file, daemon start-up, output. |
 
-The dependency direction is `cli, gui → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `opendhu-native`, which starts `opendhu-native-hu` as a child; the child links `opendhu-native` only for the shared protocol types. Nothing above the trait changed.
+The dependency direction is `cli, gui, tui, web → daemon`, `cli → test`, `daemon, test → dhu → core`. The CLI does not depend on the GUI. The native backend is the second `HeadUnitBackend`. The daemon uses `opendhu-native`, which starts `opendhu-native-hu` as a child; the child links `opendhu-native` only for the shared protocol types. Nothing above the trait changed.
 
 ## A request, step by step
 
