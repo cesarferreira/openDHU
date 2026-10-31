@@ -20,7 +20,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
-use opendhu_core::{FocusState, Key};
+use opendhu_core::{FocusState, Key, OpStatus};
 use opendhu_daemon::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -219,7 +219,8 @@ struct SessionBody {
     summary: String,
     width: u32,
     height: u32,
-    video_focus: bool,
+    /// What the phone last reported: `on`, `off` or `unknown`.
+    video_focus: FocusState,
 }
 
 #[derive(Serialize)]
@@ -244,7 +245,7 @@ async fn status(State(app): State<App>) -> Json<StatusBody> {
             ),
             width,
             height,
-            video_focus: head.video_focus.observed == FocusState::On,
+            video_focus: head.video_focus.observed,
         })
     });
     // Without a session the video cannot connect; its error would only repeat that.
@@ -402,19 +403,38 @@ struct Focus {
 
 type Done = Result<Json<serde_json::Value>, Failure>;
 
-fn done() -> Done {
-    Ok(Json(json!({ "ok": true })))
+/// What the daemon says happened. It answers 200 even when the phone refused or never confirmed,
+/// so the status decides: anything short of success is an error for the page, with the evidence
+/// that explains it. A success carries the evidence too, since `accepted` only means "sent".
+fn outcome(status: OpStatus, evidence: &[String]) -> Done {
+    let detail = evidence.last().cloned().unwrap_or_default();
+    if status.is_success() {
+        return Ok(Json(json!({ "status": status, "detail": detail })));
+    }
+    let word = serde_json::to_value(status)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+        .replace('_', " ");
+    Err(Failure(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        if detail.is_empty() {
+            word
+        } else {
+            format!("{word}: {detail}")
+        },
+    ))
 }
 
 async fn tap(Json(t): Json<Tap>) -> Done {
-    call(move |c| c.tap(t.x, t.y)).await?;
-    done()
+    let r = call(move |c| c.tap(t.x, t.y)).await?;
+    outcome(r.result.status, &r.result.evidence)
 }
 
 async fn swipe(Json(s): Json<Swipe>) -> Done {
     let held = Duration::from_millis(s.duration_ms.clamp(50, 10_000));
-    call(move |c| c.swipe(s.from, s.to, held)).await?;
-    done()
+    let r = call(move |c| c.swipe(s.from, s.to, held)).await?;
+    outcome(r.result.status, &r.result.evidence)
 }
 
 async fn key(Json(k): Json<KeyPress>) -> Done {
@@ -422,13 +442,13 @@ async fn key(Json(k): Json<KeyPress>) -> Done {
         .key
         .parse()
         .map_err(|m| Failure(StatusCode::BAD_REQUEST, m))?;
-    call(move |c| c.key(key, k.long)).await?;
-    done()
+    let r = call(move |c| c.key(key, k.long)).await?;
+    outcome(r.result.status, &r.result.evidence)
 }
 
 async fn focus(Json(f): Json<Focus>) -> Done {
-    call(move |c| c.focus_video(f.on)).await?;
-    done()
+    let r = call(move |c| c.focus_video(f.on)).await?;
+    outcome(r.result.status, &r.result.evidence)
 }
 
 #[cfg(test)]
@@ -470,6 +490,28 @@ mod tests {
         assert!(allowed(&foreign, &hosts()).is_err());
         let null = headers(&[(header::HOST, "127.0.0.1:8766"), (header::ORIGIN, "null")]);
         assert!(allowed(&null, &hosts()).is_err());
+    }
+
+    #[test]
+    fn an_unconfirmed_or_refused_input_is_an_error_not_a_success() {
+        let evidence = vec![
+            "sent VideoFocusIndication UNFOCUSED (unrequested)".to_string(),
+            "the phone did not confirm within 3s; it still reports video on".to_string(),
+        ];
+        let Err(Failure(code, message)) = outcome(OpStatus::TimedOut, &evidence) else {
+            panic!("a timeout must not look like success");
+        };
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            message,
+            "timed out: the phone did not confirm within 3s; it still reports video on"
+        );
+        assert!(outcome(OpStatus::Failed, &[]).is_err());
+        assert!(outcome(OpStatus::Unsupported, &[]).is_err());
+        let Ok(Json(ok)) = outcome(OpStatus::Accepted, &["sent home".to_string()]) else {
+            panic!("accepted is a success");
+        };
+        assert_eq!(ok, json!({ "status": "accepted", "detail": "sent home" }));
     }
 
     #[test]

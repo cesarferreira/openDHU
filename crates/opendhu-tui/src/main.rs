@@ -387,7 +387,10 @@ impl<'a> App<'a> {
             Event::Char('q') => return true,
             Event::Char('f') => {
                 let on = self.status.as_ref().map(|s| s.video_focus) == Some(FocusState::On);
-                self.act("video focus", move |c| c.focus_video(!on).map(drop));
+                self.act("video focus", move |c| {
+                    c.focus_video(!on)
+                        .and_then(|r| checked(r.result.status, &r.result.evidence))
+                });
             }
             Event::Char('S') => {
                 let path = format!("aa-screenshot-{}.png", unix_seconds());
@@ -421,7 +424,10 @@ impl<'a> App<'a> {
     }
 
     fn key(&self, key: Key) {
-        self.act(&format!("{key:?}"), move |c| c.key(key, false).map(drop));
+        self.act(&format!("{key:?}"), move |c| {
+            c.key(key, false)
+                .and_then(|r| checked(r.result.status, &r.result.evidence))
+        });
     }
 
     fn mouse(&mut self, kind: Mouse, at: (u32, u32)) {
@@ -451,12 +457,18 @@ impl<'a> App<'a> {
                     return;
                 };
                 if from.0.abs_diff(to.0).max(from.1.abs_diff(to.1)) < TAP_SLOP {
-                    self.act("tap", move |c| c.tap(from.0, from.1).map(drop));
+                    self.act("tap", move |c| {
+                        c.tap(from.0, from.1)
+                            .and_then(|r| checked(r.result.status, &r.result.evidence))
+                    });
                 } else {
                     let held = since
                         .elapsed()
                         .clamp(Duration::from_millis(100), Duration::from_millis(1500));
-                    self.act("swipe", move |c| c.swipe(from, to, held).map(drop));
+                    self.act("swipe", move |c| {
+                        c.swipe(from, to, held)
+                            .and_then(|r| checked(r.result.status, &r.result.evidence))
+                    });
                 }
             }
             Mouse::WheelUp | Mouse::WheelDown => {
@@ -478,7 +490,7 @@ impl<'a> App<'a> {
                 };
                 self.act("scroll", move |c| {
                     c.swipe((at.0, from_y), (at.0, to_y), Duration::from_millis(250))
-                        .map(drop)
+                        .and_then(|r| checked(r.result.status, &r.result.evidence))
                 });
             }
         }
@@ -685,6 +697,16 @@ fn fit(text: &str, cols: u32) -> String {
     text.chars().take(cols as usize).collect()
 }
 
+/// The daemon answers even when the phone refused or never confirmed, so the status decides: a
+/// timeout or failure is an error for the footer, with the evidence that explains it.
+fn checked(status: opendhu_core::OpStatus, evidence: &[String]) -> opendhu_core::Result<()> {
+    if status.is_success() {
+        return Ok(());
+    }
+    let detail = evidence.last().map_or("", String::as_str);
+    Err(opendhu_core::Error::Other(format!("{status:?}: {detail}")))
+}
+
 fn key_for_char(c: char) -> Option<Key> {
     Some(match c {
         'b' => Key::Back,
@@ -708,6 +730,16 @@ fn unix_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unconfirmed_input_is_reported_not_hidden() {
+        use opendhu_core::OpStatus;
+        assert!(checked(OpStatus::Accepted, &[]).is_ok());
+        assert!(checked(OpStatus::Observed, &[]).is_ok());
+        let e = checked(OpStatus::TimedOut, &["the phone did not confirm".into()]).unwrap_err();
+        assert!(e.to_string().contains("the phone did not confirm"), "{e}");
+        assert!(checked(OpStatus::Failed, &[]).is_err());
+    }
 
     #[test]
     fn letters_map_to_car_buttons() {
