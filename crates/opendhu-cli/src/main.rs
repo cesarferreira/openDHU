@@ -838,7 +838,8 @@ fn print_input(resp: &InputResponse, json: bool) {
         );
         return;
     }
-    println!("Sent (the phone does not acknowledge touch or buttons)");
+    // Each backend's evidence already says the phone does not acknowledge the input.
+    println!("Sent");
     for l in &resp.result.evidence {
         println!("  {l}");
     }
