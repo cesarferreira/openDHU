@@ -407,7 +407,11 @@ fn a_second_ctrl_c_exits_immediately_even_if_cleanup_is_stuck() {
             "--serial",
             "FAKE0001",
         ],
-        &[("FAKE_DHU_MODE", "hang-on-focus-on")],
+        // Long enough to outlast the test's 2s window, short enough not to stall teardown.
+        &[
+            ("FAKE_DHU_MODE", "hang-on-focus-on"),
+            ("FAKE_DHU_HANG_SECS", "3"),
+        ],
     );
     assert_eq!(code(&started), 0, "{}", text(&started));
     let tests = s.scratch("tests");

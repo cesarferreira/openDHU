@@ -46,6 +46,18 @@ impl Sandbox {
             .env("XDG_CONFIG_HOME", self.dir.join("no-xdg"))
             .env_remove("OPENDHU_CONFIG")
             .env_remove("OPENDHU_DHU_PATH");
+        // Never reach a real adb: with a fake serial it waits seconds for a device that is not
+        // there, and the result would depend on the machine. A test that sets PATH picks its own.
+        if !env.iter().any(|(k, _)| *k == "PATH") {
+            c.env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    fake_adb_dir(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            );
+        }
         for (k, v) in env {
             c.env(k, v);
         }

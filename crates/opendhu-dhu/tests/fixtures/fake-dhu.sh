@@ -37,7 +37,7 @@ printf '> '
 while IFS= read -r line; do
   case "$line" in
     "focus video on")
-      if [ "$FAKE_DHU_MODE" = hang-on-focus-on ]; then sleep 8; fi
+      if [ "$FAKE_DHU_MODE" = hang-on-focus-on ]; then sleep "${FAKE_DHU_HANG_SECS:-8}"; fi
       focus=true;;
     "focus video off") focus=false;;
     "focus video toggle") if $focus; then focus=false; else focus=true; fi;;

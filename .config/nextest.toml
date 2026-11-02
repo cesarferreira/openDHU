@@ -1,0 +1,4 @@
+[profile.default]
+# Tests use fake devices, so none should take long. Flag any that pass 10s (a real wait slipped in)
+# and kill one stuck for a minute, instead of letting CI hang.
+slow-timeout = { period = "10s", terminate-after = 6 }
