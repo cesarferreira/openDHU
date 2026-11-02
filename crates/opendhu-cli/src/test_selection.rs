@@ -2,7 +2,7 @@
 use opendhu_core::{Error, Result};
 use opendhu_test::TestFile;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
@@ -142,4 +142,18 @@ pub(crate) fn filter(
         )));
     }
     Ok(selected)
+}
+
+/// Keeps only the tests whose file was chosen exactly (as by `aa test -i`); `None` keeps all.
+pub(crate) fn restrict(
+    tests: Vec<(String, TestFile)>,
+    only: Option<&BTreeSet<String>>,
+) -> Vec<(String, TestFile)> {
+    match only {
+        None => tests,
+        Some(only) => tests
+            .into_iter()
+            .filter(|(file, _)| only.contains(file))
+            .collect(),
+    }
 }

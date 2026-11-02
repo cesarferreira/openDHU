@@ -889,3 +889,19 @@ fn all_suites_print_one_footer_after_cleanup_with_combined_test_counts() {
     let runtime = std::fs::read_to_string(s.suite.parent().unwrap().join("runtime")).unwrap();
     assert!(!std::path::Path::new(runtime.trim()).exists());
 }
+
+#[test]
+fn pick_needs_a_terminal_and_refuses_json() {
+    let s = Sandbox::new();
+    for (args, message) in [
+        (vec!["test", "-i"], "needs an interactive terminal"),
+        (
+            vec!["test", "-i", "--json"],
+            "cannot be combined with --json",
+        ),
+    ] {
+        let output = s.opendhu(&args);
+        assert_eq!(code(&output), 2, "{}", text(&output));
+        assert!(text(&output).contains(message), "{}", text(&output));
+    }
+}

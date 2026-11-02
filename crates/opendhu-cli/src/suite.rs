@@ -713,16 +713,20 @@ impl Drop for Lease {
 pub(crate) fn inspect(
     path: &Path,
     filter: Option<&str>,
+    only: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<Vec<(String, opendhu_test::TestFile)>> {
     let (_, tests) = load(path)?;
-    crate::test_selection::matching(test_cmd::parse_all(&tests)?, filter)
+    let tests = crate::test_selection::restrict(test_cmd::parse_all(&tests)?, only);
+    crate::test_selection::matching(tests, filter)
 }
 
 pub fn run(mut opts: test_cmd::Options, emulators: Option<&mut EmulatorPool>) -> Result<u8> {
     let output = Arc::clone(&opts.output);
     let (suite, tests) = load(&opts.paths[0])?;
-    let selected =
-        crate::test_selection::filter(test_cmd::parse_all(&tests)?, opts.filter.take().as_deref())?;
+    let selected = crate::test_selection::filter(
+        crate::test_selection::restrict(test_cmd::parse_all(&tests)?, opts.only.as_ref()),
+        opts.filter.take().as_deref(),
+    )?;
     let tests: Vec<PathBuf> = selected
         .into_iter()
         .map(|(file, _)| PathBuf::from(file))

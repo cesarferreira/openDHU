@@ -74,6 +74,7 @@ aa test                            # every suite registered in opendhu.yaml
 aa test sample                     # one suite, on its configured emulator
 aa test sample --filter persist    # only tests whose name or file matches
 aa test sample --list              # list tests; `aa test --list` lists suites
+aa test -i                         # pick suites and tests from a checklist
 aa test --validate                 # parse everything without touching a device
 aa test examples/video-focus.yaml  # one test, against a session you started with `aa session start`
 ```

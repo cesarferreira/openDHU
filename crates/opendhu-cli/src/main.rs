@@ -7,6 +7,7 @@ mod doctor;
 mod gearhead;
 mod output_path;
 mod phone_setup;
+mod picker;
 mod recording;
 mod reverse;
 mod services;
@@ -174,6 +175,9 @@ enum Command {
         /// Run tests whose name or filename contains this text (case-insensitive)
         #[arg(long)]
         filter: Option<String>,
+        /// Choose the suites and tests to run from a checklist in this terminal
+        #[arg(short = 'i', long, conflicts_with_all = ["list", "validate", "tui"])]
+        pick: bool,
         /// Film each test (native backend; needs ffmpeg). Clips go in `videos/` next to the report;
         /// `--record` keeps those of tests that did not pass, `--record all` keeps every one
         #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "failures")]
@@ -608,9 +612,23 @@ fn run(cli: Cli) -> Result<u8> {
             no_interactive,
             verbose,
             filter,
+            pick,
             record,
         } => {
             let cfg = load()?;
+            if pick && json {
+                return Err(Error::InvalidArgs(
+                    "-i draws on the terminal and cannot be combined with --json".into(),
+                ));
+            }
+            let only = if pick {
+                match test_cmd::pick_tests(&paths, filter.as_deref())? {
+                    Some(only) => Some(only),
+                    None => return Ok(0),
+                }
+            } else {
+                None
+            };
             if tui && json {
                 return Err(Error::InvalidArgs(
                     "--tui draws on the terminal and cannot be combined with --json".into(),
@@ -653,6 +671,7 @@ fn run(cli: Cli) -> Result<u8> {
                 show_head_unit: !tui && !web && (show_head_unit || !headless),
                 output,
                 filter,
+                only,
                 usb,
                 validate,
                 phone_setup: !no_phone_setup,

@@ -106,6 +106,8 @@ aa test --list                           # List registered suite names and paths
 aa test robotaxi --list                   # List tests without starting a device
 aa test robotaxi
 aa test robotaxi --filter persistence --interactive
+aa test -i                               # Pick suites and tests from a checklist
+aa test robotaxi -i                      # Pick among one suite's tests
 aa test storybook --filter route --validate
 aa test                                  # Run every registered suite in name order
 aa test all                              # Explicit form of the same command
@@ -117,6 +119,13 @@ A name resolves in the nearest `opendhu.yaml` in the current directory or its an
 are relative to that file. Existing file/directory arguments take precedence over names. YAML still
 defines each suite's environment, services and test files. If no registry is found, pass a YAML path
 directly or create `opendhu.yaml` with the mapping above.
+
+`-i`/`--pick` opens a checklist of every registered suite (or the tests of the targets you name),
+with everything checked. Use ↑/↓ (or j/k) to move, space to toggle a test or a whole suite, `a` to
+check or clear all, enter to run and `q`/Esc to cancel. It runs exactly the checked tests, in the same
+run and report as `aa test`, and `--filter` narrows what the checklist offers. It needs a terminal, so
+scripts and CI keep using `--list` and `--filter`; it cannot be combined with `--json`, `--list`,
+`--validate` or `--tui`. (`--interactive` is unrelated: it animates progress.)
 
 `--list` never starts devices, services, or a viewer. Without targets it prints suite names and paths;
 with a target (including `all`) it prints test names and files, applying `--filter` when provided.

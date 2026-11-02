@@ -47,6 +47,8 @@ pub struct Options {
     pub batch: bool,
     pub verbose: bool,
     pub filter: Option<String>,
+    /// Exact test files to run (from `aa test -i`), applied before `filter`.
+    pub only: Option<std::collections::BTreeSet<String>>,
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
     pub usb: bool,
@@ -252,7 +254,10 @@ pub(crate) fn run_with_emulators(
         ));
     }
     let files = collect(&opts.paths)?;
-    let tests = crate::test_selection::filter(parse_all(&files)?, opts.filter.as_deref())?; // before touching the session
+    let tests = crate::test_selection::filter(
+        crate::test_selection::restrict(parse_all(&files)?, opts.only.as_ref()),
+        opts.filter.as_deref(),
+    )?; // before touching the session
     if opts.validate {
         if opts.json {
             println!(
@@ -525,6 +530,62 @@ pub(crate) fn run_with_emulators(
     Ok(exit_code)
 }
 
+/// Lets the user check which of the selected suites' tests to run (`aa test -i`).
+/// `None` means they cancelled or left nothing checked.
+pub(crate) fn pick_tests(
+    paths: &[PathBuf],
+    filter: Option<&str>,
+) -> Result<Option<std::collections::BTreeSet<String>>> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Err(Error::InvalidArgs(
+            "-i needs an interactive terminal; use `aa test --list` and `--filter` in scripts"
+                .into(),
+        ));
+    }
+    let named: Vec<(String, PathBuf)> = if paths.is_empty() || crate::test_selection::is_all(paths)
+    {
+        crate::test_selection::registered()?
+            .into_iter()
+            .map(|suite| (suite.name, suite.path))
+            .collect()
+    } else {
+        let resolved = crate::test_selection::resolve(paths.to_vec())?;
+        paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .zip(resolved)
+            .collect()
+    };
+    let mut groups = Vec::new();
+    for (name, path) in named {
+        let tests = if crate::suite::is_suite(&path)? {
+            crate::suite::inspect(&path, filter, None)?
+        } else {
+            crate::test_selection::matching(parse_all(&collect(&[path])?)?, filter)?
+        };
+        if !tests.is_empty() {
+            groups.push(crate::picker::Group {
+                name,
+                tests: tests
+                    .into_iter()
+                    .map(|(file, test)| (file, test.name))
+                    .collect(),
+            });
+        }
+    }
+    if groups.is_empty() {
+        return Err(Error::InvalidArgs("no tests to pick from".into()));
+    }
+    match crate::picker::pick(groups)? {
+        Some(files) if !files.is_empty() => Ok(Some(files)),
+        _ => {
+            eprintln!("Nothing selected.");
+            Ok(None)
+        }
+    }
+}
+
 fn list_tests(opts: &Options) -> Result<u8> {
     if opts.paths.is_empty() && opts.filter.is_none() {
         let suites = crate::test_selection::registered()?;
@@ -550,7 +611,7 @@ fn list_tests(opts: &Options) -> Result<u8> {
     let mut tests = Vec::new();
     for path in paths {
         if crate::suite::is_suite(&path)? {
-            tests.extend(crate::suite::inspect(&path, None)?);
+            tests.extend(crate::suite::inspect(&path, None, None)?);
         } else {
             tests.extend(parse_all(&collect(&[path])?)?);
         }
@@ -703,10 +764,13 @@ fn run_all(opts: Options) -> Result<u8> {
     for suite in suites {
         let managed = crate::suite::is_suite(&suite.path)?;
         let tests = if managed {
-            crate::suite::inspect(&suite.path, opts.filter.as_deref())?
+            crate::suite::inspect(&suite.path, opts.filter.as_deref(), opts.only.as_ref())?
         } else {
             crate::test_selection::matching(
-                parse_all(&collect(std::slice::from_ref(&suite.path))?)?,
+                crate::test_selection::restrict(
+                    parse_all(&collect(std::slice::from_ref(&suite.path))?)?,
+                    opts.only.as_ref(),
+                ),
                 opts.filter.as_deref(),
             )?
         };
