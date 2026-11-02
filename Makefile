@@ -26,7 +26,7 @@ help:
 	@echo "    all                 lint, vendor-check, build, test, validate-examples (no hardware)"
 	@echo "    build               debug build of every crate"
 	@echo "    build-release       release build"
-	@echo "    test                cargo test --workspace (uses fake head units; no hardware)"
+	@echo "    test                cargo nextest run --workspace, or cargo test (fake head units; no hardware)"
 	@echo "    check               cargo check + clippy -D warnings"
 	@echo "    fmt                 format the code"
 	@echo "    lint                formatting check + clippy -D warnings"
@@ -71,8 +71,14 @@ build:
 build-release:
 	cargo build --release
 
+# nextest runs every test in its own process, which is much faster here; plain cargo test
+# works too for anyone without it (cargo install cargo-nextest --locked).
 test:
-	cargo test --workspace
+	@if cargo nextest --version >/dev/null 2>&1; then \
+		cargo nextest run --workspace; \
+	else \
+		cargo test --workspace; \
+	fi
 
 check:
 	cargo check --workspace

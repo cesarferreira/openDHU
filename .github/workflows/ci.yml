@@ -55,5 +55,6 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       # Tests use fake head units and stub adb/ffmpeg/tesseract, so no device or hardware is needed.
-      - run: cargo test --workspace --locked
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --locked
       - run: make validate-examples

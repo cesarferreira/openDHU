@@ -1346,12 +1346,20 @@ fn run_prepared(
 /// until it has.
 const LAUNCH_SETTLE: Duration = Duration::from_secs(10);
 
+/// `OPENDHU_LAUNCH_SETTLE_MS` overrides the wait, so tests against fake devices need not sit it out.
+fn launch_settle() -> Duration {
+    std::env::var("OPENDHU_LAUNCH_SETTLE_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(LAUNCH_SETTLE, Duration::from_millis)
+}
+
 fn settle_after_launch(
     launched_at: Instant,
     output: &Arc<crate::test_output::Output>,
     cancel: &AtomicBool,
 ) -> Result<()> {
-    let wait = LAUNCH_SETTLE.saturating_sub(launched_at.elapsed());
+    let wait = launch_settle().saturating_sub(launched_at.elapsed());
     if wait.is_zero() {
         return Ok(());
     }
