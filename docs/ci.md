@@ -24,7 +24,7 @@ jobs:
           record: failures
 ```
 
-Pin a tag or commit instead of `main` once you depend on it.
+Pin a tag or commit instead of `main` once you depend on it. Tags are cut with `make tag`; see [Releasing](releasing.md).
 
 ## Inputs
 

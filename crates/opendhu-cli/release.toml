@@ -1,0 +1,12 @@
+# Once per release, for the whole workspace. Workspace release.toml is inherited by
+# every crate, so the changelog hook and the single tag live on this package.
+# git-cliff limits history to the current directory, and this hook runs inside
+# the crate, so the changelog is generated from the workspace root.
+tag = true
+tag-name = "v{{version}}"
+tag-message = "chore: Release openDHU version {{version}}"
+pre-release-hook = [
+    "sh",
+    "-c",
+    "cd \"$WORKSPACE_ROOT\" && git-cliff --config cliff.toml -o CHANGELOG.md --tag \"v{{version}}\"",
+]

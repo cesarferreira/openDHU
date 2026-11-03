@@ -4,7 +4,8 @@
 # Targets marked [phone] need a real phone with Android Auto, unlocked, on USB. They stop with an
 # error if a DHU or openDHU daemon is already running, so they never touch someone else's session.
 
-.PHONY: help all build build-release install install-release install-debug install-cli install-native install-gui install-tui install-web \
+.PHONY: help all build build-release tag release ensure-git-cliff ensure-cargo-release \
+        install install-release install-debug install-cli install-native install-gui install-tui install-web \
         clean test check fmt lint run daemon gui web doctor stop demo vendor-check validate-examples \
         hw hw-dhu hw-native docker-build docker-test
 
@@ -15,6 +16,8 @@ INSTALL_PROFILE = $(if $(filter --debug,$(INSTALL_FLAGS)),debug,release)
 INSTALL_BUILD_FLAG = $(if $(filter --debug,$(INSTALL_FLAGS)),,--release)
 INSTALL_TARGET_DIR = $(shell cargo metadata --format-version 1 --no-deps --offline 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
 INSTALL_BIN_DIR = $(if $(CARGO_INSTALL_ROOT),$(CARGO_INSTALL_ROOT),$(if $(CARGO_HOME),$(CARGO_HOME),$(HOME)/.cargo))/bin
+LEVEL ?= minor
+GIT_CLIFF_VERSION ?= 2.14.2
 
 # Default target: everything that needs no hardware.
 all: lint vendor-check build test validate-examples
@@ -63,6 +66,10 @@ help:
 	@echo "    hw-native           real phone + openDHU's own head unit (needs ffmpeg)"
 	@echo "    hw                  both, one after the other"
 	@echo
+	@echo "  Release (see docs/releasing.md)"
+	@echo "    tag                 pick patch, minor, or major, then release (Enter keeps minor)"
+	@echo "    release             bump, changelog, tag and push (LEVEL=patch|minor|major)"
+	@echo
 	@echo "  clean                 remove build output"
 
 build:
@@ -70,6 +77,49 @@ build:
 
 build-release:
 	cargo build --release
+
+# Ask which bump to cut, then release. Enter keeps minor. LEVEL= skips the question.
+tag:
+	@origin="$(origin LEVEL)"; \
+	level="$(LEVEL)"; \
+	if [ "$$origin" = file ] && [ -t 0 ]; then \
+		printf 'Bump [patch/minor/major] (default minor): '; \
+		read -r level; \
+		level=$$(printf '%s' "$$level" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'); \
+		level=$${level:-minor}; \
+	elif [ "$$origin" = file ]; then \
+		level=minor; \
+	fi; \
+	case "$$level" in \
+		patch|minor|major) ;; \
+		*) echo "tag: expected patch, minor, or major (got $$level)" >&2; exit 1 ;; \
+	esac; \
+	$(MAKE) release LEVEL=$$level
+
+# Publish a new release (usage: make release or make release LEVEL=patch).
+# cargo-release bumps the workspace version, regenerates CHANGELOG.md, commits, tags and pushes.
+release: ensure-git-cliff ensure-cargo-release
+	cargo release $(LEVEL) --execute --no-confirm
+
+# Ensure git-cliff (changelog generator, used by cargo-release's pre-release hook)
+# is the pinned version, reinstalling via cargo when it is missing or different.
+ensure-git-cliff:
+	@installed="$$(git-cliff --version 2>/dev/null | awk '{print $$2}')"; \
+	if [ -z "$$installed" ]; then \
+		echo "git-cliff not found; installing v$(GIT_CLIFF_VERSION) via cargo..." >&2; \
+		cargo install git-cliff --version $(GIT_CLIFF_VERSION) --locked --force; \
+	elif [ "$$installed" != "$(GIT_CLIFF_VERSION)" ]; then \
+		echo "git-cliff v$$installed does not match pinned v$(GIT_CLIFF_VERSION); installing via cargo..." >&2; \
+		cargo install git-cliff --version $(GIT_CLIFF_VERSION) --locked --force; \
+	fi
+
+# Ensure cargo-release (the `cargo release` subcommand that drives version bump,
+# tag, and push) is available, so releasing does not require a manual install.
+ensure-cargo-release:
+	@command -v cargo-release >/dev/null 2>&1 || { \
+		echo "cargo-release not found; installing via cargo..."; \
+		cargo install cargo-release --locked; \
+	}
 
 # nextest runs every test in its own process, which is much faster here; plain cargo test
 # works too for anyone without it (cargo install cargo-nextest --locked).

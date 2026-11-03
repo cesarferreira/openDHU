@@ -1,0 +1,10 @@
+sign-commit = false
+sign-tag = false
+# These crates are the application, and they depend on vendored path crates, so they are not published.
+publish = false
+push = true
+shared-version = true
+consolidate-commits = true
+# cargo-release would otherwise tag every crate. The single v* tag lives on opendhu-cli.
+tag = false
+pre-release-commit-message = "chore: Release openDHU version {{version}}"

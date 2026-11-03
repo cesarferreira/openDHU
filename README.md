@@ -217,6 +217,7 @@ tunnel after a USB reconnect. `aa --help` lists everything.
 |---|---|
 | [Testing](docs/testing.md) | YAML actions, suites, services, reports, video, and what a pass does and does not prove |
 | [CI](docs/ci.md) | the GitHub Action: emulator, Android Auto, reports and videos as artifacts |
+| [Releasing](docs/releasing.md) | `make tag`: pick patch, minor, or major, then tag and open the GitHub Release |
 | [Docker](docs/docker.md) | a headless emulator and `aa` in a container on a Linux host with KVM |
 | [Native backend](docs/native-backend.md) | credentials, resolution, transports and limits |
 | [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) / [Browser viewer](docs/web.md) | the three viewers |
@@ -235,6 +236,7 @@ Android Auto is unsupported. CI currently runs on Linux only; macOS is supported
 ```bash
 make            # format check, clippy, build, tests and example validation; no hardware needed
 make help       # every target
+make tag       # ask patch, minor, or major (Enter keeps minor), then tag and push
 make hw-native  # hardware checks against a real phone
 ```
 
