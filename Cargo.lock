@@ -2153,7 +2153,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opendhu-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "ctrlc",
@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "opendhu-core",
@@ -2197,14 +2197,14 @@ dependencies = [
 
 [[package]]
 name = "opendhu-dhu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "opendhu-core",
 ]
 
 [[package]]
 name = "opendhu-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytemuck",
  "eframe",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "opendhu-core",
  "serde",
@@ -2228,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-native-hu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "android-auto",
  "async-trait",
@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-test"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "opendhu-core",
  "serde",
@@ -2254,7 +2254,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "libc",
@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "opendhu-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",
