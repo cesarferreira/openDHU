@@ -55,15 +55,24 @@ pub fn config_error(e: &opendhu_core::Error) -> Check {
     check(Level::Fail, "config file", e.to_string())
 }
 
-pub fn run(explicit_dhu: Option<PathBuf>, config_file: Option<&Path>) -> Vec<Check> {
+pub fn run(explicit_dhu: Option<PathBuf>, config_files: &[PathBuf]) -> Vec<Check> {
     let mut out = Vec::new();
-    out.push(match config_file {
-        Some(p) => check(Level::Ok, "config file", p.display().to_string()),
-        None => check(
+    out.push(if config_files.is_empty() {
+        check(
             Level::Info,
             "config file",
             "none loaded (optional; see docs/configuration.md)",
-        ),
+        )
+    } else {
+        check(
+            Level::Ok,
+            "config file",
+            config_files
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
     });
 
     native_checks(&mut out);

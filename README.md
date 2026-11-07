@@ -211,6 +211,10 @@ Touch, live view, audio and phone-confirmed video focus need the native backend.
 Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
 tunnel after a USB reconnect. `aa --help` lists everything.
 
+For a project-specific Google DHU profile, set `[session].backend` to `dhu` and `[dhu].ini`
+to the vehicle's INI path in `opendhu.toml`. Running `aa session start` from that directory or a
+child loads it automatically; see [Configuration](docs/configuration.md).
+
 ## Documentation
 
 | | |
@@ -232,6 +236,9 @@ Native USB sessions support one connected phone at a time. Car-button input is e
 Android Auto is unsupported. CI currently runs on Linux only; macOS is supported but not covered by CI.
 
 ## Development
+
+Install `cargo-nextest` (`cargo install cargo-nextest --locked`) before running the local test targets.
+CI installs it automatically and uses the same `make test` command.
 
 ```bash
 make            # format check, clippy, build, tests and example validation; no hardware needed

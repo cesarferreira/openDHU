@@ -29,7 +29,7 @@ help:
 	@echo "    all                 lint, vendor-check, build, test, validate-examples (no hardware)"
 	@echo "    build               debug build of every crate"
 	@echo "    build-release       release build"
-	@echo "    test                cargo nextest run --workspace, or cargo test (fake head units; no hardware)"
+	@echo "    test                cargo nextest run --workspace --locked (fake head units; no hardware)"
 	@echo "    check               cargo check + clippy -D warnings"
 	@echo "    fmt                 format the code"
 	@echo "    lint                formatting check + clippy -D warnings"
@@ -121,14 +121,9 @@ ensure-cargo-release:
 		cargo install cargo-release --locked; \
 	}
 
-# nextest runs every test in its own process, which is much faster here; plain cargo test
-# works too for anyone without it (cargo install cargo-nextest --locked).
+# Install nextest with `cargo install cargo-nextest --locked` if it is missing.
 test:
-	@if cargo nextest --version >/dev/null 2>&1; then \
-		cargo nextest run --workspace; \
-	else \
-		cargo test --workspace; \
-	fi
+	cargo nextest run --workspace --locked
 
 check:
 	cargo check --workspace
@@ -228,12 +223,12 @@ endef
 
 hw-dhu:
 	$(require_idle)
-	OPENDHU_HW=1 cargo test -p opendhu-cli --test hardware real_dhu -- --ignored --nocapture
+	OPENDHU_HW=1 cargo nextest run -p opendhu-cli --test hardware --run-ignored only --no-capture real_dhu
 
 hw-native:
 	$(require_idle)
 	@command -v ffmpeg >/dev/null || { echo "ffmpeg is required (macOS: brew install ffmpeg)"; exit 1; }
-	OPENDHU_HW=1 cargo test -p opendhu-cli --test hardware real_native -- --ignored --nocapture
+	OPENDHU_HW=1 cargo nextest run -p opendhu-cli --test hardware --run-ignored only --no-capture real_native
 
 hw: hw-dhu hw-native
 

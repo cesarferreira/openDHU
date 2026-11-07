@@ -3,6 +3,8 @@
 mod common;
 
 use common::*;
+use std::path::Path;
+use std::process::{Command, Output};
 
 fn write_config(s: &Sandbox, body: &str) -> String {
     // Next to the runtime dir, which must stay untouched until the daemon creates it with mode 0700.
@@ -11,6 +13,105 @@ fn write_config(s: &Sandbox, body: &str) -> String {
     let path = dir.join("config.toml");
     std::fs::write(&path, body).unwrap();
     path.display().to_string()
+}
+
+fn in_project(s: &Sandbox, cwd: &Path, xdg: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_aa"))
+        .args(args)
+        .current_dir(cwd)
+        .env("OPENDHU_RUNTIME_DIR", &s.dir)
+        .env("XDG_CONFIG_HOME", xdg)
+        .env_remove("OPENDHU_CONFIG")
+        .env_remove("OPENDHU_DHU_PATH")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_adb_dir(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn project_config_starts_dhu_with_its_relative_ini_and_user_dhu_path() {
+    let s = Sandbox::new();
+    let project = s.scratch("project");
+    let nested = project.join("app");
+    let xdg = s.scratch("xdg");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir_all(xdg.join("opendhu")).unwrap();
+    std::fs::create_dir_all(project.join("head-unit")).unwrap();
+    std::fs::write(
+        project.join("head-unit/nissan_leaf.ini"),
+        "[general]\nresolution = 1920x1080\n",
+    )
+    .unwrap();
+    std::fs::write(
+        xdg.join("opendhu/config.toml"),
+        format!(
+            "[dhu]\npath = \"{}\"\n[session]\nserial = \"FAKE0001\"",
+            fake_dhu()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("opendhu.toml"),
+        "[session]\nbackend = \"dhu\"\n[dhu]\nini = \"head-unit/nissan_leaf.ini\"\n",
+    )
+    .unwrap();
+    let args_file = s.scratch("dhu-args");
+
+    let o = Command::new(env!("CARGO_BIN_EXE_aa"))
+        .args(["session", "start"])
+        .current_dir(&nested)
+        .env("OPENDHU_RUNTIME_DIR", &s.dir)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .env("FAKE_DHU_ARGS_FILE", &args_file)
+        .env_remove("OPENDHU_CONFIG")
+        .env_remove("OPENDHU_DHU_PATH")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_adb_dir(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let args = std::fs::read_to_string(&args_file).unwrap();
+    assert!(
+        args.lines().any(|line| line
+            == format!(
+                "--config={}",
+                project.join("head-unit/nissan_leaf.ini").display()
+            )),
+        "{args}"
+    );
+    assert_eq!(s.status_json()["serial"], "FAKE0001");
+}
+
+#[test]
+fn doctor_lists_both_loaded_config_files() {
+    let s = Sandbox::new();
+    let project = s.scratch("project");
+    let xdg = s.scratch("xdg");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(xdg.join("opendhu")).unwrap();
+    std::fs::write(project.join("opendhu.toml"), "[session]\nbackend = \"dhu\"").unwrap();
+    std::fs::write(
+        xdg.join("opendhu/config.toml"),
+        "[session]\nserial = \"FAKE0001\"",
+    )
+    .unwrap();
+
+    let o = in_project(&s, &project, &xdg, &["doctor", "--dhu-path", &fake_dhu()]);
+    assert!(text(&o).contains("config.toml"), "{}", text(&o));
+    assert!(text(&o).contains("opendhu.toml"), "{}", text(&o));
 }
 
 #[test]

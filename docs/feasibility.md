@@ -314,10 +314,10 @@ Not implemented: night mode, driving restrictions, audio and nav focus (their en
 
 ## 11. Tests and how to run them
 
-- `cargo test --workspace` needs no hardware. It covers console parsing (using strings captured from the real
+- `cargo nextest run --workspace --locked` needs no hardware. It covers console parsing (using strings captured from the real
   DHU), discovery, adb parsing, exit codes, and the process and session lifecycle against a scripted fake DHU
   (`crates/opendhu-dhu/tests/fixtures/fake-dhu.sh`). The fake reproduces the real stream split.
-- `OPENDHU_HW=1 cargo test -p opendhu-cli --test hardware -- --ignored --nocapture` runs the real DHU against a
+- `OPENDHU_HW=1 cargo nextest run -p opendhu-cli --test hardware --run-ignored only --no-capture real_dhu` runs the real DHU against a
   connected phone. It needs the phone unlocked with Android Auto set up and nothing else holding the phone's
   USB accessory link (stop any DHU first).
 

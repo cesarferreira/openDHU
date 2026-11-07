@@ -706,11 +706,11 @@ fn run(cli: Cli) -> Result<u8> {
                 match load() {
                     Ok(cfg) => {
                         let dhu = config::dhu_path(dhu_path, cfg.dhu_path.clone(), dhu_env_set);
-                        doctor::run(dhu, cfg.source.as_deref())
+                        doctor::run(dhu, &cfg.sources)
                     }
                     Err(e) => {
                         let mut checks = vec![doctor::config_error(&e)];
-                        checks.extend(doctor::run(dhu_path, None).into_iter().skip(1));
+                        checks.extend(doctor::run(dhu_path, &[]).into_iter().skip(1));
                         checks
                     }
                 }

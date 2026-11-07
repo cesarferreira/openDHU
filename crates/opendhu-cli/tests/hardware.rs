@@ -1,7 +1,7 @@
 //! Hardware-in-the-loop test. Needs the real DHU, one authorized phone with Android Auto, and
-//! nothing else holding the phone's USB accessory link. Excluded from plain `cargo test`:
+//! nothing else holding the phone's USB accessory link. Excluded from ordinary `make test`:
 //!
-//!   OPENDHU_HW=1 cargo test -p opendhu-cli --test hardware -- --ignored --nocapture
+//!   OPENDHU_HW=1 cargo nextest run -p opendhu-cli --test hardware --run-ignored only --no-capture real_dhu
 
 mod common;
 

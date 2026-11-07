@@ -56,5 +56,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Tests use fake head units and stub adb/ffmpeg/tesseract, so no device or hardware is needed.
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --locked
+      - run: make test
       - run: make validate-examples
