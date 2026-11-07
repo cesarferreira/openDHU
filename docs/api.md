@@ -145,7 +145,9 @@ The CLI defaults to native and sends its backend choice explicitly.
 
 Every field is optional. `backend` is `dhu` (Google's DHU, the HTTP API default) or `native` (openDHU's own head unit, see
 [native-backend.md](native-backend.md)). `dhuPath`, `config` and `headless` belong to the DHU; sending them with
-`native` is a `400 invalid_args`. Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
+`native` is a `400 invalid_args`. For native sessions, `nativeResolution` accepts `480p`, `720p` or
+`1080p` and overrides the head-unit process's environment; sending it with `dhu` is a `400 invalid_args`.
+Without `serial`, the only authorized adb device is used (waiting up to 10 s for it to
 appear), and several devices is an error rather than a guess. Without `dhuPath`, the DHU is found through
 `OPENDHU_DHU_PATH` and the Android SDK; an explicit path that does not exist is an error, never a silent fallback.
 `reverse` lists ports to keep reachable on the phone with `adb reverse tcp:PORT tcp:PORT`. A tunnel counts only

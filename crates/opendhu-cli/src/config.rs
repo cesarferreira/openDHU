@@ -41,6 +41,7 @@ struct RawDhu {
 #[serde(deny_unknown_fields)]
 struct RawSession {
     backend: Option<BackendArg>,
+    resolution: Option<String>,
     serial: Option<String>,
     reverse: Option<Vec<u16>>,
 }
@@ -48,6 +49,7 @@ struct RawSession {
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct RawTest {
+    resolution: Option<String>,
     artifacts_dir: Option<PathBuf>,
     report: Option<Vec<ReportFormat>>,
     skip_unsupported: Option<bool>,
@@ -69,6 +71,8 @@ pub struct Config {
     pub dhu_ini: Option<PathBuf>,
     pub headless: bool,
     pub backend: Option<BackendArg>,
+    pub session_resolution: Option<String>,
+    pub test_resolution: Option<String>,
     pub serial: Option<String>,
     pub reverse: Vec<u16>,
     pub artifacts_dir: Option<PathBuf>,
@@ -132,6 +136,19 @@ fn parse(text: &str, path: &Path) -> Result<Config> {
         .map_err(|e| Error::InvalidArgs(format!("invalid config file {}:\n{e}", path.display())))?;
     let base = path.parent().unwrap_or(Path::new("/"));
     let abs = |p: PathBuf| if p.is_absolute() { p } else { base.join(p) };
+    for (section, resolution) in [
+        ("session", raw.session.resolution.as_deref()),
+        ("test", raw.test.resolution.as_deref()),
+    ] {
+        if let Some(value) = resolution
+            && !matches!(value, "480p" | "720p" | "1080p")
+        {
+            return Err(Error::InvalidArgs(format!(
+                "invalid config file {}: {section}.resolution must be 480p, 720p or 1080p",
+                path.display()
+            )));
+        }
+    }
     if raw.session.reverse.as_ref().is_some_and(|r| r.contains(&0)) {
         return Err(Error::InvalidArgs(format!(
             "invalid config file {}: session.reverse ports must be 1-65535",
@@ -164,6 +181,8 @@ fn parse(text: &str, path: &Path) -> Result<Config> {
         dhu_ini: raw.dhu.ini.map(abs),
         headless: raw.dhu.headless.unwrap_or(false),
         backend: raw.session.backend,
+        session_resolution: raw.session.resolution,
+        test_resolution: raw.test.resolution,
         serial: raw.session.serial,
         reverse: raw.session.reverse.unwrap_or_default(),
         artifacts_dir: raw.test.artifacts_dir.map(abs),
@@ -213,7 +232,7 @@ mod tests {
     #[test]
     fn full_file_parses() {
         let c = p(
-            "suites: {sample: e2e/sample.yaml}\ndhu:\n  headless: true\nsession:\n  serial: ABC\n  reverse: [10101, 8080]\ntest:\n  report: [json, junit, html]\n  skip_unsupported: true\ndaemon:\n  port: 9000\n",
+            "suites: {sample: e2e/sample.yaml}\ndhu:\n  headless: true\nsession:\n  serial: ABC\n  reverse: [10101, 8080]\n  resolution: 720p\ntest:\n  report: [json, junit, html]\n  skip_unsupported: true\n  resolution: 480p\ndaemon:\n  port: 9000\n",
         );
         assert!(c.headless && c.skip_unsupported);
         assert_eq!(c.serial.as_deref(), Some("ABC"));
@@ -223,6 +242,8 @@ mod tests {
             vec![ReportFormat::Json, ReportFormat::Junit, ReportFormat::Html]
         );
         assert_eq!(c.port, Some(9000));
+        assert_eq!(c.session_resolution.as_deref(), Some("720p"));
+        assert_eq!(c.test_resolution.as_deref(), Some("480p"));
         assert_eq!(
             c.suites["sample"],
             Path::new("/home/u/project/e2e/sample.yaml")
@@ -245,6 +266,8 @@ mod tests {
             "session:\n  reverse: [0]",
             "session:\n  reverse: [70000]",
             "test:\n  report: [csv]",
+            "session:\n  resolution: 900p",
+            "test:\n  resolution: 900p",
         ] {
             assert!(parse(bad, Path::new("/c.yaml")).is_err(), "{bad}");
         }

@@ -77,6 +77,9 @@ pub struct StartRequest {
     /// Native connection to an existing loopback ADB forward; default uses USB.
     #[serde(default)]
     pub native_tcp: Option<String>,
+    /// Native projection preset: 480p, 720p or 1080p.
+    #[serde(default)]
+    pub native_resolution: Option<String>,
     /// DHU executable. Default: discovered from the environment and the Android SDK.
     #[serde(default)]
     pub dhu_path: Option<PathBuf>,

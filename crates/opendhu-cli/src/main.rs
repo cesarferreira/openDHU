@@ -231,6 +231,9 @@ enum SessionAction {
         /// Connect native backend to an existing loopback ADB forward (IP:port)
         #[arg(long)]
         native_tcp: Option<String>,
+        /// Native projected resolution: 480p (800x480), 720p or 1080p
+        #[arg(long, value_parser = ["480p", "720p", "1080p"])]
+        resolution: Option<String>,
         /// DHU .ini configuration file
         #[arg(long)]
         config: Option<PathBuf>,
@@ -443,6 +446,7 @@ fn run(cli: Cli) -> Result<u8> {
                     dhu_path,
                     serial,
                     native_tcp,
+                    resolution,
                     config,
                     headless,
                     reverse,
@@ -459,9 +463,26 @@ fn run(cli: Cli) -> Result<u8> {
             // `dhu.*` settings in the config file are for the DHU only: they never reach another backend.
             // A flag given on the command line still does, and the daemon then refuses it.
             let from_file = backend == BackendArg::Dhu;
+            let native_resolution = if backend == BackendArg::Native {
+                config::first(
+                    resolution,
+                    std::env::var("OPENDHU_NATIVE_RESOLUTION")
+                        .ok()
+                        .filter(|value| !value.is_empty())
+                        .or(cfg.session_resolution.clone()),
+                )
+            } else {
+                if resolution.is_some() {
+                    return Err(Error::InvalidArgs(
+                        "`--resolution` belongs to the native backend".into(),
+                    ));
+                }
+                None
+            };
             let req = StartRequest {
                 backend: backend.into(),
                 native_tcp,
+                native_resolution,
                 serial: config::first(serial, cfg.serial.clone()),
                 dhu_path: config::dhu_path(
                     dhu_path.map(|p| output_path::absolute(&p, &cwd)),
@@ -668,6 +689,7 @@ fn run(cli: Cli) -> Result<u8> {
                 },
                 artifacts_dir: config::first(artifacts_dir, cfg.artifacts_dir.clone()),
                 skip_unsupported: skip_unsupported || cfg.skip_unsupported,
+                test_resolution: cfg.test_resolution.clone().unwrap_or_else(|| "480p".into()),
                 show_head_unit: !tui && !web && (show_head_unit || !headless),
                 output,
                 filter,

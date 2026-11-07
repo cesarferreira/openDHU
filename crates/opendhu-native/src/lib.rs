@@ -109,6 +109,8 @@ pub struct NativeLaunch {
     pub serial: Option<String>,
     /// A loopback ADB-forwarded Android Auto head-unit server. None uses USB.
     pub tcp: Option<String>,
+    /// Projected resolution, passed to the head-unit child. None inherits its environment.
+    pub resolution: Option<String>,
 }
 
 /// Only explicit loopback addresses are accepted: this transport is an ADB tunnel.
@@ -171,6 +173,9 @@ impl NativeBackend {
         command.env_remove("OPENDHU_NATIVE_TCP");
         if let Some(tcp) = &launch.tcp {
             command.env("OPENDHU_NATIVE_TCP", tcp);
+        }
+        if let Some(resolution) = &launch.resolution {
+            command.env("OPENDHU_NATIVE_RESOLUTION", resolution);
         }
         let mut child = command
             .args(args)

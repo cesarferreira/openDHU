@@ -21,6 +21,7 @@ fn launch(mode: &str, ready: Duration) -> Result<NativeBackend, Error> {
         program: fake(),
         serial: Some("FAKE0001".into()),
         tcp: None,
+        resolution: None,
     };
     unsafe { std::env::set_var("FAKE_NATIVE_MODE", mode) };
     let r = NativeBackend::launch_with_ready_timeout(&launch, &[] as &[&str], ready);
@@ -137,6 +138,7 @@ fn a_missing_program_is_backend_unavailable() {
         program: "/no/such/opendhu-native-hu".into(),
         serial: None,
         tcp: None,
+        resolution: None,
     })
     .err()
     .unwrap();
@@ -284,6 +286,7 @@ fn tcp_endpoint_is_passed_to_the_child_for_this_session() {
         program: "/bin/sh".into(),
         serial: None,
         tcp: Some("127.0.0.1:15277".into()),
+        resolution: None,
     };
     let script = r#"[ "$OPENDHU_NATIVE_TCP" = "127.0.0.1:15277" ] || exit 9
 printf '%s\n' '{"event":"ready","backend_version":"tcp-test","backend_build":"test"}'

@@ -203,6 +203,7 @@ esac
                 "native-hu",
                 r#"#!/bin/sh
 printf 'tcp=%s\n' "${OPENDHU_NATIVE_TCP-unset}" >> "$USB_FIXTURE/native"
+printf '%s\n' "$OPENDHU_NATIVE_RESOLUTION" >> "$USB_FIXTURE/native-resolution"
 printf '%s\n' "$OPENDHU_RUNTIME_DIR" > "$USB_FIXTURE/runtime"
 echo $$ > "$USB_FIXTURE/native-pid"
 exec "$USB_FAKE_NATIVE"
@@ -373,6 +374,23 @@ fn usb_overrides_emulator_runs_suite_and_cleans_up_only_its_session() {
     assert_eq!(
         std::fs::read_to_string(dir.join("native")).unwrap(),
         "tcp=unset\n"
+    );
+}
+
+#[test]
+fn managed_suite_uses_test_resolution_independent_of_session_resolution() {
+    let s = UsbSuite::new("List of devices attached\nPHONE device usb:1 model:Pixel\n");
+    let root = s.suite.parent().unwrap();
+    std::fs::write(
+        root.join("opendhu.yaml"),
+        "suites: {sample: suite.yaml}\nsession:\n  backend: dhu\n  resolution: 1080p\ntest:\n  resolution: 720p\n",
+    )
+    .unwrap();
+    let output = s.registered_command(&["sample"], &[]).output().unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    assert_eq!(
+        std::fs::read_to_string(root.join("native-resolution")).unwrap(),
+        "720p\n"
     );
 }
 

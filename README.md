@@ -211,9 +211,10 @@ Touch, live view, audio and phone-confirmed video focus need the native backend.
 Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
 tunnel after a USB reconnect. `aa --help` lists everything.
 
-For a project-specific Google DHU profile, set `session.backend` to `dhu` and `dhu.ini`
-to the vehicle's INI path in `opendhu.yaml`. Running `aa session start` from that directory or a
-child loads it automatically; see [Configuration](docs/configuration.md).
+For a project-specific native display, set `session.resolution` in `opendhu.yaml`; keep
+`test.resolution` separate so managed E2E suites run at a repeatable size. Set `dhu.ini` to a
+vehicle's INI path and use `aa session start --dhu` to run Google's DHU profile explicitly.
+See [Configuration](docs/configuration.md).
 
 ## Documentation
 

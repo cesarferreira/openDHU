@@ -129,9 +129,11 @@ phone, status, screenshots (800×480), refusal to screenshot while the phone is 
   over adb (`svc usb getFunctions`) and, if it is still in accessory mode, resets its USB gadget
   (`svc usb resetUsbGadget`) and waits for it to come back, which adds about 5 s. This needs USB debugging, which
   openDHU uses anyway.
-- **Resolution** defaults to 800×480 (480p). `OPENDHU_NATIVE_RESOLUTION=720p` or `=1080p` (set before the
-  daemon starts, like the certificate variables above) asks the phone for a bigger screen instead;
-  an unrecognised value falls back to 480p with a warning in the head unit's log.
+- **Resolution** defaults to 800×480 (480p). Set `session.resolution: 720p` or `1080p` in
+  `opendhu.yaml`, pass `aa session start --resolution 720p`, or set `OPENDHU_NATIVE_RESOLUTION`
+  to ask the phone for a bigger screen. Managed suites use the separate `test.resolution` setting
+  (480p by default). The native head unit itself falls back to 480p for an unrecognised environment
+  value with a warning in its log.
 - **Fragile by nature.** This is an unofficial implementation of an undocumented protocol. A phone-side Android
   Auto update can break it. Run the hardware test after updating the phone.
 - **Not certified.** It is a test tool, not a car head unit.

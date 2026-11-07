@@ -61,6 +61,8 @@ pub struct Options {
     pub report: Vec<ReportFormat>,
     pub artifacts_dir: Option<PathBuf>,
     pub skip_unsupported: bool,
+    /// Projected native resolution for managed suites; independent of interactive sessions.
+    pub test_resolution: String,
     /// Film each test, keeping the clips this says to.
     pub record: Option<crate::recording::Mode>,
     pub json: bool,

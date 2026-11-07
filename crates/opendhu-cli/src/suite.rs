@@ -527,7 +527,6 @@ fn suite_cli(exe: &Path, runtime: &Path, args: &[&str], cancel: Option<&AtomicBo
     let mut child = Command::new(exe)
         .args(args)
         .env("OPENDHU_RUNTIME_DIR", runtime)
-        .env("OPENDHU_NATIVE_RESOLUTION", "480p")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
@@ -1216,6 +1215,8 @@ fn run_prepared(
         "start",
         "--backend",
         "native",
+        "--resolution",
+        &opts.test_resolution,
         "--serial",
         &serial,
     ];

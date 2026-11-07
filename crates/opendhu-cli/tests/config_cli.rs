@@ -95,6 +95,62 @@ fn doctor_names_the_project_config_file() {
 }
 
 #[test]
+fn native_session_uses_project_resolution_and_flag_can_override_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Sandbox::new();
+    let project = s.scratch("native-resolution");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("opendhu.yaml"),
+        "session:\n  backend: native\n  serial: FAKE0001\n  resolution: 720p\ntest:\n  resolution: 480p\n",
+    )
+    .unwrap();
+    let launched = project.join("launched-resolution");
+    let wrapper = project.join("native-hu");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$OPENDHU_NATIVE_RESOLUTION\" >> '{}'\nexec '{}'\n",
+            launched.display(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../opendhu-native/tests/fixtures/fake-native-hu.sh"
+            )
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let start = |extra: &[&str]| {
+        let mut args = vec!["session", "start"];
+        args.extend_from_slice(extra);
+        Command::new(env!("CARGO_BIN_EXE_aa"))
+            .args(args)
+            .current_dir(&project)
+            .env("OPENDHU_RUNTIME_DIR", &s.dir)
+            .env("OPENDHU_NATIVE_HU", &wrapper)
+            .env_remove("OPENDHU_CONFIG")
+            .env_remove("OPENDHU_NATIVE_RESOLUTION")
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    fake_adb_dir(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .output()
+            .unwrap()
+    };
+    let first = start(&[]);
+    assert_eq!(code(&first), 0, "{}", text(&first));
+    assert_eq!(std::fs::read_to_string(&launched).unwrap(), "720p\n");
+    assert_eq!(code(&s.opendhu(&["session", "stop"])), 0);
+    let second = start(&["--resolution", "1080p"]);
+    assert_eq!(code(&second), 0, "{}", text(&second));
+    assert_eq!(std::fs::read_to_string(&launched).unwrap(), "720p\n1080p\n");
+}
+
+#[test]
 fn config_file_supplies_dhu_path_and_serial_so_start_needs_no_flags() {
     let s = Sandbox::new();
     let cfg = write_config(

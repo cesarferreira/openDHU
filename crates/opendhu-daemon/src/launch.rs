@@ -24,6 +24,18 @@ pub struct LaunchedBackend {
 /// Start the head unit the request asks for. Returns it with the phone's adb serial, which the
 /// session needs for tunnels and status.
 pub fn launch_backend(req: &StartRequest) -> Result<LaunchedBackend> {
+    if let Some(resolution) = req.native_resolution.as_deref() {
+        if req.backend != BackendKind::Native {
+            return Err(Error::InvalidArgs(
+                "`nativeResolution` belongs to the native backend".into(),
+            ));
+        }
+        if !matches!(resolution, "480p" | "720p" | "1080p") {
+            return Err(Error::InvalidArgs(
+                "`nativeResolution` must be 480p, 720p or 1080p".into(),
+            ));
+        }
+    }
     if let Some(tcp) = &req.native_tcp {
         if req.backend != BackendKind::Native {
             return Err(Error::InvalidArgs(
@@ -145,6 +157,7 @@ fn resolve_native(req: &StartRequest) -> Result<(NativeLaunch, String)> {
             program,
             serial: Some(serial.clone()),
             tcp: req.native_tcp.clone(),
+            resolution: req.native_resolution.clone(),
         },
         serial,
     ))
