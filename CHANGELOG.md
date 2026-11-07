@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-11-07
+
+### 💼 Other
+
+- Load project head-unit config and use nextest consistently
+- Use opendhu.yaml as the single project config
+- Separate managed test and interactive display resolutions
 ## [0.2.0] - 2026-11-03
 
 ### 🚀 Features
