@@ -1,15 +1,8 @@
 //! Project-local names select existing suite YAML; filters select tests before setup begins.
 use opendhu_core::{Error, Result};
 use opendhu_test::TestFile;
-use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Project {
-    suites: BTreeMap<String, PathBuf>,
-}
 
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct NamedSuite {
@@ -17,45 +10,14 @@ pub(crate) struct NamedSuite {
     pub path: PathBuf,
 }
 
-fn project() -> Result<Option<(PathBuf, Project)>> {
+fn project() -> Result<Option<(PathBuf, crate::config::Config)>> {
     let cwd = std::env::current_dir().map_err(|e| Error::Other(e.to_string()))?;
-    for base in cwd.ancestors() {
-        let index = base.join("opendhu.yaml");
-        let text = match std::fs::read_to_string(&index) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => {
-                return Err(Error::InvalidArgs(format!(
-                    "cannot read {}: {e}",
-                    index.display()
-                )));
-            }
-        };
-        let project: Project = serde_norway::from_str(&text)
-            .map_err(|e| Error::InvalidArgs(format!("invalid {}: {e}", index.display())))?;
-        for (name, path) in &project.suites {
-            if name.is_empty()
-                || name == "."
-                || name == ".."
-                || !name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-            {
-                return Err(Error::InvalidArgs(format!(
-                    "invalid suite name {name:?} in {}",
-                    index.display()
-                )));
-            }
-            if path.as_os_str().is_empty() {
-                return Err(Error::InvalidArgs(format!(
-                    "named suite {name:?} has an empty path in {}",
-                    index.display()
-                )));
-            }
-        }
-        return Ok(Some((index, project)));
-    }
-    Ok(None)
+    let project = crate::config::load(&crate::config::Locator::from_process(), &cwd)?;
+    Ok(project
+        .sources
+        .first()
+        .cloned()
+        .map(|index| (index, project)))
 }
 
 fn missing_registry() -> Error {
@@ -63,15 +25,11 @@ fn missing_registry() -> Error {
 }
 
 pub(crate) fn registered() -> Result<Vec<NamedSuite>> {
-    let (index, project) = project()?.ok_or_else(missing_registry)?;
-    let base = index.parent().expect("registry parent");
+    let (_, project) = project()?.ok_or_else(missing_registry)?;
     Ok(project
         .suites
         .into_iter()
-        .map(|(name, path)| NamedSuite {
-            name,
-            path: base.join(path),
-        })
+        .map(|(name, path)| NamedSuite { name, path })
         .collect())
 }
 
@@ -92,7 +50,7 @@ pub(crate) fn resolve(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
         };
     };
     if let Some(path) = project.suites.get(name.as_ref()) {
-        return Ok(vec![index.parent().expect("registry parent").join(path)]);
+        return Ok(vec![path.clone()]);
     }
     Err(Error::InvalidArgs(format!(
         "unknown suite {name:?} in {}; available names: {}. Use `aa test --list` to list suites",

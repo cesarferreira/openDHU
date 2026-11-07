@@ -1,10 +1,7 @@
-//! Optional user and project TOML configuration. Only the CLI reads it: the daemon receives explicit,
-//! absolute values in each request, so the API stays self-describing.
-//!
-//! Precedence, highest first: command-line flag, environment variable, project file, user file,
-//! built-in default. `OPENDHU_CONFIG` selects one file instead of automatic lookup.
-//! A relative path inside the file is relative to the file's own directory, not the current one.
+//! Project YAML configuration. Only the CLI reads it: the daemon receives explicit, absolute
+//! values in each request, so the API stays self-describing. Relative paths are based on the file.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use opendhu_core::{Error, Result};
@@ -13,12 +10,14 @@ use serde::Deserialize;
 use crate::BackendArg;
 use crate::test_cmd::ReportFormat;
 
-/// Names the config file, overriding the default location. A missing file here is an error.
+/// Names a YAML config file instead of searching for `opendhu.yaml` in the current tree.
 pub const ENV_VAR: &str = "OPENDHU_CONFIG";
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct Raw {
+    #[serde(default)]
+    suites: BTreeMap<String, PathBuf>,
     #[serde(default)]
     dhu: RawDhu,
     #[serde(default)]
@@ -63,8 +62,9 @@ struct RawDaemon {
 /// Parsed settings with every path already absolute.
 #[derive(Debug, Default, PartialEq)]
 pub struct Config {
-    /// All loaded files, in increasing priority order.
+    /// The loaded YAML file, if any.
     pub sources: Vec<PathBuf>,
+    pub suites: BTreeMap<String, PathBuf>,
     pub dhu_path: Option<PathBuf>,
     pub dhu_ini: Option<PathBuf>,
     pub headless: bool,
@@ -80,65 +80,42 @@ pub struct Config {
 /// Where the lookup inputs come from. Injected so tests never read the real machine.
 pub struct Locator {
     pub opendhu_config: Option<PathBuf>,
-    pub xdg_config_home: Option<PathBuf>,
-    pub home: Option<PathBuf>,
 }
 
 impl Locator {
     pub fn from_process() -> Self {
-        let var = |k: &str| {
-            std::env::var_os(k)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
         Self {
-            opendhu_config: var(ENV_VAR),
-            xdg_config_home: var("XDG_CONFIG_HOME"),
-            home: var("HOME"),
+            opendhu_config: std::env::var_os(ENV_VAR)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from),
         }
-    }
-
-    /// `(path, must_exist)`. A file the user named must exist; the default location may be absent.
-    fn path(&self) -> Option<(PathBuf, bool)> {
-        if let Some(p) = &self.opendhu_config {
-            return Some((p.clone(), true));
-        }
-        let base = self
-            .xdg_config_home
-            .clone()
-            .filter(|p| p.is_absolute())
-            .or_else(|| self.home.as_ref().map(|h| h.join(".config")))?;
-        Some((base.join("opendhu").join("config.toml"), false))
     }
 }
 
-/// Load user and project files if present. No file is not an error and gives the defaults.
+/// Load the nearest project file, or the explicit file. No project file gives the defaults.
 pub fn load(loc: &Locator, cwd: &Path) -> Result<Config> {
-    let mut config = Config::default();
-    if let Some((path, must_exist)) = loc.path() {
+    if let Some(path) = &loc.opendhu_config {
         let path = if path.is_absolute() {
-            path
+            path.clone()
         } else {
             cwd.join(path)
         };
-        read_into(&mut config, &path, must_exist)?;
+        return read(&path, true).map(Option::unwrap);
     }
-    if loc.opendhu_config.is_none() {
-        for base in cwd.ancestors() {
-            let path = base.join("opendhu.toml");
-            if read_into(&mut config, &path, false)? {
-                break;
-            }
+    for base in cwd.ancestors() {
+        let path = base.join("opendhu.yaml");
+        if let Some(config) = read(&path, false)? {
+            return Ok(config);
         }
     }
-    Ok(config)
+    Ok(Config::default())
 }
 
-fn read_into(config: &mut Config, path: &Path, must_exist: bool) -> Result<bool> {
+fn read(path: &Path, must_exist: bool) -> Result<Option<Config>> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => {
-            return Ok(false);
+            return Ok(None);
         }
         Err(e) => {
             return Err(Error::InvalidArgs(format!(
@@ -147,19 +124,11 @@ fn read_into(config: &mut Config, path: &Path, must_exist: bool) -> Result<bool>
             )));
         }
     };
-    apply(config, &text, path)?;
-    Ok(true)
+    parse(&text, path).map(Some)
 }
 
-#[cfg(test)]
 fn parse(text: &str, path: &Path) -> Result<Config> {
-    let mut config = Config::default();
-    apply(&mut config, text, path)?;
-    Ok(config)
-}
-
-fn apply(config: &mut Config, text: &str, path: &Path) -> Result<()> {
-    let raw: Raw = toml::from_str(text)
+    let raw: Raw = serde_norway::from_str(text)
         .map_err(|e| Error::InvalidArgs(format!("invalid config file {}:\n{e}", path.display())))?;
     let base = path.parent().unwrap_or(Path::new("/"));
     let abs = |p: PathBuf| if p.is_absolute() { p } else { base.join(p) };
@@ -169,38 +138,39 @@ fn apply(config: &mut Config, text: &str, path: &Path) -> Result<()> {
             path.display()
         )));
     }
-    config.sources.push(path.to_path_buf());
-    if let Some(value) = raw.dhu.path {
-        config.dhu_path = Some(abs(value));
+    for (name, suite) in &raw.suites {
+        if name.is_empty()
+            || name == "."
+            || name == ".."
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            || suite.as_os_str().is_empty()
+        {
+            return Err(Error::InvalidArgs(format!(
+                "invalid suite {name:?} in {}",
+                path.display()
+            )));
+        }
     }
-    if let Some(value) = raw.dhu.ini {
-        config.dhu_ini = Some(abs(value));
-    }
-    if let Some(value) = raw.dhu.headless {
-        config.headless = value;
-    }
-    if let Some(value) = raw.session.backend {
-        config.backend = Some(value);
-    }
-    if let Some(value) = raw.session.serial {
-        config.serial = Some(value);
-    }
-    if let Some(value) = raw.session.reverse {
-        config.reverse = value;
-    }
-    if let Some(value) = raw.test.artifacts_dir {
-        config.artifacts_dir = Some(abs(value));
-    }
-    if let Some(value) = raw.test.report {
-        config.report = value;
-    }
-    if let Some(value) = raw.test.skip_unsupported {
-        config.skip_unsupported = value;
-    }
-    if let Some(value) = raw.daemon.port {
-        config.port = Some(value);
-    }
-    Ok(())
+    Ok(Config {
+        sources: vec![path.to_path_buf()],
+        suites: raw
+            .suites
+            .into_iter()
+            .map(|(name, p)| (name, abs(p)))
+            .collect(),
+        dhu_path: raw.dhu.path.map(abs),
+        dhu_ini: raw.dhu.ini.map(abs),
+        headless: raw.dhu.headless.unwrap_or(false),
+        backend: raw.session.backend,
+        serial: raw.session.serial,
+        reverse: raw.session.reverse.unwrap_or_default(),
+        artifacts_dir: raw.test.artifacts_dir.map(abs),
+        report: raw.test.report.unwrap_or_default(),
+        skip_unsupported: raw.test.skip_unsupported.unwrap_or(false),
+        port: raw.daemon.port,
+    })
 }
 
 /// Flag first, then the config file's value.
@@ -219,38 +189,31 @@ mod tests {
     use super::*;
 
     fn p(s: &str) -> Config {
-        parse(s, Path::new("/home/u/.config/opendhu/config.toml")).unwrap()
+        parse(s, Path::new("/home/u/project/opendhu.yaml")).unwrap()
     }
 
     #[test]
     fn empty_file_gives_defaults_but_records_its_source() {
-        let c = p("");
+        let c = p("suites: {}\n");
         assert_eq!(
             c.sources,
-            vec![PathBuf::from("/home/u/.config/opendhu/config.toml")]
+            vec![PathBuf::from("/home/u/project/opendhu.yaml")]
         );
         assert!(c.dhu_path.is_none() && c.reverse.is_empty() && !c.headless);
     }
 
     #[test]
     fn relative_paths_resolve_against_the_file_directory() {
-        let c =
-            p("[dhu]\npath = \"bin/dhu\"\nini = \"/abs/x.ini\"\n[test]\nartifacts_dir = \"out\"");
-        assert_eq!(
-            c.dhu_path.unwrap(),
-            Path::new("/home/u/.config/opendhu/bin/dhu")
-        );
+        let c = p("dhu:\n  path: bin/dhu\n  ini: /abs/x.ini\ntest:\n  artifacts_dir: out\n");
+        assert_eq!(c.dhu_path.unwrap(), Path::new("/home/u/project/bin/dhu"));
         assert_eq!(c.dhu_ini.unwrap(), Path::new("/abs/x.ini"));
-        assert_eq!(
-            c.artifacts_dir.unwrap(),
-            Path::new("/home/u/.config/opendhu/out")
-        );
+        assert_eq!(c.artifacts_dir.unwrap(), Path::new("/home/u/project/out"));
     }
 
     #[test]
     fn full_file_parses() {
         let c = p(
-            "[dhu]\nheadless = true\n[session]\nserial = \"ABC\"\nreverse = [10101, 8080]\n[test]\nreport = [\"json\", \"junit\", \"html\"]\nskip_unsupported = true\n[daemon]\nport = 9000",
+            "suites: {sample: e2e/sample.yaml}\ndhu:\n  headless: true\nsession:\n  serial: ABC\n  reverse: [10101, 8080]\ntest:\n  report: [json, junit, html]\n  skip_unsupported: true\ndaemon:\n  port: 9000\n",
         );
         assert!(c.headless && c.skip_unsupported);
         assert_eq!(c.serial.as_deref(), Some("ABC"));
@@ -260,26 +223,30 @@ mod tests {
             vec![ReportFormat::Json, ReportFormat::Junit, ReportFormat::Html]
         );
         assert_eq!(c.port, Some(9000));
+        assert_eq!(
+            c.suites["sample"],
+            Path::new("/home/u/project/e2e/sample.yaml")
+        );
     }
 
     #[test]
     fn unknown_keys_and_sections_are_errors_that_name_the_file() {
-        for bad in ["[dhu]\npth = \"x\"", "[nope]\na = 1", "top = 1"] {
-            let e = parse(bad, Path::new("/c.toml")).unwrap_err();
+        for bad in ["dhu:\n  pth: x", "nope:\n  a: 1", "top: 1"] {
+            let e = parse(bad, Path::new("/c.yaml")).unwrap_err();
             assert!(matches!(e, Error::InvalidArgs(_)), "{bad}");
-            assert!(e.to_string().contains("/c.toml"), "{e}");
+            assert!(e.to_string().contains("/c.yaml"), "{e}");
         }
     }
 
     #[test]
     fn wrong_types_and_bad_ports_are_errors() {
         for bad in [
-            "[session]\nreverse = \"10101\"",
-            "[session]\nreverse = [0]",
-            "[session]\nreverse = [70000]",
-            "[test]\nreport = [\"csv\"]",
+            "session:\n  reverse: '10101'",
+            "session:\n  reverse: [0]",
+            "session:\n  reverse: [70000]",
+            "test:\n  report: [csv]",
         ] {
-            assert!(parse(bad, Path::new("/c.toml")).is_err(), "{bad}");
+            assert!(parse(bad, Path::new("/c.yaml")).is_err(), "{bad}");
         }
     }
 
@@ -294,73 +261,55 @@ mod tests {
     }
 
     #[test]
-    fn default_location_uses_only_opendhu_and_named_files_must_exist() {
+    fn missing_project_file_gives_defaults_and_named_files_must_exist() {
         let dir = std::env::temp_dir().join(format!("opendhu-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let none = Locator {
             opendhu_config: None,
-            xdg_config_home: Some(dir.clone()),
-            home: None,
         };
         assert_eq!(load(&none, &dir).unwrap(), Config::default());
         let named = Locator {
-            opendhu_config: Some(dir.join("missing.toml")),
-            xdg_config_home: None,
-            home: None,
+            opendhu_config: Some(dir.join("missing.yaml")),
         };
         assert!(load(&named, &dir).is_err());
-        let sub = dir.join("opendhu");
-        std::fs::create_dir_all(&sub).unwrap();
-        std::fs::write(sub.join("config.toml"), "[session]\nserial = \"Z\"").unwrap();
+        std::fs::write(dir.join("opendhu.yaml"), "session:\n  serial: Z\n").unwrap();
         assert_eq!(load(&none, &dir).unwrap().serial.as_deref(), Some("Z"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn nearest_project_file_overrides_user_settings_and_keeps_other_values() {
+    fn nearest_project_file_supplies_session_and_suite_settings() {
         let dir = std::env::temp_dir().join(format!(
             "opendhu-project-cfg-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        let user = dir.join("user/opendhu");
         let project = dir.join("project");
         let nested = project.join("app/src");
-        std::fs::create_dir_all(&user).unwrap();
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(
-            user.join("config.toml"),
-            "[dhu]\npath = \"bin/dhu\"\nini = \"global.ini\"\n[session]\nbackend = \"native\"\nserial = \"FAKE0001\"",
-        )
-        .unwrap();
-        std::fs::write(
-            project.join("opendhu.toml"),
-            "[dhu]\nini = \"head-unit/nissan_leaf.ini\"\n[session]\nbackend = \"dhu\"",
+            project.join("opendhu.yaml"),
+            "suites: {robotaxi: e2e/robotaxi.yaml}\ndhu:\n  ini: head-unit/nissan_leaf.ini\nsession:\n  backend: dhu\n  serial: FAKE0001\n",
         )
         .unwrap();
         let locator = Locator {
             opendhu_config: None,
-            xdg_config_home: Some(dir.join("user")),
-            home: None,
         };
 
         let cfg = load(&locator, &nested).unwrap();
         assert_eq!(cfg.backend, Some(BackendArg::Dhu));
         assert_eq!(cfg.serial.as_deref(), Some("FAKE0001"));
         assert_eq!(
-            cfg.dhu_path.as_deref(),
-            Some(user.join("bin/dhu").as_path())
-        );
-        assert_eq!(
             cfg.dhu_ini.as_deref(),
             Some(project.join("head-unit/nissan_leaf.ini").as_path())
         );
+        assert_eq!(cfg.suites["robotaxi"], project.join("e2e/robotaxi.yaml"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn explicit_config_skips_project_and_user_files() {
+    fn explicit_config_skips_project_discovery() {
         let dir = std::env::temp_dir().join(format!(
             "opendhu-explicit-cfg-{}-{:?}",
             std::process::id(),
@@ -368,26 +317,21 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let project = dir.join("project");
-        let user = dir.join("user/opendhu");
         std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&user).unwrap();
-        std::fs::write(project.join("opendhu.toml"), "[session]\nbackend = \"dhu\"").unwrap();
-        std::fs::write(user.join("config.toml"), "[session]\nserial = \"USER\"").unwrap();
+        std::fs::write(project.join("opendhu.yaml"), "session:\n  backend: dhu\n").unwrap();
         std::fs::write(
-            project.join("chosen.toml"),
-            "[session]\nserial = \"EXPLICIT\"",
+            project.join("chosen.yaml"),
+            "session:\n  serial: EXPLICIT\n",
         )
         .unwrap();
         let locator = Locator {
-            opendhu_config: Some(PathBuf::from("chosen.toml")),
-            xdg_config_home: Some(dir.join("user")),
-            home: None,
+            opendhu_config: Some(PathBuf::from("chosen.yaml")),
         };
 
         let cfg = load(&locator, &project).unwrap();
         assert_eq!(cfg.backend, None);
         assert_eq!(cfg.serial.as_deref(), Some("EXPLICIT"));
-        assert_eq!(cfg.sources, vec![project.join("chosen.toml")]);
+        assert_eq!(cfg.sources, vec![project.join("chosen.yaml")]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -401,17 +345,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let child = dir.join("child");
         std::fs::create_dir_all(&child).unwrap();
-        std::fs::write(dir.join("opendhu.toml"), "[dhu]\nini = \"parent.ini\"").unwrap();
-        std::fs::write(child.join("opendhu.toml"), "[dhu]\nini = \"child.ini\"").unwrap();
+        std::fs::write(dir.join("opendhu.yaml"), "dhu:\n  ini: parent.ini\n").unwrap();
+        std::fs::write(child.join("opendhu.yaml"), "dhu:\n  ini: child.ini\n").unwrap();
         let locator = Locator {
             opendhu_config: None,
-            xdg_config_home: Some(dir.join("missing-xdg")),
-            home: None,
         };
 
         let cfg = load(&locator, &child).unwrap();
         assert_eq!(cfg.dhu_ini, Some(child.join("child.ini")));
-        assert_eq!(cfg.sources, vec![child.join("opendhu.toml")]);
+        assert_eq!(cfg.sources, vec![child.join("opendhu.yaml")]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

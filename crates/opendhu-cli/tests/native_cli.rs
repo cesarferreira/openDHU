@@ -164,10 +164,10 @@ fn the_config_file_can_choose_the_backend_and_its_dhu_settings_are_then_ignored(
     let s = Sandbox::new();
     let dir = s.scratch("cfg");
     std::fs::create_dir_all(&dir).unwrap();
-    let cfg = dir.join("config.toml");
+    let cfg = dir.join("config.yaml");
     std::fs::write(
         &cfg,
-        "[session]\nbackend = \"native\"\nserial = \"FAKE0001\"\n[dhu]\npath = \"/no/such/dhu\"\nheadless = true\n",
+        "session:\n  backend: native\n  serial: FAKE0001\ndhu:\n  path: /no/such/dhu\n  headless: true\n",
     )
     .unwrap();
     let o = s.opendhu_env(
@@ -350,8 +350,8 @@ fn dhu_flag_overrides_a_configured_native_backend() {
     let s = Sandbox::new();
     let dir = s.scratch("cfg");
     std::fs::create_dir_all(&dir).unwrap();
-    let cfg = dir.join("config.toml");
-    std::fs::write(&cfg, "[session]\nbackend = \"native\"\n").unwrap();
+    let cfg = dir.join("config.yaml");
+    std::fs::write(&cfg, "session:\n  backend: native\n").unwrap();
     let o = s.opendhu_env(
         &[
             "session",

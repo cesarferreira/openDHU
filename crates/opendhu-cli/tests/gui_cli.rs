@@ -25,7 +25,7 @@ fn launch(cli: &Path, path: &Path) -> Output {
     Command::new(cli)
         .arg("gui")
         .env("PATH", path)
-        .env("OPENDHU_CONFIG", "/no/such/config.toml")
+        .env("OPENDHU_CONFIG", "/no/such/config.yaml")
         .output()
         .unwrap()
 }
@@ -214,7 +214,7 @@ fn web_opens_the_browser_unless_told_not_to_and_passes_the_port() {
             .arg("web")
             .args(args)
             .env("PATH", s.scratch("empty-path"))
-            .env("OPENDHU_CONFIG", "/no/such/config.toml")
+            .env("OPENDHU_CONFIG", "/no/such/config.yaml")
             .output()
             .unwrap();
         assert_eq!(code(&output), 0, "{}", text(&output));
@@ -231,7 +231,7 @@ fn missing_web_viewer_explains_how_to_install_it() {
     let output = Command::new(&cli)
         .arg("web")
         .env("PATH", s.scratch("empty-path"))
-        .env("OPENDHU_CONFIG", "/no/such/config.toml")
+        .env("OPENDHU_CONFIG", "/no/such/config.yaml")
         .output()
         .unwrap();
     assert_eq!(code(&output), 3, "{}", text(&output));

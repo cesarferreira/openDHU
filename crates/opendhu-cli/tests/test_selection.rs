@@ -21,7 +21,7 @@ fn named_suite_resolves_from_a_subdirectory_and_filters_before_device_setup() {
     std::fs::create_dir_all(root.join("e2e/tests")).unwrap();
     std::fs::write(
         root.join("opendhu.yaml"),
-        "suites:\n  robotaxi: e2e/production.yaml\n  storybook: e2e/storybook.yaml\n",
+        "suites:\n  robotaxi: e2e/production.yaml\n  storybook: e2e/storybook.yaml\nsession:\n  backend: dhu\ndhu:\n  ini: head-unit/nissan_leaf.ini\n",
     )
     .unwrap();
     std::fs::write(root.join("e2e/production.yaml"), "version: 1\nenvironment: {emulator: medium_phone, apk: absent.apk, package: test.app, appLabel: Test}\ntests: [tests/*.yaml]\n").unwrap();
