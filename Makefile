@@ -5,7 +5,7 @@
 # error if a DHU or openDHU daemon is already running, so they never touch someone else's session.
 
 .PHONY: help all build build-release tag release ensure-git-cliff ensure-cargo-release \
-        install install-release install-debug install-cli install-native install-gui install-tui install-web \
+        install install-release install-debug install-cli install-native install-gui install-tui install-web install-skill \
         clean test check fmt lint run daemon gui web doctor stop demo vendor-check validate-examples \
         hw hw-dhu hw-native docker-build docker-test
 
@@ -50,6 +50,7 @@ help:
 	@echo "    install             aa, opendhu-native-hu, opendhu-gui, opendhu-tui and opendhu-web (release)"
 	@echo "    install-release     alias for install"
 	@echo "    install-debug       the same, debug (development only)"
+	@echo "    install-skill       aa skill install: the agent skill into ~/.claude/skills and ~/.agents/skills"
 	@echo "    install-cli | install-native | install-gui | install-tui | install-web   one of them"
 	@echo
 	@echo "  Run (usage: make run ARGS=\"status\")"
@@ -182,6 +183,10 @@ install-web:
 	CARGO_INCREMENTAL=0 cargo build --locked --bins -p opendhu-web $(INSTALL_BUILD_FLAG)
 	@mkdir -p "$(INSTALL_BIN_DIR)"
 	install -m 755 "$(INSTALL_TARGET_DIR)/$(INSTALL_PROFILE)/opendhu-web" "$(INSTALL_BIN_DIR)/opendhu-web"
+
+# Install the agent skill (embedded in aa) for Claude Code and ~/.agents. Needs `make install-cli` first.
+install-skill:
+	$(OPENDHU_BIN) skill install --force
 
 clean:
 	cargo clean

@@ -33,6 +33,13 @@ aa doctor     # checks the environment, including Android Auto on each device
 For a real phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
 Development apps need [head-unit credentials](docs/native-backend.md#debugging-knobs).
 
+### Agent skill
+
+The skill is built into the binary. `aa skill install` writes it to `~/.claude/skills` and `~/.agents/skills`
+(`--project` for the current repo, `--dir` for anywhere else, `--force` to replace a changed copy), so coding
+agents learn to start a session, tap, swipe, press keys and take screenshots. `aa skill print` shows it.
+Claude Code, Codex, Cursor, opencode and pi all find it there. Rerun it after upgrading `aa`.
+
 ## Write a test
 
 A test is a YAML file. Each step can carry an `as:` label, and the run prints that instead of the mechanics:

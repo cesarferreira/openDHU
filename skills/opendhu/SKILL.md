@@ -1,0 +1,1 @@
+../../crates/opendhu-cli/skill/SKILL.md

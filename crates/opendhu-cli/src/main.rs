@@ -12,6 +12,7 @@ mod recording;
 mod reverse;
 mod services;
 mod session_backend;
+mod skill;
 mod suite;
 mod suite_config;
 mod suite_doctor;
@@ -198,6 +199,11 @@ enum Command {
         #[command(subcommand)]
         what: SetupKind,
     },
+    /// Install or print the agent skill that teaches coding agents to drive `aa`
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
     /// Run the openDHU daemon in the foreground
     ///
     /// It serves the HTTP API on 127.0.0.1 until stopped with Ctrl+C or SIGTERM, which also stops the
@@ -251,6 +257,24 @@ enum SessionAction {
     Status,
     /// Stop the running session and start it again with the same settings
     Restart,
+}
+
+#[derive(Subcommand, Debug)]
+enum SkillAction {
+    /// Write the skill to ~/.claude/skills and ~/.agents/skills (or --project, or --dir)
+    Install {
+        /// Install into ./.claude/skills and ./.agents/skills instead of the home directory
+        #[arg(long, conflicts_with = "dir")]
+        project: bool,
+        /// Skills directory to install into (repeatable); replaces the defaults
+        #[arg(long)]
+        dir: Vec<PathBuf>,
+        /// Replace an existing, different skill
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the skill (SKILL.md) to stdout
+    Print,
 }
 
 #[derive(Subcommand, Debug)]
@@ -766,6 +790,39 @@ fn run(cli: Cli) -> Result<u8> {
                     force,
                 },
         } => setup_gearhead(apk, download, version, sha256, serial, force, json),
+        Command::Skill { action } => match action {
+            SkillAction::Print => {
+                print!("{}", skill::SKILL);
+                Ok(0)
+            }
+            SkillAction::Install {
+                project,
+                dir,
+                force,
+            } => {
+                let roots = if dir.is_empty() {
+                    skill::default_roots(project, &current_dir()?)?
+                } else {
+                    dir
+                };
+                let done = skill::install(&roots, force)?;
+                if json {
+                    let items: Vec<_> = done
+                        .iter()
+                        .map(|(p, s)| serde_json::json!({"path": p, "status": s}))
+                        .collect();
+                    println!(
+                        "{}",
+                        serde_json::json!({ "skill": "opendhu", "files": items })
+                    );
+                } else {
+                    for (p, s) in &done {
+                        println!("{s}  {}", p.display());
+                    }
+                }
+                Ok(0)
+            }
+        },
         Command::Daemon {
             port,
             exit_when_idle,
