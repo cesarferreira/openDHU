@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-11-09
+
+### 💼 Other
+
+- Add aa skill install: an agent skill embedded in the binary
 ## [0.3.0] - 2026-11-07
 
 ### 💼 Other
