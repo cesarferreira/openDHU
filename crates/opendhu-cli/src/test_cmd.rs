@@ -52,6 +52,9 @@ pub struct Options {
     pub output: Arc<crate::test_output::Output>,
     pub validate: bool,
     pub usb: bool,
+    /// Run a managed suite on this already running device instead of finding or booting
+    /// `environment.emulator`.
+    pub serial: Option<String>,
     /// Let a managed emulator run fix up Android Auto's phone-side settings.
     pub phone_setup: bool,
     pub show_head_unit: bool,
@@ -253,6 +256,11 @@ pub(crate) fn run_with_emulators(
     if opts.usb {
         return Err(Error::InvalidArgs(
             "--usb requires a managed suite (for example `aa test sample --usb`)".into(),
+        ));
+    }
+    if opts.serial.is_some() {
+        return Err(Error::InvalidArgs(
+            "--serial requires a managed suite (for example `aa test sample --serial emulator-5554`)".into(),
         ));
     }
     let files = collect(&opts.paths)?;
@@ -779,11 +787,13 @@ fn run_all(opts: Options) -> Result<u8> {
         if tests.is_empty() {
             continue;
         }
-        if opts.usb && !managed {
-            return Err(Error::InvalidArgs(format!(
-                "--usb requires a managed suite: {}",
-                suite.path.display(),
-            )));
+        for (flag, set) in [("--usb", opts.usb), ("--serial", opts.serial.is_some())] {
+            if set && !managed {
+                return Err(Error::InvalidArgs(format!(
+                    "{flag} requires a managed suite: {}",
+                    suite.path.display(),
+                )));
+            }
         }
         let known: Vec<Option<u64>> = tests
             .iter()

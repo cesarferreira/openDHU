@@ -61,6 +61,10 @@ with `aa session restart` if needed. Native key presses such as Home are also re
 aa test --list                      # registered suites in opendhu.yaml
 aa test --validate path/to/tests    # parse YAML without devices
 aa test sample --headless           # run a suite; reports land in ./build/test-results
+aa test sample --serial emulator-5556  # run on this attached device; never boots the suite's AVD
 ```
+
+`--serial` is for several emulators that share one AVD name (name lookup would be ambiguous). Give each
+parallel run its own `OPENDHU_RUNTIME_DIR`, `--artifacts-dir` and service ports. It conflicts with `--usb`.
 
 Full docs: the repo's `docs/` (`api.md`, `testing.md`, `native-backend.md`).

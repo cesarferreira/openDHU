@@ -914,3 +914,101 @@ fn pick_needs_a_terminal_and_refuses_json() {
         assert!(text(&output).contains(message), "{}", text(&output));
     }
 }
+
+fn serial_args<'a>(s: &'a UsbSuite, serial: &'a str) -> Vec<&'a str> {
+    vec![
+        "test",
+        s.suite.to_str().unwrap(),
+        "--serial",
+        serial,
+        "--headless",
+        "--no-interactive",
+        "--artifacts-dir",
+        s.artifacts.to_str().unwrap(),
+    ]
+}
+
+#[test]
+fn serial_selects_one_of_several_emulators_with_the_same_avd_name() {
+    let s = UsbSuite::emulator_fixture();
+    let root = s.suite.parent().unwrap();
+    let avd = std::fs::read_to_string(root.join("avd-name")).unwrap();
+    std::fs::write(root.join("other-avd"), &avd).unwrap();
+    std::fs::write(root.join("emulator-running"), "external").unwrap();
+    std::fs::write(root.join("other-running"), "external").unwrap();
+    let output = s
+        .sandbox
+        .opendhu_with(&serial_args(&s, "emulator-5556"), &s.env);
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(s.artifacts.join("suite.json")).unwrap()).unwrap();
+    assert_eq!(metadata["serial"], "emulator-5556");
+    assert_eq!(metadata["transport"], "tcp");
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert!(calls.contains("-s emulator-5556 install -r -t"), "{calls}");
+    assert!(!calls.contains("-s emulator-5554"), "{calls}");
+    assert!(!root.join("emulator-events").exists(), "no emulator booted");
+    assert!(!calls.contains("emu kill"), "{calls}");
+    assert!(root.join("emulator-running").exists());
+    assert!(root.join("other-running").exists());
+}
+
+#[test]
+fn serial_of_an_absent_device_fails_without_booting_the_suite_emulator() {
+    let s = UsbSuite::emulator_fixture();
+    let root = s.suite.parent().unwrap();
+    let output = s
+        .sandbox
+        .opendhu_with(&serial_args(&s, "emulator-5558"), &s.env);
+    assert_eq!(code(&output), 4, "{}", text(&output));
+    assert!(text(&output).contains("emulator-5558"), "{}", text(&output));
+    assert!(!root.join("emulator-events").exists());
+}
+
+#[test]
+fn serial_rejects_ordinary_test_files_with_its_own_message() {
+    let s = UsbSuite::new("List of devices attached\n");
+    let output = s.sandbox.opendhu(&[
+        "test",
+        s.suite
+            .parent()
+            .unwrap()
+            .join("test.yaml")
+            .to_str()
+            .unwrap(),
+        "--serial",
+        "emulator-5556",
+    ]);
+    assert_eq!(code(&output), 2, "{}", text(&output));
+    assert!(
+        text(&output).contains("--serial requires a managed suite"),
+        "{}",
+        text(&output)
+    );
+}
+
+#[test]
+fn all_with_serial_runs_every_suite_on_that_device() {
+    let s = UsbSuite::emulator_fixture();
+    s.register_all();
+    let root = s.suite.parent().unwrap();
+    let avd = std::fs::read_to_string(root.join("avd-name")).unwrap();
+    std::fs::write(root.join("other-avd"), &avd).unwrap();
+    std::fs::write(root.join("emulator-running"), "external").unwrap();
+    std::fs::write(root.join("other-running"), "external").unwrap();
+    let output = s
+        .all_command(&["--json", "--serial", "emulator-5556"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&output), 0, "{}", text(&output));
+    for suite in ["first", "second"] {
+        let metadata: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(s.artifacts.join(suite).join("suite.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(metadata["serial"], "emulator-5556", "{suite}");
+    }
+    let calls = std::fs::read_to_string(root.join("calls")).unwrap();
+    assert!(!calls.contains("-s emulator-5554"), "{calls}");
+    assert!(!root.join("emulator-events").exists());
+}

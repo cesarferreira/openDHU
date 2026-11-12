@@ -448,6 +448,11 @@ removes the forward and private daemon. A standalone suite stops the emulator it
 all-suites run retains that emulator until the entire run ends. Pre-existing emulators stay running.
 The AVD's user data is preserved: this is not a fresh device image or a production backend test.
 
+Pass `--serial SERIAL` to run on an already attached device instead of finding `environment.emulator` by
+AVD name; nothing is booted or stopped for it, and a missing device is an error. This lets several emulators
+with the same AVD name run suites side by side, one `aa test --serial` per device (give each its own
+`OPENDHU_RUNTIME_DIR`, `--artifacts-dir` and service ports). `--serial` conflicts with `--usb`.
+
 Pass `--usb` to use a physical phone instead of `environment.emulator`:
 
 ```bash

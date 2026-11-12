@@ -144,6 +144,10 @@ enum Command {
         /// Run a managed suite on the single connected USB phone instead of its emulator
         #[arg(long)]
         usb: bool,
+        /// Run a managed suite on this already running device (emulator or phone) instead of
+        /// finding or booting its `environment.emulator`; the suite's emulator is not started
+        #[arg(long, conflicts_with = "usb")]
+        serial: Option<String>,
         /// Validate suite and test files without starting a device or session
         #[arg(long)]
         validate: bool,
@@ -647,6 +651,7 @@ fn run(cli: Cli) -> Result<u8> {
             artifacts_dir,
             skip_unsupported,
             usb,
+            serial,
             validate,
             no_phone_setup,
             show_head_unit,
@@ -719,6 +724,7 @@ fn run(cli: Cli) -> Result<u8> {
                 filter,
                 only,
                 usb,
+                serial,
                 validate,
                 phone_setup: !no_phone_setup,
                 record,

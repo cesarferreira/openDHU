@@ -494,6 +494,21 @@ fn find_emulator(adb: &Path, name: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// `--serial` names an already running device. Nothing is booted for it, so a missing or
+/// half-started device is an error rather than a reason to start `environment.emulator`.
+fn require_booted_device(adb: &Path, serial: &str) -> Result<()> {
+    match device::adb(adb, serial, &["get-state"]) {
+        Ok(state) if state.trim() == "device" => Ok(()),
+        Ok(state) => Err(Error::DeviceDisconnected(format!(
+            "device {serial} is {}; check `adb devices -l`",
+            state.trim(),
+        ))),
+        Err(_) => Err(Error::DeviceDisconnected(format!(
+            "device {serial} is not attached; check `adb devices -l`",
+        ))),
+    }
+}
+
 pub(crate) fn find_usb_phone(adb: &Path) -> Result<String> {
     let output = device::command(adb, &["devices", "-l"], Duration::from_secs(20))?;
     let devices = opendhu_dhu::adb::parse_devices(&output);
@@ -927,7 +942,13 @@ fn run_prepared(
     } else {
         None
     };
-    let device_name = usb_serial.as_deref().unwrap_or(&suite.environment.emulator);
+    if let Some(serial) = &opts.serial {
+        require_booted_device(&adb, serial)?;
+    }
+    let device_name = usb_serial
+        .as_deref()
+        .or(opts.serial.as_deref())
+        .unwrap_or(&suite.environment.emulator);
     let lock = if !opts.usb
         && let Some(pool) = emulators.as_deref_mut()
     {
@@ -976,6 +997,9 @@ fn run_prepared(
     let serial = if let Some(serial) = usb_serial {
         phase(&output, format!("Using USB phone {serial}"));
         serial
+    } else if let Some(serial) = &opts.serial {
+        phase(&output, format!("Using device {serial}"));
+        serial.clone()
     } else {
         phase(
             &output,
@@ -1296,6 +1320,7 @@ fn run_prepared(
     });
     opts.cancel = Some(Arc::clone(&cancel));
     opts.usb = false; // Device setup is complete; ordinary tests use the leased session.
+    opts.serial = None;
     opts.paths = tests;
     opts.runtime_dir = Some(lease.runtime.clone());
     opts.app = Some(Application {

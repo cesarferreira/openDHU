@@ -106,6 +106,17 @@ aa test sample --headless  # no head-unit window
 
 Without `--headless`, the head-unit window opens so you can watch. Use it on servers and in CI.
 
+### On a specific running device
+
+```bash
+aa test sample --serial emulator-5556  # run on this adb device instead of finding or booting the AVD
+```
+
+`--serial` skips the lookup of `environment.emulator` by AVD name and never boots an emulator. Use it when several
+emulators share one AVD name, for example parallel shards of one snapshot, each behind its own adb server. The device
+must be attached and in the `device` state; the run is otherwise the same as an emulator run (Android Auto check,
+reverse tunnels, head-unit server). Two runs cannot lease the same serial at once. It cannot be combined with `--usb`.
+
 ### On a USB phone
 
 ```bash
