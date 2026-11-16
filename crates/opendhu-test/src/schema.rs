@@ -78,6 +78,16 @@ pub enum Step {
     /// start from state the app has not cached yet. Other entries and app data are kept.
     #[serde(rename = "app.removePreferences")]
     AppRemovePreferences { file: String, keys: Vec<String> },
+    /// Stop the app and set entries in one of its SharedPreferences files, so a journey can start
+    /// from app-local state that no backend fixture can reach. Other entries and app data are kept.
+    #[serde(rename = "app.setPreferences")]
+    AppSetPreferences {
+        file: String,
+        #[serde(default)]
+        booleans: std::collections::BTreeMap<String, bool>,
+        #[serde(default)]
+        strings: std::collections::BTreeMap<String, String>,
+    },
     #[serde(rename = "keyboard.type")]
     KeyboardType { text: String, timeout: Dur },
     #[serde(rename = "device.inputText")]
@@ -138,6 +148,7 @@ impl Step {
             Self::AppOpen => "app.open",
             Self::AppRestart => "app.restart",
             Self::AppRemovePreferences { .. } => "app.removePreferences",
+            Self::AppSetPreferences { .. } => "app.setPreferences",
             Self::DeviceInputText { .. } => "device.inputText",
             Self::KeyboardType { .. } => "keyboard.type",
             Self::UiWaitFor { .. } => "ui.waitFor",
@@ -166,6 +177,18 @@ impl Step {
             Self::AppRestart => "restart the app".into(),
             Self::AppRemovePreferences { file, keys } => {
                 format!("remove {} from {file}", keys.join(", "))
+            }
+            Self::AppSetPreferences {
+                file,
+                booleans,
+                strings,
+            } => {
+                let keys: Vec<&str> = booleans
+                    .keys()
+                    .chain(strings.keys())
+                    .map(String::as_str)
+                    .collect();
+                format!("set {} in {file}", keys.join(", "))
             }
             Self::KeyboardType { text, .. } | Self::DeviceInputText { text } => {
                 format!("type {text:?}")
@@ -489,6 +512,35 @@ fn validate(t: &TestFile) -> Result<()> {
                     return Err(bad(i, a, "`keys` has nothing to remove"));
                 }
                 if !name_ok(file) || !keys.iter().all(|k| name_ok(k)) {
+                    return Err(bad(
+                        i,
+                        a,
+                        "file and keys may only use letters, digits, '.', '_' and '-'",
+                    ));
+                }
+            }
+            Step::AppSetPreferences {
+                file,
+                booleans,
+                strings,
+            } => {
+                let name_ok = |name: &str| {
+                    !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+                };
+                if booleans.is_empty() && strings.is_empty() {
+                    return Err(bad(i, a, "`booleans` and `strings` have nothing to set"));
+                }
+                if let Some(key) = booleans.keys().find(|key| strings.contains_key(*key)) {
+                    return Err(bad(
+                        i,
+                        a,
+                        format!("{key:?} is set as both a boolean and a string"),
+                    ));
+                }
+                if !name_ok(file) || !booleans.keys().chain(strings.keys()).all(|k| name_ok(k)) {
                     return Err(bad(
                         i,
                         a,

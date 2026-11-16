@@ -93,6 +93,18 @@ pub trait ApplicationControl {
             "app.removePreferences requires a suite application context".into(),
         ))
     }
+    /// Stop the application and set boolean and string entries in one of its SharedPreferences
+    /// files, replacing entries of the same name.
+    fn set_preferences(
+        &self,
+        _file: &str,
+        _booleans: &std::collections::BTreeMap<String, bool>,
+        _strings: &std::collections::BTreeMap<String, String>,
+    ) -> opendhu_core::Result<()> {
+        Err(Error::InvalidArgs(
+            "app.setPreferences requires a suite application context".into(),
+        ))
+    }
     /// A `uiautomator dump` of the phone's own screen.
     fn phone_ui_dump(&self) -> opendhu_core::Result<String> {
         Err(Error::InvalidArgs(
@@ -506,6 +518,26 @@ fn exec(step: &Step, backend: &mut dyn HeadUnitBackend, cfg: &RunConfig) -> End 
                 Err(error) => End::error(&error),
             }
         }
+        Step::AppSetPreferences {
+            file,
+            booleans,
+            strings,
+        } => {
+            let Some(application) = cfg.application else {
+                return End::error(&Error::InvalidArgs(
+                    "app.setPreferences requires a suite application context".into(),
+                ));
+            };
+            let keys: Vec<&str> = booleans
+                .keys()
+                .chain(strings.keys())
+                .map(String::as_str)
+                .collect();
+            match application.set_preferences(file, booleans, strings) {
+                Ok(()) => End::pass(format!("set {} in {file}", keys.join(", "))),
+                Err(error) => End::error(&error),
+            }
+        }
         Step::DeviceInputText { text } => {
             if let Err(error) = schema::validate_input_text(text) {
                 return End::error(&error);
@@ -683,6 +715,8 @@ fn screenshot(rel: &str, backend: &mut dyn HeadUnitBackend, artifacts: &Path) ->
 
 /// How long a tap with an expected result gets to take effect before it is sent again.
 const RETAP_AFTER: Duration = Duration::from_secs(5);
+/// Launcher taps skipped because the screen changed after OCR, before tapping regardless.
+const MAX_STALE_LAUNCHER_SKIPS: u32 = 2;
 
 static SCREEN_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -708,6 +742,7 @@ fn screen_text(
     let mut previous: Option<(Option<u64>, Vec<crate::screen::Word>)> = None;
     let mut taps: Vec<(u32, u32)> = Vec::new();
     let mut last_tap_at: Option<Duration> = None;
+    let mut stale_skips = 0u32;
     loop {
         if cfg.clock.cancelled() {
             return End::interrupted("interrupted while observing projected UI");
@@ -803,6 +838,27 @@ fn screen_text(
                 let settled =
                     last_tap_at.is_none_or(|at| cfg.clock.now().saturating_sub(at) >= RETAP_AFTER);
                 if until.is_none() || (cfg.clock.now() < deadline && settled) {
+                    // OCR takes about a second, and Android Auto can resume the app in that time.
+                    // A launcher tap at the label's position would then land on the app's own
+                    // screen (Robot UI's Drive row), long after the step passed. Tap only while the
+                    // screen still matches the frame the label was read from. A screen that never
+                    // settles is tapped anyway after a few re-reads, as before.
+                    if launcher && stale_skips < MAX_STALE_LAUNCHER_SKIPS {
+                        let recheck = dir.join(format!("screen-{id:04}-recheck.png"));
+                        if let Err(e) = backend.screenshot(&recheck) {
+                            return End::error(&e);
+                        }
+                        let now_print = std::fs::read(&recheck).ok().map(|bytes| {
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                            std::hash::Hash::hash(&bytes, &mut hasher);
+                            std::hash::Hasher::finish(&hasher)
+                        });
+                        if fingerprint.is_some() && now_print != fingerprint {
+                            stale_skips += 1;
+                            pending = None;
+                            continue;
+                        }
+                    }
                     if let Err(e) = backend.tap(x, y) {
                         return End::error(&e);
                     }

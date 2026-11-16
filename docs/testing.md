@@ -597,9 +597,11 @@ session being created leaves Android Auto's host unable to show the app for a fe
 sessions start, but the host never asks for a template; restarting the app or Android Auto does not
 help). Without this wait that coincidence caused about 7% of fresh-session runs to fail.
 
-`preferences` sets boolean entries in one of the app's SharedPreferences files (`file` is the name
-without `.xml`) after install and before launch, so a journey can turn on a developer flag instead of
-relying on a manually provisioned AVD. The app is stopped first, other entries in the file are kept,
+`preferences` sets `booleans` and `strings` entries in one of the app's SharedPreferences files (`file`
+is the name without `.xml`) after install and before launch, so a journey can turn on a developer flag
+instead of relying on a manually provisioned AVD. A string can hold any text, including JSON for an app
+that stores objects as strings; it is escaped as Android writes it. An entry with the same name is
+replaced whatever its type. The app is stopped first, other entries in the file are kept,
 and the file is written through `run-as`, so the app must be a debuggable build. Like other
 environment fields, a child suite's `preferences` replaces the inherited one completely; a shared
 base can set a flag to `false` so every suite starts from a known state.
@@ -614,6 +616,19 @@ behaviour that a cached value from an earlier test would hide. It needs a debugg
 - action: app.removePreferences
   file: APPLICATION_SHARED_PREFERENCES
   keys: [cachedProfile]
+- action: app.open
+```
+
+`app.setPreferences` is the per-test counterpart of `preferences`: it force-stops the app and sets
+`booleans` and `strings` entries in one SharedPreferences `file`, replacing entries of the same name and
+keeping the rest. Use it when only some tests need app-local state that no backend fixture can reach,
+for example a selection the app caches as JSON. A key may not appear in both maps.
+
+```yaml
+- action: app.setPreferences
+  file: APPLICATION_SHARED_PREFERENCES
+  strings:
+    selectedItem: '{"id":"item-1","status":"started"}'
 - action: app.open
 ```
 

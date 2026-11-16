@@ -69,6 +69,18 @@ pub(crate) struct Preferences {
     pub(crate) file: String,
     #[serde(default)]
     pub(crate) booleans: std::collections::BTreeMap<String, bool>,
+    /// String entries; any text, including JSON for an app that stores objects as strings.
+    #[serde(default)]
+    pub(crate) strings: std::collections::BTreeMap<String, String>,
+}
+
+impl Preferences {
+    pub(crate) fn values(&self) -> device::PreferenceValues {
+        device::PreferenceValues {
+            booleans: self.booleans.clone(),
+            strings: self.strings.clone(),
+        }
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +133,18 @@ impl opendhu_test::runner::ApplicationControl for Application {
     }
     fn remove_preferences(&self, file: &str, keys: &[String]) -> Result<()> {
         device::remove_preferences(&self.adb, &self.serial, &self.package, file, keys)
+    }
+    fn set_preferences(
+        &self,
+        file: &str,
+        booleans: &std::collections::BTreeMap<String, bool>,
+        strings: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        let values = device::PreferenceValues {
+            booleans: booleans.clone(),
+            strings: strings.clone(),
+        };
+        device::set_preferences(&self.adb, &self.serial, &self.package, file, &values)
     }
     fn phone_ui_dump(&self) -> Result<String> {
         // While projecting, the phone sits on an Android Auto screen and `uiautomator` dumps the
@@ -317,7 +341,7 @@ pub(crate) fn load(path: &Path) -> Result<(Suite, Vec<PathBuf>)> {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
         };
-        if !name_ok(&preferences.file) || !preferences.booleans.keys().all(|k| name_ok(k)) {
+        if !name_ok(&preferences.file) || !preferences.values().keys().all(|k| name_ok(k)) {
             return Err(Error::InvalidArgs(
                 "suite preferences file and keys may only use letters, digits, '.', '_' and '-'"
                     .into(),
@@ -1179,22 +1203,20 @@ fn run_prepared(
         )?;
     }
     if let Some(preferences) = &suite.environment.preferences
-        && !preferences.booleans.is_empty()
+        && !preferences.values().is_empty()
     {
+        let values = preferences.values();
         check_cancel(&cancel)?;
         phase(
             &output,
-            format!(
-                "Setting {} app preference(s)...",
-                preferences.booleans.len()
-            ),
+            format!("Setting {} app preference(s)...", values.len()),
         );
-        device::set_boolean_preferences(
+        device::set_preferences(
             &lease.adb,
             &serial,
             &suite.environment.package,
             &preferences.file,
-            &preferences.booleans,
+            &values,
         )?;
     }
     if !opts.usb {
@@ -1465,9 +1487,19 @@ DisplayDeviceInfo{"GhFacetBar": uniqueId="virtual:com.google.android.projection.
         let prefs = ok.environment.preferences.unwrap();
         assert_eq!(prefs.file, "APPLICATION_SHARED_PREFERENCES");
         assert_eq!(prefs.booleans.get("EnableRobotaxiMode"), Some(&true));
+        let strings =
+            suite("preferences: {file: p, strings: {selected_assignment: '{\"id\":\"a\"}'}}")
+                .unwrap()
+                .0;
+        let prefs = strings.environment.preferences.unwrap();
+        assert_eq!(
+            prefs.strings.get("selected_assignment").map(String::as_str),
+            Some(r#"{"id":"a"}"#)
+        );
+        assert!(suite("preferences: {file: p, strings: {'a b': x}}").is_err());
         assert!(suite("preferences: {file: '../x', booleans: {}}").is_err());
         assert!(suite("preferences: {file: p, booleans: {'a b': true}}").is_err());
-        assert!(suite("preferences: {file: p, strings: {a: b}}").is_err());
+        assert!(suite("preferences: {file: p, ints: {a: 1}}").is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

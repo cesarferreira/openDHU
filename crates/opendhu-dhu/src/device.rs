@@ -221,6 +221,28 @@ pub fn restart_head_unit_server(program: &Path, serial: &str) -> Result<()> {
     ensure_head_unit_server(program, serial)
 }
 
+/// Entries to write into one SharedPreferences file. Strings hold any text, including JSON.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PreferenceValues {
+    pub booleans: std::collections::BTreeMap<String, bool>,
+    pub strings: std::collections::BTreeMap<String, String>,
+}
+
+impl PreferenceValues {
+    pub fn is_empty(&self) -> bool {
+        self.booleans.is_empty() && self.strings.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.booleans.len() + self.strings.len()
+    }
+
+    /// Every key, booleans first.
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.booleans.keys().chain(self.strings.keys())
+    }
+}
+
 /// Set boolean entries in one of a debuggable app's SharedPreferences files, keeping every other
 /// entry. The app is stopped first so it reads the file fresh on its next launch. Uses `run-as`,
 /// so the app must be a debuggable build; nothing outside the app's own storage is touched.
@@ -231,6 +253,24 @@ pub fn set_boolean_preferences(
     file: &str,
     booleans: &std::collections::BTreeMap<String, bool>,
 ) -> Result<()> {
+    let values = PreferenceValues {
+        booleans: booleans.clone(),
+        ..PreferenceValues::default()
+    };
+    set_preferences(program, serial, package, file, &values)
+}
+
+/// Set boolean and string entries in one of a debuggable app's SharedPreferences files. An entry
+/// with the same name is replaced whatever its type; every other entry is kept. The app is stopped
+/// first so it reads the file fresh on its next launch. Uses `run-as`, so the app must be a
+/// debuggable build; nothing outside the app's own storage is touched.
+pub fn set_preferences(
+    program: &Path,
+    serial: &str,
+    package: &str,
+    file: &str,
+    values: &PreferenceValues,
+) -> Result<()> {
     adb(program, serial, &["shell", "am", "force-stop", package])?;
     let existing = read_preferences(program, serial, package, file)?;
     write_preferences(
@@ -238,7 +278,7 @@ pub fn set_boolean_preferences(
         serial,
         package,
         file,
-        &with_boolean_preferences(&existing, booleans),
+        &with_preferences(&existing, values),
     )
 }
 
@@ -364,7 +404,24 @@ pub fn with_boolean_preferences(
     xml: &str,
     booleans: &std::collections::BTreeMap<String, bool>,
 ) -> String {
-    let mut lines: Vec<String> = xml.lines().map(str::to_string).collect();
+    let values = PreferenceValues {
+        booleans: booleans.clone(),
+        ..PreferenceValues::default()
+    };
+    with_preferences(xml, &values)
+}
+
+/// `xml` with each value set. An existing entry of the same name is replaced whatever its type, and
+/// everything else is kept. Android writes `<boolean name="k" value="v" />` and
+/// `<string name="k">text</string>` entries inside a single `<map>`, escaping the text.
+pub fn with_preferences(xml: &str, values: &PreferenceValues) -> String {
+    let keys: Vec<String> = values.keys().cloned().collect();
+    let kept = if keys.is_empty() {
+        xml.to_string()
+    } else {
+        without_preferences(xml, &keys)
+    };
+    let mut lines: Vec<String> = kept.lines().map(str::to_string).collect();
     if !lines.iter().any(|l| l.contains("<map")) {
         lines = vec![
             "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>".into(),
@@ -380,20 +437,39 @@ pub fn with_boolean_preferences(
     if !lines.iter().any(|l| l.trim() == "</map>") {
         lines.push("</map>".into());
     }
-    for (key, value) in booleans {
-        let marker = format!("<boolean name=\"{key}\" ");
-        lines.retain(|l| !l.contains(&marker));
-        let end = lines
-            .iter()
-            .rposition(|l| l.trim() == "</map>")
-            .expect("map close tag");
-        lines.insert(
-            end,
-            format!("    <boolean name=\"{key}\" value=\"{value}\" />"),
-        );
-    }
+    let end = lines
+        .iter()
+        .rposition(|l| l.trim() == "</map>")
+        .expect("map close tag");
+    let mut entries: Vec<String> = values
+        .booleans
+        .iter()
+        .map(|(key, value)| format!("    <boolean name=\"{key}\" value=\"{value}\" />"))
+        .collect();
+    entries.extend(
+        values.strings.iter().map(|(key, value)| {
+            format!("    <string name=\"{key}\">{}</string>", escape_xml(value))
+        }),
+    );
+    lines.splice(end..end, entries);
     let mut out = lines.join("\n");
     out.push('\n');
+    out
+}
+
+/// Escape text the way Android's SharedPreferences writer does.
+fn escape_xml(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
     out
 }
 
@@ -544,6 +620,40 @@ mod tests {
         let filled = with_boolean_preferences(empty_map, &flags);
         assert!(filled.contains("<map>") && !filled.contains("<map />"));
         assert_eq!(with_boolean_preferences(&filled, &flags), filled);
+    }
+
+    #[test]
+    fn string_preferences_are_escaped_and_replace_entries_of_any_type() {
+        let values = PreferenceValues {
+            booleans: std::collections::BTreeMap::from([("flag".to_string(), false)]),
+            strings: std::collections::BTreeMap::from([
+                (
+                    "json".to_string(),
+                    r#"{"id":"a&b","name":"<x>'y'"}"#.to_string(),
+                ),
+                ("spans".to_string(), "new".to_string()),
+                ("was_bool".to_string(), "text".to_string()),
+            ]),
+        };
+        let existing = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <string name=\"spans\">first\nsecond</string>\n    <boolean name=\"was_bool\" value=\"true\" />\n    <string name=\"keep\">me</string>\n</map>\n";
+
+        let merged = with_preferences(existing, &values);
+
+        assert!(merged.contains(
+            r#"<string name="json">{&quot;id&quot;:&quot;a&amp;b&quot;,&quot;name&quot;:&quot;&lt;x&gt;&apos;y&apos;&quot;}</string>"#
+        ));
+        assert!(merged.contains(r#"<string name="spans">new</string>"#));
+        assert!(!merged.contains("first") && !merged.contains("second"));
+        assert!(merged.contains(r#"<string name="was_bool">text</string>"#));
+        assert!(!merged.contains(r#"<boolean name="was_bool""#));
+        assert!(merged.contains(r#"<boolean name="flag" value="false" />"#));
+        assert!(merged.contains(r#"<string name="keep">me</string>"#));
+        assert!(merged.trim_end().ends_with("</map>"));
+        assert_eq!(with_preferences(&merged, &values), merged);
+        assert_eq!(
+            with_preferences(existing, &PreferenceValues::default()),
+            existing
+        );
     }
 
     #[test]
