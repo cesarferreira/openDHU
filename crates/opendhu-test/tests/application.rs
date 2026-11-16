@@ -280,3 +280,76 @@ fn remove_preferences_requires_safe_names_and_at_least_one_key() {
         assert!(parse(&yaml).is_err(), "{yaml}");
     }
 }
+
+#[test]
+fn set_preferences_requires_safe_names_and_something_to_set() {
+    let ok = "name: Seeded\nsteps:\n  - action: app.setPreferences\n    file: APPLICATION_SHARED_PREFERENCES\n    booleans: {flag: true}\n    strings: {selected_assignment: '{\"id\":\"a\"}'}\n";
+    assert!(parse(ok).is_ok());
+    for step in [
+        "file: p",
+        "file: p\n    strings: {}",
+        "file: ../x\n    strings: {a: b}",
+        "file: p\n    strings: {'a b': c}",
+        "file: p\n    booleans: {a: true}\n    strings: {a: b}",
+        "file: p\n    strings: {a: 1}\n    keys: [a]",
+    ] {
+        let yaml = format!("name: Seeded\nsteps:\n  - action: app.setPreferences\n    {step}\n");
+        assert!(parse(&yaml).is_err(), "{yaml}");
+    }
+}
+
+#[test]
+fn set_preferences_passes_every_value_to_the_application() {
+    struct Recording(RefCell<Vec<String>>);
+    impl ApplicationControl for Recording {
+        fn restart(&self) -> Result<()> {
+            Ok(())
+        }
+        fn input_text(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn set_preferences(
+            &self,
+            file: &str,
+            booleans: &std::collections::BTreeMap<String, bool>,
+            strings: &std::collections::BTreeMap<String, String>,
+        ) -> Result<()> {
+            self.0
+                .borrow_mut()
+                .push(format!("{file} {booleans:?} {strings:?}"));
+            Ok(())
+        }
+    }
+    let app = Recording(RefCell::new(Vec::new()));
+    let test = parse("name: Seeded\nsteps:\n  - action: app.setPreferences\n    file: prefs\n    booleans: {flag: false}\n    strings: {json: '{\"id\":\"a\"}'}\n").unwrap();
+    let mut backend = MockBackend::new();
+    let clock = FakeClock::default();
+    let with_app = RunConfig {
+        application: Some(&app),
+        app_label: Some("Robot UI"),
+        artifacts_dir: Path::new("/tmp"),
+        skip_unsupported: false,
+        clock: &clock,
+    };
+    let without_app = RunConfig {
+        application: None,
+        ..with_app
+    };
+
+    let result = run_test(&test, "app.yaml", &mut backend, &with_app);
+
+    assert_eq!(result.outcome, Outcome::Passed, "{:?}", result.steps);
+    assert_eq!(
+        *app.0.borrow(),
+        vec![r#"prefs {"flag": false} {"json": "{\"id\":\"a\"}"}"#]
+    );
+    assert!(result.steps[1].detail.contains("set flag, json in prefs"));
+
+    let without = run_test(&test, "app.yaml", &mut backend, &without_app);
+    assert_eq!(without.outcome, Outcome::Error);
+    assert!(
+        without.steps[1]
+            .detail
+            .contains("suite application context")
+    );
+}

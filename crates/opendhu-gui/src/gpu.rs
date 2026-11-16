@@ -161,8 +161,8 @@ impl VideoGpu {
                     gl.bind_texture(glow::TEXTURE_2D, Some(*t));
                 }
             }
-            for i in 0..3 {
-                gl.uniform_1_i32(self.locations[i].as_ref(), i as i32);
+            for (i, location) in self.locations.iter().take(3).enumerate() {
+                gl.uniform_1_i32(location.as_ref(), i as i32);
             }
             gl.uniform_1_f32(self.locations[3].as_ref(), brightness);
             if self.size != [0, 0] {
