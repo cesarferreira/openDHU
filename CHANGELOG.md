@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-11-16
+
+### 💼 Other
+
+- Add aa test --serial to run a suite on a specific attached device
+- Add string app preferences and app.setPreferences, and stop stale launcher taps in app.open ([#7](https://github.com/cesarferreira/openDHU/issues/7))
 ## [0.4.0] - 2026-11-09
 
 ### 💼 Other
