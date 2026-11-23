@@ -1,28 +1,19 @@
 <div align="center">
   <h1>openDHU</h1>
-
   <p><strong>A scriptable Android Auto head unit for your terminal, desktop and CI.</strong></p>
-
   <p>
-    <a href="https://github.com/cesarferreira/openDHU/actions/workflows/ci.yml">
-      <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cesarferreira/openDHU/ci.yml?branch=main&logo=github&color=007ACC&label=ci">
-    </a>
-    <a href="https://github.com/cesarferreira/openDHU/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cesarferreira/openDHU?color=blue"></a>
-    <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green">
+    <a href="https://github.com/cesarferreira/openDHU/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cesarferreira/openDHU/ci.yml?branch=main&amp;logo=github&amp;label=ci"></a>
+    <a href="https://github.com/cesarferreira/openDHU/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cesarferreira/openDHU"></a>
+    <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-green">
   </p>
-
+  <img src="docs/images/tui.png" width="100%" alt="opendhu-tui showing the projected Android Auto screen in a terminal, above aa session status">
   <p>
-    <a href="#install">Install</a>
-    &nbsp;·&nbsp;
-    <a href="#quickstart">Quickstart</a>
-    &nbsp;·&nbsp;
-    <a href="#test-android-auto-apps">Testing</a>
-    &nbsp;·&nbsp;
+    <a href="#install">Install</a> ·
+    <a href="#quickstart">Quickstart</a> ·
+    <a href="#test-android-auto-apps">Testing</a> ·
     <a href="#documentation">Docs</a>
   </p>
 </div>
-
----
 
 openDHU connects to a phone or an emulator and acts as the car. It shows the projected Android Auto screen
 and gives you the same controls everywhere: a CLI, a desktop window, a terminal viewer, a browser tab and a
@@ -34,10 +25,6 @@ local HTTP API. Anything you can do by hand, a script or a coding agent can do t
 - **Hand it to an agent.** The built-in agent skill lets Claude Code, Codex, Cursor and others drive the screen.
 - **Test with it.** Write YAML tests that tap, read, film and assert on the screen exactly as a driver sees it,
   and run them locally or in CI.
-
-<p align="center">
-  <img alt="opendhu-tui showing the projected Android Auto screen in a terminal" src="docs/images/tui.png" width="720">
-</p>
 
 ## Install
 
