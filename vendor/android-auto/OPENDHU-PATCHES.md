@@ -26,6 +26,11 @@ Changes against upstream:
    to an existing head-unit server tunnel with a bounded connection timeout. It reuses the USB
    framing/TLS/discovery handlers and never enumerates or claims USB devices.
 
+6. **No protoc at build time** (`build.rs`). Upstream generates the `.proto` code with `protoc()`, which needs
+   the `protoc` binary on every build machine. It now uses `protobuf-codegen`'s pure-Rust parser (`pure()`).
+   The generated message code is the same; only the file header and the embedded descriptor differ (the pure
+   parser writes the default `syntax = "proto2"` explicitly).
+
 `src/cert.rs` holds the head-unit client certificate and its private key that upstream ships. They are the
 public, long-known credentials from the old HeadUnit project, not secrets of ours. They are in the repository on
 purpose: a secret scanner will flag them, and that finding can be allow-listed.
