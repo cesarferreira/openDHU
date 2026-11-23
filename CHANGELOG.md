@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-11-23
+
+### 💼 Other
+
+- Publish prebuilt binaries and shell installers with each release ([#8](https://github.com/cesarferreira/openDHU/issues/8))
 ## [0.5.0] - 2026-11-16
 
 ### 💼 Other
