@@ -1,23 +1,43 @@
-# openDHU
+<div align="center">
+  <h1>openDHU</h1>
 
-**Espresso for the car screen.** Drive and test Android Auto apps from your terminal, a desktop window or CI.
+  <p><strong>A scriptable Android Auto head unit for your terminal, desktop and CI.</strong></p>
 
-openDHU is a scriptable Android Auto head unit. It connects to a phone or an emulator, shows the projected
-screen, and lets a script or a YAML test tap it, read it, film it and assert on it, exactly as a driver would
-see it.
+  <p>
+    <a href="https://github.com/cesarferreira/openDHU/actions/workflows/ci.yml">
+      <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cesarferreira/openDHU/ci.yml?branch=main&logo=github&color=007ACC&label=ci">
+    </a>
+    <a href="https://github.com/cesarferreira/openDHU/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cesarferreira/openDHU?color=blue"></a>
+    <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green">
+  </p>
 
-```text
-$ aa test sample --tui --record
-Suite: android-sample/e2e/suite.yaml (3 tests)
-Test: Favorite selected in Android Auto survives an app restart [2/3] · ~1m left
-  PASS 1. launch the app on the car screen (8.4s)
-  PASS 2. clear any saved favorite (3.2s)
-  PASS 8. save Harbour Cafe as favorite (1.3s)
-  PASS 10. restart the app (8.2s)
-  PASS 11. favorite survived the restart (2.9s)
-  Video: build/test-results/videos/02-favorite-selected-in-android-auto-survives-an-app-restart.mp4
-PASS  3 tests · 1 suite
-```
+  <p>
+    <a href="#install">Install</a>
+    &nbsp;·&nbsp;
+    <a href="#quickstart">Quickstart</a>
+    &nbsp;·&nbsp;
+    <a href="#test-android-auto-apps">Testing</a>
+    &nbsp;·&nbsp;
+    <a href="#documentation">Docs</a>
+  </p>
+</div>
+
+---
+
+openDHU connects to a phone or an emulator and acts as the car. It shows the projected Android Auto screen
+and gives you the same controls everywhere: a CLI, a desktop window, a terminal viewer, a browser tab and a
+local HTTP API. Anything you can do by hand, a script or a coding agent can do too.
+
+- **Use it as a head unit.** See the car screen and touch it with the mouse, without a car or Google's DHU.
+- **Script it.** Tap, swipe, press car keys, switch video focus and take screenshots from the shell.
+- **Capture it.** Record the car screen as MP4 and the car audio as WAV.
+- **Hand it to an agent.** The built-in agent skill lets Claude Code, Codex, Cursor and others drive the screen.
+- **Test with it.** Write YAML tests that tap, read, film and assert on the screen exactly as a driver sees it,
+  and run them locally or in CI.
+
+<p align="center">
+  <img alt="aa test --tui: the projected Android Auto screen above a live test log" src="docs/images/tui.png" width="720">
+</p>
 
 ## Install
 
@@ -46,14 +66,67 @@ aa doctor     # checks the environment, including Android Auto on each device
 For a real phone, enable USB debugging, authorize the computer and finish Android Auto setup on it first.
 Development apps need [head-unit credentials](docs/native-backend.md#debugging-knobs).
 
-### Agent skill
+<a id="quickstart"></a>
+## Quickstart
+
+```bash
+aa session start  # native head unit over USB (--serial SERIAL to pick a device)
+aa gui            # live display with mouse input and session controls
+aa tui            # the same in your terminal
+aa web            # the same in a browser tab
+aa tap 400 240
+aa swipe 300 200 100 200 --duration-ms 400
+aa key home
+aa key rotate_right  # turn the dial: focus the next item (`aa key enter` presses it)
+aa focus video off
+aa screenshot screen.png
+aa record clip.mp4 --seconds 10
+aa audio recording.wav --seconds 10
+aa session status --json
+aa session restart  # stop and start again with the same settings
+aa session stop
+```
+
+Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa session start --dhu` for
+Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
+tunnel after a USB reconnect. `aa --help` lists everything.
+
+For a project-specific native display, set `session.resolution` in `opendhu.yaml`; keep
+`test.resolution` separate so managed E2E suites run at a repeatable size. Set `dhu.ini` to a
+vehicle's INI path and use `aa session start --dhu` to run Google's DHU profile explicitly.
+See [Configuration](docs/configuration.md).
+
+### From your own code
+
+The CLI is a thin client of a local [HTTP API](docs/api.md) with live events, so any language can start a
+session, send input and read frames.
+
+### From a coding agent
 
 The skill is built into the binary. `aa skill install` writes it to `~/.claude/skills` and `~/.agents/skills`
 (`--project` for the current repo, `--dir` for anywhere else, `--force` to replace a changed copy), so coding
 agents learn to start a session, tap, swipe, press keys and take screenshots. `aa skill print` shows it.
 Claude Code, Codex, Cursor, opencode and pi all find it there. Rerun it after upgrading `aa`.
 
-## Write a test
+## Test Android Auto apps
+
+openDHU can run end-to-end tests for Android Auto apps, like Espresso for the car screen. A test sees only
+what a driver would see.
+
+```text
+$ aa test sample --tui --record
+Suite: android-sample/e2e/suite.yaml (3 tests)
+Test: Favorite selected in Android Auto survives an app restart [2/3] · ~1m left
+  PASS 1. launch the app on the car screen (8.4s)
+  PASS 2. clear any saved favorite (3.2s)
+  PASS 8. save Harbour Cafe as favorite (1.3s)
+  PASS 10. restart the app (8.2s)
+  PASS 11. favorite survived the restart (2.9s)
+  Video: build/test-results/videos/02-favorite-selected-in-android-auto-survives-an-app-restart.mp4
+PASS  3 tests · 1 suite
+```
+
+### Write a test
 
 A test is a YAML file. Each step can carry an `as:` label, and the run prints that instead of the mechanics:
 
@@ -81,13 +154,13 @@ steps:
 driver would see. Other actions cover swipes, car keys, video focus, HTTP calls to local fixtures and status
 assertions. See [Testing](docs/testing.md) for all of them.
 
-## Run tests
+### Run tests
 
 A **suite** (see `opendhu.yaml`) builds and installs your APK, boots the emulator, starts your local services
 and ADB tunnels, runs the tests and cleans up. Open `results.html` in the artifacts folder afterwards for steps,
 screenshots, logs and videos. JSON and JUnit reports are written too.
 
-### Basics
+#### Basics
 
 ```bash
 aa test                            # every suite registered in opendhu.yaml
@@ -99,7 +172,7 @@ aa test --validate                 # parse everything without touching a device
 aa test examples/video-focus.yaml  # one test, against a session you started with `aa session start`
 ```
 
-### With recording
+#### With recording
 
 ```bash
 aa test sample --record          # film each test, keep the clips of the ones that failed
@@ -111,7 +184,7 @@ Clips are MP4s in `videos/` next to the report, and `results.html` plays them un
 real pace of the run, since the phone only sends a frame when the picture changes. Needs ffmpeg with libx264
 and the native backend.
 
-### Headless
+#### Headless
 
 ```bash
 aa test sample --headless  # no head-unit window
@@ -119,7 +192,7 @@ aa test sample --headless  # no head-unit window
 
 Without `--headless`, the head-unit window opens so you can watch. Use it on servers and in CI.
 
-### On a specific running device
+#### On a specific running device
 
 ```bash
 aa test sample --serial emulator-5556  # run on this adb device instead of finding or booting the AVD
@@ -130,7 +203,7 @@ emulators share one AVD name, for example parallel shards of one snapshot, each 
 must be attached and in the `device` state; the run is otherwise the same as an emulator run (Android Auto check,
 reverse tunnels, head-unit server). Two runs cannot lease the same serial at once. It cannot be combined with `--usb`.
 
-### On a USB phone
+#### On a USB phone
 
 ```bash
 aa test sample --usb  # the one authorized USB phone instead of the emulator
@@ -148,7 +221,7 @@ unexpected error" card instead of the app. When that card stays up for 10 second
 `app.restart`, a USB suite restarts the head-unit session once, restores its ADB tunnels and opens the app again;
 the step detail says when this happened.
 
-### With the TUI
+#### With the TUI
 
 ```bash
 aa test sample --tui               # head unit and test progress together, in your terminal
@@ -158,7 +231,7 @@ aa test sample --tui --record all  # both, keeping every clip
 Draws the head unit with kitty graphics, so it needs kitty, Ghostty or WezTerm and `opendhu-tui`
 (`make install`). It replaces the head-unit window, so it can't be combined with `--headless`.
 
-### In the browser
+#### In the browser
 
 ```bash
 aa test sample --web  # head unit and test progress together, in a browser tab
@@ -168,7 +241,7 @@ Opens `http://127.0.0.1:8766/` with the live picture next to the test log, and y
 touch the phone. Progress still prints in the terminal as usual. Needs `opendhu-web` (`make install`) and
 ffmpeg. It replaces the head-unit window.
 
-### Without the animated progress
+#### Without the animated progress
 
 ```bash
 aa test sample --no-interactive  # plain line-by-line progress, for logs
@@ -218,34 +291,6 @@ The [Android sample](android-sample/README.md) is a small app with three Android
 ```bash
 make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 ```
-
-## Drive it by hand
-
-```bash
-aa session start  # native head unit over USB (--serial SERIAL to pick a device)
-aa gui            # live display with mouse input and session controls
-aa tui            # the same in your terminal
-aa web            # the same in a browser tab
-aa tap 400 240
-aa swipe 300 200 100 200 --duration-ms 400
-aa key home
-aa key rotate_right  # turn the dial: focus the next item (`aa key enter` presses it)
-aa focus video off
-aa screenshot screen.png
-aa audio recording.wav --seconds 10
-aa session status --json
-aa session restart  # stop and start again with the same settings
-aa session stop
-```
-
-Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa session start --dhu` for
-Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
-tunnel after a USB reconnect. `aa --help` lists everything.
-
-For a project-specific native display, set `session.resolution` in `opendhu.yaml`; keep
-`test.resolution` separate so managed E2E suites run at a repeatable size. Set `dhu.ini` to a
-vehicle's INI path and use `aa session start --dhu` to run Google's DHU profile explicitly.
-See [Configuration](docs/configuration.md).
 
 ## Documentation
 
