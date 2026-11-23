@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-11-23
+
+### 💼 Other
+
+- Present openDHU as a scriptable head unit in the README ([#10](https://github.com/cesarferreira/openDHU/issues/10))
+- Replace the README screenshot with a smaller one ([#11](https://github.com/cesarferreira/openDHU/issues/11))
+- Start a session from aa tui and aa web when none is running ([#12](https://github.com/cesarferreira/openDHU/issues/12))
+- Put the README screenshot in the header, stax style ([#13](https://github.com/cesarferreira/openDHU/issues/13))
+- Remove unused Cargo workspace declarations
+- Fix sessions stuck during startup
 ## [0.5.2] - 2026-11-23
 
 ### 💼 Other
