@@ -35,6 +35,10 @@ local HTTP API. Anything you can do by hand, a script or a coding agent can do t
 - **Test with it.** Write YAML tests that tap, read, film and assert on the screen exactly as a driver sees it,
   and run them locally or in CI.
 
+<p align="center">
+  <img alt="aa test --tui: the projected Android Auto screen above a live test log" src="docs/images/tui.png" width="720">
+</p>
+
 ## Install
 
 You need `adb` and `ffmpeg`. Tests that read the screen also need `tesseract` with English data.
