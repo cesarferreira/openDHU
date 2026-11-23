@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use opendhu_core::{Capabilities, Error, HeadUnitBackend, HeadUnitStatus, Result};
 use opendhu_dhu::adb;
 use serde_json::json;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 use crate::api::{
     BackendKind, DaemonInfo, DeviceInfo, DevicesResponse, InputResponse, OperationResponse, Phase,
@@ -42,9 +42,14 @@ struct RunningSession {
 
 enum Slot {
     Idle,
-    Starting { id: String },
+    Starting {
+        id: String,
+        stop: Option<oneshot::Sender<Result<()>>>,
+    },
     Running(RunningSession),
-    Stopping { id: String },
+    Stopping {
+        id: String,
+    },
 }
 
 struct Inner {
@@ -116,10 +121,10 @@ impl Daemon {
         match &*lock(&self.inner.slot) {
             Slot::Running(r) => Ok(r.clone()),
             Slot::Idle => Err(no_session()),
-            Slot::Starting { .. } => Err(Error::BackendUnavailable(
+            Slot::Starting { stop: None, .. } => Err(Error::BackendUnavailable(
                 "the session is still starting".into(),
             )),
-            Slot::Stopping { .. } => {
+            Slot::Starting { stop: Some(_), .. } | Slot::Stopping { .. } => {
                 Err(Error::BackendUnavailable("the session is stopping".into()))
             }
         }
@@ -135,8 +140,10 @@ impl Daemon {
                     session: None,
                 });
             }
-            Slot::Starting { id } => (id.clone(), Phase::Starting, None),
-            Slot::Stopping { id } => (id.clone(), Phase::Stopping, None),
+            Slot::Starting { id, stop: None } => (id.clone(), Phase::Starting, None),
+            Slot::Starting { id, stop: Some(_) } | Slot::Stopping { id } => {
+                (id.clone(), Phase::Stopping, None)
+            }
             Slot::Running(r) => (r.id.clone(), Phase::Running, Some(r.clone())),
         };
         let details = match running {
@@ -361,8 +368,8 @@ impl Daemon {
         {
             let mut slot = lock(&self.inner.slot);
             match &*slot {
-                Slot::Idle => *slot = Slot::Starting { id: id.clone() },
-                Slot::Starting { .. } => {
+                Slot::Idle => self.mark_starting(&mut slot, &id),
+                Slot::Starting { stop: None, .. } => {
                     return Err(Error::SessionConflict(
                         "a session is already starting".into(),
                     ));
@@ -372,7 +379,7 @@ impl Daemon {
                         "an openDHU session is already running; run `aa session stop` first".into(),
                     ));
                 }
-                Slot::Stopping { .. } => {
+                Slot::Starting { stop: Some(_), .. } | Slot::Stopping { .. } => {
                     return Err(Error::SessionConflict(
                         "the previous session is still stopping".into(),
                     ));
@@ -406,9 +413,9 @@ impl Daemon {
         events.emit("session.restarting", Some(&running.id), json!({}));
         log::info("session.restarting", json!({ "sessionId": running.id }));
         running.stop_keeper.store(true, Ordering::SeqCst);
-        let stopped = with_backend(Arc::clone(&running.backend), |b| b.stop()).await?;
+        let stopped = with_backend(Arc::clone(&running.backend), |b| b.stop()).await;
         events.emit("session.stopped", Some(&running.id), json!({}));
-        if let Err(e) = stopped {
+        if let Err(e) = stopped.and_then(|result| result) {
             // The new launch reports whether the phone is usable; a failed stop alone is not fatal.
             log::warn(
                 "session.restart_stop_failed",
@@ -425,90 +432,137 @@ impl Daemon {
                 return Err(e);
             }
         };
-        *lock(&self.inner.slot) = Slot::Starting { id: id.clone() };
+        self.mark_starting(&mut lock(&self.inner.slot), &id);
         self.launch(id, req).await
     }
 
-    /// Launch a session for a slot already marked `Starting { id }`.
+    fn mark_starting(&self, slot: &mut Slot, id: &str) {
+        *slot = Slot::Starting {
+            id: id.into(),
+            stop: None,
+        };
+        self.inner
+            .events
+            .emit("session.starting", Some(id), json!({}));
+        log::info("session.starting", json!({ "sessionId": id }));
+    }
+
+    /// Launch a session for a slot already marked `Starting`.
     async fn launch(&self, id: String, req: StartRequest) -> Result<StatusResponse> {
         let events = &self.inner.events;
-        events.emit("session.starting", Some(&id), json!({}));
-        log::info("session.starting", json!({ "sessionId": id }));
-
         let (launch_id, bus) = (id.clone(), Arc::clone(&self.inner.events));
-        match blocking(move || launch_session(&req, launch_id, bus)).await? {
-            Ok(running) => {
-                *lock(&self.inner.slot) = Slot::Running(running.clone());
-                events.emit(
-                    "session.started",
-                    Some(&id),
-                    json!({ "serial": running.serial }),
-                );
-                log::info(
-                    "session.started",
-                    json!({ "sessionId": id, "serial": running.serial }),
-                );
-                self.status().await
+        let launched = blocking(move || launch_session(&req, launch_id, bus))
+            .await
+            .and_then(|result| result);
+        let cancellation = {
+            let mut slot = lock(&self.inner.slot);
+            let cancellation = match &mut *slot {
+                Slot::Starting { stop, .. } => stop.take(),
+                _ => unreachable!("only launch can leave the starting slot"),
+            };
+            match (&cancellation, &launched) {
+                (Some(_), _) => *slot = Slot::Stopping { id: id.clone() },
+                (None, Ok(running)) => {
+                    *slot = Slot::Running(running.clone());
+                    events.emit(
+                        "session.started",
+                        Some(&id),
+                        json!({ "serial": running.serial }),
+                    );
+                    log::info(
+                        "session.started",
+                        json!({ "sessionId": id, "serial": running.serial }),
+                    );
+                }
+                (None, Err(e)) => {
+                    *slot = Slot::Idle;
+                    events.emit(
+                        "session.start_failed",
+                        Some(&id),
+                        json!({ "message": e.message() }),
+                    );
+                    log::warn(
+                        "session.start_failed",
+                        json!({ "sessionId": id, "message": e.message() }),
+                    );
+                    self.signal_if_ephemeral();
+                }
             }
-            Err(e) => {
-                *lock(&self.inner.slot) = Slot::Idle;
-                events.emit(
-                    "session.start_failed",
-                    Some(&id),
-                    json!({ "message": e.message() }),
-                );
-                log::warn(
-                    "session.start_failed",
-                    json!({ "sessionId": id, "message": e.message() }),
-                );
-                self.signal_if_ephemeral();
-                Err(e)
-            }
+            cancellation
+        };
+        if let Some(stopped) = cancellation {
+            let result = self.finish_stop(&id, launched.ok()).await;
+            let _ = stopped.send(result);
+            return Err(Error::SessionConflict(
+                "the session start was cancelled".into(),
+            ));
         }
+        launched?;
+        self.status().await
     }
 
     pub async fn stop(&self) -> Result<()> {
-        let running = {
+        let (id, running, pending) = {
             let mut slot = lock(&self.inner.slot);
-            match &*slot {
+            let (id, running, pending) = match &mut *slot {
                 Slot::Running(r) => {
                     let r = r.clone();
-                    *slot = Slot::Stopping { id: r.id.clone() };
-                    r
+                    let id = r.id.clone();
+                    *slot = Slot::Stopping { id: id.clone() };
+                    (id, Some(r), None)
                 }
                 Slot::Idle => return Err(no_session()),
-                Slot::Starting { .. } => {
-                    return Err(Error::SessionConflict(
-                        "the session is still starting; try again shortly".into(),
-                    ));
+                Slot::Starting { id, stop } if stop.is_none() => {
+                    let (done, pending) = oneshot::channel();
+                    *stop = Some(done);
+                    (id.clone(), None, Some(pending))
                 }
-                Slot::Stopping { .. } => {
+                Slot::Starting { .. } | Slot::Stopping { .. } => {
                     return Err(Error::SessionConflict(
                         "the session is already stopping".into(),
                     ));
                 }
-            }
+            };
+            self.inner
+                .events
+                .emit("session.stopping", Some(&id), json!({}));
+            (id, running, pending)
         };
-        let events = &self.inner.events;
-        events.emit("session.stopping", Some(&running.id), json!({}));
-        running.stop_keeper.store(true, Ordering::SeqCst);
-        let result = with_backend(Arc::clone(&running.backend), |b| b.stop()).await;
-        *lock(&self.inner.slot) = Slot::Idle;
-        events.emit("session.stopped", Some(&running.id), json!({}));
-        log::info("session.stopped", json!({ "sessionId": running.id }));
+        if let Some(pending) = pending {
+            return pending
+                .await
+                .map_err(|e| Error::Other(format!("session stop failed: {e}")))?;
+        }
+        self.finish_stop(&id, running).await
+    }
+
+    async fn finish_stop(&self, id: &str, running: Option<RunningSession>) -> Result<()> {
+        let result = if let Some(running) = running {
+            running.stop_keeper.store(true, Ordering::SeqCst);
+            with_backend(Arc::clone(&running.backend), |b| b.stop())
+                .await
+                .and_then(|result| result)
+        } else {
+            Ok(())
+        };
+        let mut slot = lock(&self.inner.slot);
+        *slot = Slot::Idle;
+        self.inner
+            .events
+            .emit("session.stopped", Some(id), json!({}));
+        log::info("session.stopped", json!({ "sessionId": id }));
         self.signal_if_ephemeral();
-        result?
+        result
     }
 
     /// Stop the session (if any) and ask the server to exit.
     pub async fn shutdown(&self) {
         for _ in 0..1200 {
-            if !matches!(*lock(&self.inner.slot), Slot::Starting { .. }) {
+            if !matches!(self.stop().await, Err(Error::SessionConflict(_))) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        let _ = self.stop().await;
         self.inner.shutdown.send_replace(true);
     }
 

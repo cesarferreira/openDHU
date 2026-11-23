@@ -133,6 +133,21 @@ fn raw(
     headers: &[(&str, String)],
     body: Option<&str>,
 ) -> (u16, Value) {
+    let mut s = send_raw(port, method, path, headers, body);
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let status: u16 = out.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let body = out.split("\r\n\r\n").nth(1).unwrap_or("");
+    (status, serde_json::from_str(body).unwrap_or(Value::Null))
+}
+
+fn send_raw(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, String)],
+    body: Option<&str>,
+) -> TcpStream {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     let mut req = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
@@ -150,11 +165,7 @@ fn raw(
         req.push_str(b);
     }
     s.write_all(req.as_bytes()).unwrap();
-    let mut out = String::new();
-    s.read_to_string(&mut out).unwrap();
-    let status: u16 = out.split_whitespace().nth(1).unwrap().parse().unwrap();
-    let body = out.split("\r\n\r\n").nth(1).unwrap_or("");
-    (status, serde_json::from_str(body).unwrap_or(Value::Null))
+    s
 }
 
 fn authed(d: &TestDaemon) -> Vec<(&'static str, String)> {
@@ -619,7 +630,7 @@ fn two_simultaneous_starts_yield_exactly_one_session() {
 }
 
 #[test]
-fn status_answers_immediately_while_a_slow_start_is_in_progress() {
+fn status_and_stop_work_while_a_slow_start_is_in_progress() {
     let d = TestDaemon::start(false);
     let slow = StartRequest {
         config: Some("/tmp/slow.ini".into()),
@@ -651,16 +662,54 @@ fn status_answers_immediately_while_a_slow_start_is_in_progress() {
         8,
         "second start during Starting"
     );
-    assert_eq!(
-        d.client.stop().unwrap_err().exit_code(),
-        8,
-        "cannot stop a session that is still starting"
+    let c = d.client.clone();
+    let stopping = thread::spawn(move || c.stop());
+    assert!(wait_until(Duration::from_secs(1), || {
+        d.client
+            .status()
+            .unwrap()
+            .session
+            .is_some_and(|s| s.phase == Phase::Stopping)
+    }));
+    assert_eq!(d.client.start(&d.dhu()).unwrap_err().exit_code(), 8);
+    stopping.join().unwrap().unwrap();
+    let cancelled = starting.join().unwrap().unwrap_err();
+    assert!(matches!(cancelled, Error::SessionConflict(message) if message.contains("cancelled")));
+    assert!(d.client.status().unwrap().session.is_none());
+    d.client.start(&d.dhu()).unwrap();
+}
+
+#[test]
+fn a_disconnected_start_request_does_not_strand_the_session() {
+    let d = TestDaemon::start(false);
+    let slow = StartRequest {
+        config: Some("/tmp/slow.ini".into()),
+        ..d.dhu()
+    };
+    let request = send_raw(
+        d.port(),
+        "POST",
+        "/v1/session/start",
+        &authed(&d),
+        Some(&serde_json::to_string(&slow).unwrap()),
     );
-    starting.join().unwrap().unwrap();
-    assert_eq!(
-        d.client.status().unwrap().session.unwrap().phase,
-        Phase::Running
-    );
+    assert!(wait_until(Duration::from_secs(2), || {
+        d.client
+            .status()
+            .unwrap()
+            .session
+            .is_some_and(|s| s.phase == Phase::Starting)
+    }));
+    drop(request);
+    assert!(wait_until(Duration::from_secs(8), || {
+        d.client
+            .status()
+            .unwrap()
+            .session
+            .is_some_and(|s| s.phase == Phase::Running)
+    }));
+    d.client.stop().unwrap();
+    assert!(d.client.status().unwrap().session.is_none());
 }
 
 // ---- lifecycle policy ----------------------------------------------------------------------

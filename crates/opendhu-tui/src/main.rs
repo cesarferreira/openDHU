@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use opendhu_core::{FocusState, Key};
 use opendhu_daemon::Client;
+use opendhu_daemon::api::Phase;
 
 use layout::Layout;
 use term::{Arrow, Event, Mouse, Terminal};
@@ -52,11 +53,14 @@ pub enum Msg {
     Runtime,
 }
 
-#[derive(Clone)]
-pub struct Status {
-    summary: String,
-    screen: (u32, u32),
-    video_focus: FocusState,
+pub enum Status {
+    Starting,
+    Stopping,
+    Running {
+        summary: String,
+        screen: (u32, u32),
+        video_focus: FocusState,
+    },
 }
 
 fn main() -> ExitCode {
@@ -219,7 +223,13 @@ fn spawn_status(tx: Sender<Msg>) {
                 .and_then(|c| c.status())
                 .ok()
                 .and_then(|s| {
-                    let head = s.session?.details?.head_unit;
+                    let session = s.session?;
+                    match session.phase {
+                        Phase::Starting => return Some(Status::Starting),
+                        Phase::Stopping => return Some(Status::Stopping),
+                        Phase::Running => {}
+                    }
+                    let head = session.details?.head_unit;
                     let screen = match (head.screen_width, head.screen_height) {
                         (Some(w), Some(h)) => (w.into(), h.into()),
                         _ => (
@@ -227,7 +237,7 @@ fn spawn_status(tx: Sender<Msg>) {
                             opendhu_native::protocol::SCREEN_HEIGHT.into(),
                         ),
                     };
-                    Some(Status {
+                    Some(Status::Running {
                         summary: format!(
                             "{} {:?} {}x{} focus {:?}",
                             head.backend, head.state, screen.0, screen.1, head.video_focus.observed
@@ -287,13 +297,13 @@ impl<'a> App<'a> {
     }
 
     fn screen(&self) -> (u32, u32) {
-        self.status.as_ref().map_or(
-            (
+        match &self.status {
+            Some(Status::Running { screen, .. }) => *screen,
+            _ => (
                 opendhu_native::protocol::SCREEN_WIDTH.into(),
                 opendhu_native::protocol::SCREEN_HEIGHT.into(),
             ),
-            |s| s.screen,
-        )
+        }
     }
 
     fn layout(&self) -> Layout {
@@ -387,7 +397,13 @@ impl<'a> App<'a> {
             Event::PixelMouse(false) => {}
             Event::Char('q') => return true,
             Event::Char('f') => {
-                let on = self.status.as_ref().map(|s| s.video_focus) == Some(FocusState::On);
+                let on = matches!(
+                    self.status,
+                    Some(Status::Running {
+                        video_focus: FocusState::On,
+                        ..
+                    })
+                );
                 self.act("video focus", move |c| {
                     c.focus_video(!on)
                         .and_then(|r| checked(r.result.status, &r.result.evidence))
@@ -569,14 +585,20 @@ impl<'a> App<'a> {
     fn chrome(&self, size: term::Size) -> Chrome {
         let running = self.log.as_ref().is_some_and(|l| !l.ended);
         let link = match &self.status {
-            Some(s) => s.summary.clone(),
+            Some(Status::Starting) => "starting session".to_string(),
+            Some(Status::Stopping) => "stopping session".to_string(),
+            Some(Status::Running { summary, .. }) => summary.clone(),
             // `aa test` boots its own device after building, so there is nothing to start by hand.
             None if self.log.is_some() && !running => "test run finished; no session".to_string(),
             None if running => "waiting for the test run to start a session".to_string(),
             None => "no session; start one with `aa session start`".to_string(),
         };
         // Without a session the video cannot connect; its error would only repeat that.
-        let video = match (self.status.as_ref().and(self.video.problem()), self.frames) {
+        let problem = match self.status {
+            Some(Status::Running { .. }) => self.video.problem(),
+            _ => None,
+        };
+        let video = match (problem, self.frames) {
             (Some(p), _) => p,
             (None, 0) => "waiting for video".to_string(),
             (None, n) => format!(

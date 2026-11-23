@@ -1,6 +1,7 @@
 //! The HTTP server: router, handlers, SSE stream, and the process-level `run`.
 
 use std::convert::Infallible;
+use std::future::Future;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,6 +44,15 @@ pub struct ServeOptions {
 
 type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
 
+/// A client disconnect can drop its handler while a backend operation is still in flight.
+async fn session_request<T: Send + 'static>(
+    operation: impl Future<Output = Result<T>> + Send + 'static,
+) -> Result<T> {
+    tokio::spawn(operation)
+        .await
+        .map_err(|e| Error::Other(format!("session task failed: {e}")))?
+}
+
 async fn status(State(d): State<Daemon>) -> ApiResult<StatusResponse> {
     Ok(Json(d.status().await?))
 }
@@ -59,16 +69,19 @@ async fn session_start(
     State(d): State<Daemon>,
     AppJson(req): AppJson<StartRequest>,
 ) -> std::result::Result<(StatusCode, Json<StatusResponse>), ApiError> {
-    Ok((StatusCode::CREATED, Json(d.start(req).await?)))
+    let started = session_request(async move { d.start(req).await }).await?;
+    Ok((StatusCode::CREATED, Json(started)))
 }
 
 async fn session_stop(State(d): State<Daemon>) -> ApiResult<StoppedResponse> {
-    d.stop().await?;
+    session_request(async move { d.stop().await }).await?;
     Ok(Json(StoppedResponse { stopped: true }))
 }
 
 async fn session_restart(State(d): State<Daemon>) -> ApiResult<StatusResponse> {
-    Ok(Json(d.restart().await?))
+    Ok(Json(
+        session_request(async move { d.restart().await }).await?,
+    ))
 }
 
 async fn focus_video(
@@ -181,9 +194,13 @@ async fn audio(
         .expect("static headers are valid"))
 }
 
-async fn daemon_shutdown(State(d): State<Daemon>) -> Json<serde_json::Value> {
-    d.shutdown().await;
-    Json(json!({ "shuttingDown": true }))
+async fn daemon_shutdown(State(d): State<Daemon>) -> ApiResult<serde_json::Value> {
+    session_request(async move {
+        d.shutdown().await;
+        Ok(())
+    })
+    .await?;
+    Ok(Json(json!({ "shuttingDown": true })))
 }
 
 /// Endpoints from the PRD that openDHU does not implement answer with a structured error rather
