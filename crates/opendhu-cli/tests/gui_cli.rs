@@ -207,12 +207,16 @@ fn fake_web(dir: &Path, script: &str) {
 #[test]
 fn web_opens_the_browser_unless_told_not_to_and_passes_the_port() {
     let s = Sandbox::new();
+    // With a running session the viewer attaches to it, so only the viewer's arguments matter.
+    let start = s.start_fake();
+    assert_eq!(code(&start), 0, "{}", text(&start));
     let cli = isolated_cli(&s);
     fake_web(cli.parent().unwrap(), "echo \"$@\"");
     let run = |args: &[&str]| {
         let output = Command::new(&cli)
             .arg("web")
             .args(args)
+            .env("OPENDHU_RUNTIME_DIR", &s.dir)
             .env("PATH", s.scratch("empty-path"))
             .env("OPENDHU_CONFIG", "/no/such/config.yaml")
             .output()
