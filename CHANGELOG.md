@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.5.3] - 2026-11-23
+## [0.5.3]
 
 ### 💼 Other
 
@@ -12,35 +12,35 @@ All notable changes to this project will be documented in this file.
 - Put the README screenshot in the header, stax style ([#13](https://github.com/cesarferreira/openDHU/issues/13))
 - Remove unused Cargo workspace declarations
 - Fix sessions stuck during startup
-## [0.5.2] - 2026-11-23
+## [0.5.2]
 
 ### 💼 Other
 
 - Build the vendored protobuf code without protoc ([#9](https://github.com/cesarferreira/openDHU/issues/9))
-## [0.5.1] - 2026-11-23
+## [0.5.1]
 
 ### 💼 Other
 
 - Publish prebuilt binaries and shell installers with each release ([#8](https://github.com/cesarferreira/openDHU/issues/8))
-## [0.5.0] - 2026-11-16
+## [0.5.0]
 
 ### 💼 Other
 
 - Add aa test --serial to run a suite on a specific attached device
 - Add string app preferences and app.setPreferences, and stop stale launcher taps in app.open ([#7](https://github.com/cesarferreira/openDHU/issues/7))
-## [0.4.0] - 2026-11-09
+## [0.4.0]
 
 ### 💼 Other
 
 - Add aa skill install: an agent skill embedded in the binary
-## [0.3.0] - 2026-11-07
+## [0.3.0]
 
 ### 💼 Other
 
 - Load project head-unit config and use nextest consistently
 - Use opendhu.yaml as the single project config
 - Separate managed test and interactive display resolutions
-## [0.2.0] - 2026-11-03
+## [0.2.0]
 
 ### 🚀 Features
 
