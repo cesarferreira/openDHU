@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-11-23
+
+### 💼 Other
+
+- Build the vendored protobuf code without protoc ([#9](https://github.com/cesarferreira/openDHU/issues/9))
 ## [0.5.1] - 2026-11-23
 
 ### 💼 Other
