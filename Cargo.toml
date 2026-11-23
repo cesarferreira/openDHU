@@ -20,11 +20,9 @@ version = "0.5.2"
 edition = "2024"
 rust-version = "1.87"
 license = "Apache-2.0"
-authors = ["Cesar Ferreira"]
 repository = "https://github.com/cesarferreira/openDHU"
 
 [workspace.dependencies]
-anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
