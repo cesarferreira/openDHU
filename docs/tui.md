@@ -6,13 +6,18 @@ supports it: kitty, Ghostty or WezTerm. Like the desktop window ([gui.md](gui.md
 [api.md](api.md), and the video is decoded with `ffmpeg`.
 
 ```bash
-aa session start
 aa tui                           # after make install-tui
+aa tui --serial emulator-5554    # pick the device for the session it starts
 cargo run -p opendhu-tui         # from a checkout
 aa test e2e/production.yaml --tui  # with the test progress underneath; see testing.md
 ```
 
 `aa tui` finds `opendhu-tui` next to the CLI or on `PATH`.
+
+If a session is running, `aa tui` shows it and leaves it running when you quit. If none is running, it starts
+one first, with the same options and `opendhu.yaml` settings as `aa session start` (`--serial`, `--dhu`,
+`--resolution`, `--reverse` and the rest), and stops that session when you quit. Start options given while a
+session is already running are ignored, with a note.
 
 ## Controls
 

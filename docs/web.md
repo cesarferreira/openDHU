@@ -6,8 +6,8 @@ and the terminal viewer ([tui.md](tui.md)) it is a client of the HTTP API in [ap
 talks to `opendhu-web`, never to the daemon, and never sees its token.
 
 ```bash
-aa session start
 aa web                       # opens http://127.0.0.1:8766/ in the default browser
+aa web --serial emulator-5554 # pick the device for the session it starts
 aa web --no-open --port 9000 # just print the address
 cargo run -p opendhu-web     # from a checkout
 aa test sample --web         # with the test progress beside the picture; see testing.md
@@ -16,6 +16,10 @@ aa test sample --web         # with the test progress beside the picture; see te
 `aa web` finds `opendhu-web` next to the CLI or on `PATH` (`make install-web`). Port 8766 is tried first, then
 any free port; the address is printed either way. The video is decoded with `ffmpeg` into an MJPEG stream,
 once for all open tabs, and only while a tab is watching.
+
+If a session is running, `aa web` shows it and leaves it running when you stop the server. If none is running,
+it starts one first, with the same options and `opendhu.yaml` settings as `aa session start`, and stops that
+session when you press Ctrl+C. Start options given while a session is already running are ignored, with a note.
 
 ## Controls
 

@@ -56,8 +56,15 @@ enum Command {
     /// Open the desktop window
     Gui,
     /// Show the head unit in this terminal (needs kitty graphics: kitty, Ghostty, WezTerm)
-    Tui,
+    ///
+    /// Without a running session, starts one with these options and stops it when you quit.
+    Tui {
+        #[command(flatten)]
+        start: StartArgs,
+    },
     /// Show the head unit in a browser, served on 127.0.0.1
+    ///
+    /// Without a running session, starts one with these options and stops it when you quit.
     Web {
         /// Port to serve on [default: 8766, or any free port if that is taken]
         #[arg(long)]
@@ -65,6 +72,8 @@ enum Command {
         /// Print the address instead of opening the default browser
         #[arg(long)]
         no_open: bool,
+        #[command(flatten)]
+        start: StartArgs,
     },
     /// Change head unit focus
     Focus {
@@ -225,42 +234,46 @@ enum Command {
 #[derive(Subcommand, Debug)]
 enum SessionAction {
     /// Start a session (native by default; the daemon keeps it running)
-    Start {
-        /// Head unit to run [default: native]
-        #[arg(long, value_enum)]
-        backend: Option<BackendArg>,
-        /// Use Google's Desktop Head Unit instead of the native backend
-        #[arg(long, conflicts_with = "backend")]
-        dhu: bool,
-        /// Path to the desktop-head-unit executable (dhu backend) [env: OPENDHU_DHU_PATH]
-        #[arg(long)]
-        dhu_path: Option<PathBuf>,
-        /// Android device serial (default: the only authorized adb device)
-        #[arg(long)]
-        serial: Option<String>,
-        /// Connect native backend to an existing loopback ADB forward (IP:port)
-        #[arg(long)]
-        native_tcp: Option<String>,
-        /// Native projected resolution: 480p (800x480), 720p or 1080p
-        #[arg(long, value_parser = ["480p", "720p", "1080p"])]
-        resolution: Option<String>,
-        /// DHU .ini configuration file
-        #[arg(long)]
-        config: Option<PathBuf>,
-        /// Run the DHU without its window
-        #[arg(long)]
-        headless: bool,
-        /// Re-apply `adb reverse tcp:PORT tcp:PORT` after the phone attaches (repeatable). Starting
-        /// a session re-enumerates the phone over USB, which drops existing tunnels.
-        #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
-        reverse: Vec<u16>,
-    },
+    Start(StartArgs),
     /// Stop the running session
     Stop,
     /// Show the running session
     Status,
     /// Stop the running session and start it again with the same settings
     Restart,
+}
+
+/// How to start a session: `aa session start`, and `aa tui` or `aa web` when none is running.
+#[derive(clap::Args, Debug, Default, PartialEq)]
+struct StartArgs {
+    /// Head unit to run [default: native]
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
+    /// Use Google's Desktop Head Unit instead of the native backend
+    #[arg(long, conflicts_with = "backend")]
+    dhu: bool,
+    /// Path to the desktop-head-unit executable (dhu backend) [env: OPENDHU_DHU_PATH]
+    #[arg(long)]
+    dhu_path: Option<PathBuf>,
+    /// Android device serial (default: the only authorized adb device)
+    #[arg(long)]
+    serial: Option<String>,
+    /// Connect native backend to an existing loopback ADB forward (IP:port)
+    #[arg(long)]
+    native_tcp: Option<String>,
+    /// Native projected resolution: 480p (800x480), 720p or 1080p
+    #[arg(long, value_parser = ["480p", "720p", "1080p"])]
+    resolution: Option<String>,
+    /// DHU .ini configuration file
+    #[arg(long)]
+    config: Option<PathBuf>,
+    /// Run the DHU without its window
+    #[arg(long)]
+    headless: bool,
+    /// Re-apply `adb reverse tcp:PORT tcp:PORT` after the phone attaches (repeatable). Starting
+    /// a session re-enumerates the phone over USB, which drops existing tunnels.
+    #[arg(long = "reverse", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+    reverse: Vec<u16>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -356,6 +369,73 @@ fn launch_gui() -> Result<u8> {
     launch("opendhu-gui", "install-gui")
 }
 
+/// Show a running session in a viewer. Without one, start a session with `start`, run the viewer,
+/// and stop that session when the viewer exits, so the viewer never leaves a phone session behind.
+fn view(binary: &str, target: &str, args: &[String], start: StartArgs) -> Result<u8> {
+    if running_session().is_some() {
+        if start != StartArgs::default() {
+            eprintln!(
+                "note: a session is already running, so the start options are ignored; \
+                 `aa session stop` ends it"
+            );
+        }
+        return launch_with(binary, target, args);
+    }
+    let program = viewer::sibling(binary);
+    if !installed(&program) {
+        return Err(missing_viewer(&program, target, "not found"));
+    }
+    eprintln!("No session is running; starting one. It stops when the viewer exits.");
+    let started = start_session(start)?.session_id;
+    let result = run_viewer(&program, target, args);
+    // Stop only the session started here: the viewer may have outlived it, or another took its place.
+    if running_session().is_some_and(|s| s.session_id == started) {
+        match daemon_ctl::connect().and_then(|c| c.stop()) {
+            Ok(()) => eprintln!("Session stopped"),
+            Err(e) => eprintln!("warning: cannot stop the session: {e}; run `aa session stop`"),
+        }
+    }
+    result
+}
+
+fn running_session() -> Option<SessionStatus> {
+    daemon_ctl::connect().ok()?.status().ok()?.session
+}
+
+/// Run the viewer as a child and return its exit code. Ctrl+C reaches the viewer, which quits;
+/// this process ignores it so it can still stop the session afterwards.
+fn run_viewer(program: &std::path::Path, target: &str, args: &[String]) -> Result<u8> {
+    use std::os::unix::process::ExitStatusExt;
+
+    // A handler, unlike SIG_IGN, is reset by exec, so the viewer still gets the default action.
+    let _ = ctrlc::set_handler(|| {});
+    let status = std::process::Command::new(program)
+        .args(args)
+        .status()
+        .map_err(|e| missing_viewer(program, target, &e.to_string()))?;
+    Ok(match (status.code(), status.signal()) {
+        (Some(code), _) => u8::try_from(code).unwrap_or(1),
+        (None, Some(signal)) => u8::try_from(128 + signal).unwrap_or(1),
+        (None, None) => 1,
+    })
+}
+
+/// `program` as `Command` would find it: a path, or a name looked up on `PATH`.
+fn installed(program: &std::path::Path) -> bool {
+    if program.components().count() > 1 {
+        return program.is_file();
+    }
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+}
+
+fn missing_viewer(program: &std::path::Path, target: &str, why: &str) -> Error {
+    Error::BackendUnavailable(format!(
+        "cannot launch {}: {why}; install it with `make {target}`",
+        program.display()
+    ))
+}
+
 fn launch(binary: &str, target: &str) -> Result<u8> {
     launch_with(binary, target, &[])
 }
@@ -365,10 +445,73 @@ fn launch_with(binary: &str, target: &str, args: &[String]) -> Result<u8> {
 
     let program = viewer::sibling(binary);
     let error = std::process::Command::new(&program).args(args).exec();
-    Err(Error::BackendUnavailable(format!(
-        "cannot launch {}: {error}; install it with `make {target}`",
-        program.display()
-    )))
+    Err(missing_viewer(&program, target, &error.to_string()))
+}
+
+/// Start a session through the daemon, starting the daemon first if none answers.
+fn start_session(start: StartArgs) -> Result<SessionStatus> {
+    let StartArgs {
+        backend,
+        dhu,
+        dhu_path,
+        serial,
+        native_tcp,
+        resolution,
+        config,
+        headless,
+        reverse,
+    } = start;
+    // Only commands that use settings read the file, so a typo in it never blocks `session stop` or `session status`.
+    let cfg = config::load(&config::Locator::from_process(), &current_dir()?)?;
+    let dhu_env_set = std::env::var_os("OPENDHU_DHU_PATH").is_some_and(|v| !v.is_empty());
+    let cwd = current_dir()?;
+    // The daemon's working directory is not ours, so paths are resolved here.
+    let backend = config::first(
+        if dhu { Some(BackendArg::Dhu) } else { backend },
+        cfg.backend,
+    )
+    .unwrap_or(BackendArg::Native);
+    // `dhu.*` settings in the config file are for the DHU only: they never reach another backend.
+    // A flag given on the command line still does, and the daemon then refuses it.
+    let from_file = backend == BackendArg::Dhu;
+    let native_resolution = if backend == BackendArg::Native {
+        config::first(
+            resolution,
+            std::env::var("OPENDHU_NATIVE_RESOLUTION")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .or(cfg.session_resolution.clone()),
+        )
+    } else {
+        if resolution.is_some() {
+            return Err(Error::InvalidArgs(
+                "`--resolution` belongs to the native backend".into(),
+            ));
+        }
+        None
+    };
+    let req = StartRequest {
+        backend: backend.into(),
+        native_tcp,
+        native_resolution,
+        serial: config::first(serial, cfg.serial.clone()),
+        dhu_path: config::dhu_path(
+            dhu_path.map(|p| output_path::absolute(&p, &cwd)),
+            cfg.dhu_path.clone().filter(|_| from_file),
+            dhu_env_set || !from_file,
+        ),
+        config: config::first(
+            config.map(|p| output_path::absolute(&p, &cwd)),
+            cfg.dhu_ini.clone().filter(|_| from_file),
+        ),
+        headless: headless || (from_file && cfg.headless),
+        reverse: if reverse.is_empty() {
+            cfg.reverse.clone()
+        } else {
+            reverse
+        },
+    };
+    expect_session(daemon_ctl::ensure()?.start(&req)?.session)
 }
 
 fn setup_gearhead(
@@ -455,8 +598,12 @@ fn run(cli: Cli) -> Result<u8> {
     let dhu_env_set = std::env::var_os("OPENDHU_DHU_PATH").is_some_and(|v| !v.is_empty());
     match cli.command {
         Command::Gui => launch_gui(),
-        Command::Tui => launch("opendhu-tui", "install-tui"),
-        Command::Web { port, no_open } => {
+        Command::Tui { start } => view("opendhu-tui", "install-tui", &[], start),
+        Command::Web {
+            port,
+            no_open,
+            start,
+        } => {
             let mut args = Vec::new();
             if let Some(port) = port {
                 args.extend(["--port".to_string(), port.to_string()]);
@@ -464,72 +611,12 @@ fn run(cli: Cli) -> Result<u8> {
             if !no_open {
                 args.push("--open".to_string());
             }
-            launch_with("opendhu-web", "install-web", &args)
+            view("opendhu-web", "install-web", &args, start)
         }
         Command::Session {
-            action:
-                SessionAction::Start {
-                    backend,
-                    dhu,
-                    dhu_path,
-                    serial,
-                    native_tcp,
-                    resolution,
-                    config,
-                    headless,
-                    reverse,
-                },
+            action: SessionAction::Start(start),
         } => {
-            let cfg = load()?;
-            let cwd = current_dir()?;
-            // The daemon's working directory is not ours, so paths are resolved here.
-            let backend = config::first(
-                if dhu { Some(BackendArg::Dhu) } else { backend },
-                cfg.backend,
-            )
-            .unwrap_or(BackendArg::Native);
-            // `dhu.*` settings in the config file are for the DHU only: they never reach another backend.
-            // A flag given on the command line still does, and the daemon then refuses it.
-            let from_file = backend == BackendArg::Dhu;
-            let native_resolution = if backend == BackendArg::Native {
-                config::first(
-                    resolution,
-                    std::env::var("OPENDHU_NATIVE_RESOLUTION")
-                        .ok()
-                        .filter(|value| !value.is_empty())
-                        .or(cfg.session_resolution.clone()),
-                )
-            } else {
-                if resolution.is_some() {
-                    return Err(Error::InvalidArgs(
-                        "`--resolution` belongs to the native backend".into(),
-                    ));
-                }
-                None
-            };
-            let req = StartRequest {
-                backend: backend.into(),
-                native_tcp,
-                native_resolution,
-                serial: config::first(serial, cfg.serial.clone()),
-                dhu_path: config::dhu_path(
-                    dhu_path.map(|p| output_path::absolute(&p, &cwd)),
-                    cfg.dhu_path.clone().filter(|_| from_file),
-                    dhu_env_set || !from_file,
-                ),
-                config: config::first(
-                    config.map(|p| output_path::absolute(&p, &cwd)),
-                    cfg.dhu_ini.clone().filter(|_| from_file),
-                ),
-                headless: headless || (from_file && cfg.headless),
-                reverse: if reverse.is_empty() {
-                    cfg.reverse.clone()
-                } else {
-                    reverse
-                },
-            };
-            let status = daemon_ctl::ensure()?.start(&req)?;
-            print_session(&expect_session(status.session)?, json);
+            print_session(&start_session(start)?, json);
             Ok(0)
         }
         Command::Session {

@@ -72,8 +72,8 @@ Development apps need [head-unit credentials](docs/native-backend.md#debugging-k
 ```bash
 aa session start  # native head unit over USB (--serial SERIAL to pick a device)
 aa gui            # live display with mouse input and session controls
-aa tui            # the same in your terminal
-aa web            # the same in a browser tab
+aa tui            # the same in your terminal; starts a session if none is running
+aa web            # the same in a browser tab; starts a session if none is running
 aa tap 400 240
 aa swipe 300 200 100 200 --duration-ms 400
 aa key home
@@ -86,6 +86,9 @@ aa session status --json
 aa session restart  # stop and start again with the same settings
 aa session stop
 ```
+
+`aa tui` and `aa web` stop a session they started when you quit them, and leave one you started yourself
+running.
 
 Touch, live view, audio and phone-confirmed video focus need the native backend. Use `aa session start --dhu` for
 Google's DHU (install `extras;google;auto` with the Android SDK). `aa session start --reverse PORT` restores an ADB
