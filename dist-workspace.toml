@@ -1,0 +1,13 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist' (https://axodotdev.github.io/cargo-dist/): prebuilt binaries for each v* tag,
+# attached to the GitHub release with a shell installer and SHA-256 files.
+[dist]
+cargo-dist-version = "0.34.0"
+ci = "github"
+installers = ["shell"]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+# Where `make install` puts them too.
+install-path = "CARGO_HOME"
+install-updater = false

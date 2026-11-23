@@ -21,7 +21,20 @@ PASS  3 tests · 1 suite
 
 ## Install
 
-You need Rust 1.87+, `adb` and `ffmpeg`. Tests that read the screen also need `tesseract` with English data.
+You need `adb` and `ffmpeg`. Tests that read the screen also need `tesseract` with English data.
+
+Each release has prebuilt binaries for macOS (Apple Silicon) and Linux (x86_64, arm64; glibc 2.35 or newer,
+so Ubuntu 22.04+). One installer per binary puts it in `~/.cargo/bin`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/cesarferreira/openDHU/releases/latest/download/opendhu-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/cesarferreira/openDHU/releases/latest/download/opendhu-native-hu-installer.sh | sh
+```
+
+`opendhu-gui`, `opendhu-tui` and `opendhu-web` have installers with the same naming. The release page also
+has the plain `.tar.xz` archives with `.sha256` files, for scripts and Docker images that pin a version.
+
+To build from source instead, you need Rust 1.87+:
 
 ```bash
 git clone https://github.com/cesarferreira/openDHU.git
@@ -240,7 +253,7 @@ See [Configuration](docs/configuration.md).
 |---|---|
 | [Testing](docs/testing.md) | YAML actions, suites, services, reports, video, and what a pass does and does not prove |
 | [CI](docs/ci.md) | the GitHub Action: emulator, Android Auto, reports and videos as artifacts |
-| [Releasing](docs/releasing.md) | `make tag`: pick patch, minor, or major, then tag and open the GitHub Release |
+| [Releasing](docs/releasing.md) | `make tag`: pick patch, minor, or major, then tag; CI publishes the release with prebuilt binaries |
 | [Docker](docs/docker.md) | a headless emulator and `aa` in a container on a Linux host with KVM |
 | [Native backend](docs/native-backend.md) | credentials, resolution, transports and limits |
 | [Desktop GUI](docs/gui.md) / [Terminal viewer](docs/tui.md) / [Browser viewer](docs/web.md) | the three viewers |
