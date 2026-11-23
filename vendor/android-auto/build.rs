@@ -3,7 +3,8 @@ fn main() {
     let out_dir = std::path::Path::new(&out_dir_env);
     protobuf_codegen::Codegen::new()
         .out_dir(out_dir)
-        .protoc()
+        // The pure-Rust parser, so building needs no protoc (see OPENDHU-PATCHES.md).
+        .pure()
         .includes(["protobuf"])
         .input("protobuf/Bluetooth.proto")
         .input("protobuf/Wifi.proto")

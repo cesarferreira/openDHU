@@ -34,7 +34,6 @@ PR references like `(#123)` become links to this repo. The automated `chore: Rel
 
 [dist](https://axodotdev.github.io/cargo-dist/) (cargo-dist) generates `.github/workflows/release.yml` from [`dist-workspace.toml`](../dist-workspace.toml). For each `v*` tag it builds `aa`, `opendhu-native-hu`, `opendhu-gui`, `opendhu-tui` and `opendhu-web` for `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu` (Linux on Ubuntu 22.04 runners, so glibc 2.35), with the `dist` Cargo profile (the release profile). It attaches a `.tar.xz` archive and `.sha256` per binary and target, a `sha256.sum`, and a shell installer per binary (`<package>-installer.sh`). Release notes are the version's `CHANGELOG.md` entry.
 
-- Build-time system packages for the runners (`protoc`, which `vendor/android-auto` needs to generate its protobuf code) are listed under `[dist.dependencies]` in `dist-workspace.toml`.
 - Do not edit `release.yml` by hand. Change `dist-workspace.toml`, then run `dist generate` (CI fails when the workflow is out of date).
 - On pull requests the workflow only runs `dist plan`, so a broken config shows up before a tag.
 - Check a change locally with `dist plan`, or build one target's artifacts with `dist build --artifacts=local --target x86_64-unknown-linux-gnu` (output in `target/distrib/`).
