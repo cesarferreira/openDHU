@@ -48,3 +48,7 @@ rustls-webpki = { path = "vendor/rustls-webpki" }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# The profile that 'dist' builds release artifacts with (see dist-workspace.toml).
+[profile.dist]
+inherits = "release"

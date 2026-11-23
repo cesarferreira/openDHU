@@ -1,6 +1,6 @@
 # Release workflow
 
-Cut a release with an auto-generated changelog entry. This bumps every crate together, commits, tags `vX.Y.Z`, and pushes. The tag push opens a GitHub Release whose notes are that changelog entry. Nothing is published to crates.io.
+Cut a release with an auto-generated changelog entry. This bumps every crate together, commits, tags `vX.Y.Z`, and pushes. The tag push runs `.github/workflows/release.yml`, which builds the binaries and publishes a GitHub Release whose notes are that changelog entry. Nothing is published to crates.io: the crates depend on vendored path crates.
 
 ```bash
 make tag                      # asks patch, minor, or major; Enter keeps minor
@@ -29,6 +29,15 @@ git-cliff groups commits by their [conventional-commit](https://www.conventional
 | anything else | `💼 Other` |
 
 PR references like `(#123)` become links to this repo. The automated `chore: Release openDHU version …` commits are skipped. Sentence-style subjects are kept under Other, so a change is not dropped because it lacks a conventional prefix.
+
+## Prebuilt binaries
+
+[dist](https://axodotdev.github.io/cargo-dist/) (cargo-dist) generates `.github/workflows/release.yml` from [`dist-workspace.toml`](../dist-workspace.toml). For each `v*` tag it builds `aa`, `opendhu-native-hu`, `opendhu-gui`, `opendhu-tui` and `opendhu-web` for `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu` (Linux on Ubuntu 22.04 runners, so glibc 2.35), with the `dist` Cargo profile (the release profile). It attaches a `.tar.xz` archive and `.sha256` per binary and target, a `sha256.sum`, and a shell installer per binary (`<package>-installer.sh`). Release notes are the version's `CHANGELOG.md` entry.
+
+- Do not edit `release.yml` by hand. Change `dist-workspace.toml`, then run `dist generate` (CI fails when the workflow is out of date).
+- On pull requests the workflow only runs `dist plan`, so a broken config shows up before a tag.
+- Check a change locally with `dist plan`, or build one target's artifacts with `dist build --artifacts=local --target x86_64-unknown-linux-gnu` (output in `target/distrib/`).
+- Upgrade dist with `cargo binstall cargo-dist` (or `cargo install cargo-dist`), then `dist init` to update the pinned version and regenerate the workflow.
 
 ## Notes
 
