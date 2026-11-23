@@ -36,7 +36,7 @@ local HTTP API. Anything you can do by hand, a script or a coding agent can do t
   and run them locally or in CI.
 
 <p align="center">
-  <img alt="aa test --tui: the projected Android Auto screen above a live test log" src="docs/images/tui.png" width="720">
+  <img alt="opendhu-tui showing the projected Android Auto screen in a terminal" src="docs/images/tui.png" width="720">
 </p>
 
 ## Install
