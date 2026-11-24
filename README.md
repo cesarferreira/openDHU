@@ -282,6 +282,40 @@ The [Android sample](android-sample/README.md) is a small app with three Android
 make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 ```
 
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph clients["Clients"]
+        cli["aa CLI"]
+        tests["aa test<br/>YAML suites"]
+        viewers["opendhu-gui<br/>opendhu-tui<br/>opendhu-web"]
+        own["Your code<br/>or a coding agent"]
+    end
+
+    daemon["aa daemon<br/>HTTP API on 127.0.0.1<br/>owns the session"]
+
+    subgraph backends["Head unit backends"]
+        native["opendhu-native-hu<br/>native, default"]
+        dhu["Google's DHU<br/>--dhu"]
+    end
+
+    phone["Phone or emulator<br/>running Android Auto"]
+    ffmpeg["ffmpeg<br/>screenshots, live view, MP4"]
+
+    cli & tests & viewers & own -- "HTTP + token" --> daemon
+    daemon -- "JSON lines on stdin/stdout" --> native
+    daemon -- "console commands" --> dhu
+    native -- "Android Auto protocol<br/>USB or ADB TCP forward" --> phone
+    dhu -- USB --> phone
+    phone -- "H.264 video, audio" --> native
+    daemon -. "H.264 frames" .-> ffmpeg
+```
+
+One daemon owns one head-unit session, and every client uses the same local HTTP API. The head unit runs as a
+child process, so it exits when the daemon stops and never outlives it. See [Architecture](docs/architecture.md)
+for the crates and a request step by step.
+
 ## Documentation
 
 | | |
