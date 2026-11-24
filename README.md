@@ -285,7 +285,7 @@ make sample-build && aa test sample  # needs the Android SDK and JDK 17+
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart RL
     subgraph clients["Clients"]
         cli["aa CLI"]
         tests["aa test<br/>YAML suites"]
