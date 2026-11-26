@@ -485,7 +485,14 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                 }
             }
         } else {
-            todo!("{:?} {:x?}", msg2.err(), msg);
+            // A phone may send control messages this crate does not model, such as
+            // BATTERY_STATUS_NOTIFICATION (0x17) from AARE. They are informational: log and carry on
+            // rather than panic, which would end the whole session.
+            log::warn!(
+                "Ignoring control message: {} {:x?}",
+                msg2.err().unwrap_or_default(),
+                msg
+            );
         }
         Ok(())
     }
