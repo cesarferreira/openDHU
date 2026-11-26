@@ -35,5 +35,9 @@ Changes against upstream:
 public, long-known credentials from the old HeadUnit project, not secrets of ours. They are in the repository on
 purpose: a secret scanner will flag them, and that finding can be allow-listed.
 
+7. **Unknown control messages are ignored** (`src/control.rs`). Upstream `todo!()`s on a control message type
+   it does not model, which ends the session. AARE sends `BATTERY_STATUS_NOTIFICATION` (0x17) right after the
+   channels open; Google's Android Auto never does. The handler now logs the message and continues.
+
 Known weakness: the crate panics (`todo!()`, `unimplemented!()`, `.expect()`) on messages it does not handle.
 That is why openDHU runs it in a separate child process and never inside the daemon.
