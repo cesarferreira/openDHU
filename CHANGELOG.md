@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0]
+
+### 💼 Other
+
+- Drop the date from changelog headings, and so from release titles ([#14](https://github.com/cesarferreira/openDHU/issues/14))
+- Add a How it works diagram to the README ([#15](https://github.com/cesarferreira/openDHU/issues/15))
+- Ignore unknown control messages instead of panicking ([#16](https://github.com/cesarferreira/openDHU/issues/16))
 ## [0.5.3]
 
 ### 💼 Other
